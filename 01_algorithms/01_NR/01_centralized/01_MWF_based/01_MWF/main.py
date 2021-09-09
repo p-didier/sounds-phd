@@ -1,10 +1,9 @@
-from math import radians
-import numpy as np     # installed with matplotlib
+import numpy as np
 import matplotlib.pyplot as plt
 
-def main():
-    x = np.arange(0, radians(1800), radians(12))
-    plt.plot(x, np.cos(x), 'b')
-    plt.show()
+# Classic Multichannel Wiener Filter for noise reduction, 
+# using oracle VAD and full communication (i.e. a fusion center for all nodes data).
+#
+# (c) Paul Didier - 08-Sept-2021
+# SOUNDS ETN - KU Leuven ESAT STADIUS
 
-main()

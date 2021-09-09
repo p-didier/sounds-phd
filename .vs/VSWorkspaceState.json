@@ -1,6 +1,14 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\01_algorithms",
+    "\\01_algorithms\\01_NR",
+    "\\01_algorithms\\01_NR\\01_centralized",
+    "\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based",
+    "\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_MWF",
+    "\\01_algorithms\\03_signal_gen",
+    "\\01_algorithms\\03_signal_gen\\01_acoustic_scenes"
   ],
+  "SelectedNode": "\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_MWF\\main.py",
   "PreviewInSolutionExplorer": false
 }
