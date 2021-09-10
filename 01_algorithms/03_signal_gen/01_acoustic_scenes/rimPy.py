@@ -71,12 +71,12 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     if mic_pos.ndim == 2:
         if mic_pos.shape[1] != 3:
             mic_pos = np.transpose(mic_pos)
-    if source_pos.ndim == 2:
-        if source_pos.shape[1] != 3:
-            source_pos = np.transpose(source_pos)
-    if room_dim.ndim == 2:
-        if room_dim.shape[1] != 3:
-            room_dim = np.transpose(room_dim)
+    elif len(mic_pos) < 3:
+        raise ValueError("Arg. <mic_pos> must have at 3 elements per row")
+    if len(source_pos) < 3:
+        raise ValueError("Arg. <source_pos> must have 3 elements")
+    if len(room_dim) < 3:
+        raise ValueError("Arg. <room_dim> must have 3 elements")
     if rir_length <= 0:
         raise ValueError("Arg. <rir_length> must be strictly positive")
     if rand_dist < 0:
@@ -94,7 +94,7 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     # Check that room dimensions are not too small
     if any(np.linalg.norm(mic_pos,None,axis=1) > np.linalg.norm(room_dim)):
         raise ValueError("Some microphones are located outside the room")
-    if any(np.linalg.norm(source_pos,None,axis=1) > np.linalg.norm(room_dim)):
+    if np.linalg.norm(source_pos) > np.linalg.norm(room_dim):
         raise ValueError("Some sources are located outside the room")
     
     npts = int(np.ceil(rir_length*Fs))
@@ -145,7 +145,7 @@ def main():
     
     alpha = 0.5
     mic_pos = [[0.1,0.1,0.1],]
-    source_pos = [[1,2,3],]
+    source_pos = [1,2,3]
     room_dim = [5,6,7]
     rir_length = 2**11
     Fs = 16e3
