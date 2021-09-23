@@ -1,6 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
+# from numba import jit
+# import time
 
+# @jit(nopython=True)
 def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # oracleVAD -- Oracle Voice Activity Detection (VAD) function. Returns the
     # oracle VAD for a given speech (+ background noise) signal <x>.
@@ -20,8 +23,7 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # ------------------------------------
 
     # Check input format
-    if type(x) == list:
-        x = np.array(x)
+    x = np.array(x)     # Ensure it is an array
     if len(x.shape) > 1:
         print('<oracleVAD>: input signal is multidimensional: using 1st row as reference')
         dimsidx = range(len(x.shape))
@@ -35,9 +37,10 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # VAD window length
     Nw = tw*Fs
 
+    # Compute VAD
     oVAD = np.zeros(n)
     for ii in range(n):
-        chunk_x = x[range(ii,int(np.amin([ii+Nw, n])))]
+        chunk_x = x[np.arange(ii,int(min(ii+Nw, n)))]
 
         # Compute short-term signal energy
         E = np.mean(np.abs(chunk_x)**2)
@@ -65,6 +68,7 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     return oVAD,t
 
 
+# @jit(nopython=True)
 def getSNR(Y,VAD):
     # getSNR -- Sub-function for SNRest().
 
@@ -100,9 +104,14 @@ def getSNR(Y,VAD):
     elif Ln == 0:
         SNR = float('inf')
 
+    # fig, ax = plt.subplots()
+    # ax.plot(np.abs(Y)**2 * (1 - VAD))
+    # plt.show()
+
     return SNR
 
 
+# @jit(nopython=True)
 def SNRest(Y,VAD):
     # SNRest -- Estimate SNR from time-domain or STFT-domain signal + VAD.
     #

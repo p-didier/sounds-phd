@@ -9,7 +9,7 @@ from rimPy import rimPy
 
 # Acoustic Scenario (AS) generation script.
 
-def main():
+def main(gen_specific_AS=False):
     nAS = 10        # Number of AS to generate
     Fs = 16e3       # Sampling frequency [samples/s]
     RIR_l = 2**12   # RIR length [samples]
@@ -22,23 +22,45 @@ def main():
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
     T60min = 0.4*RIR_l/Fs   # Smallest possible T60
 
+    if gen_specific_AS:
+        nAS = 1
     counter = 0
     while counter < nAS:
-
-        rd = np.random.uniform(low=minRd, high=maxRd, size=(3,))    # Generate random room dimensions
-        T60 = random.uniform(T60min, T60max)
+        
+        if gen_specific_AS:
+            rd = get_fixed_values()[0]
+            # T60 = 0.25
+            T60 = 0
+        else:
+            rd = np.random.uniform(low=minRd, high=maxRd, size=(3,))    # Generate random room dimensions
+            T60 = random.uniform(T60min, T60max)
         # T60 = np.random.uniform(low=T60min, high=T60max, size=(1,)) # Generate random reverberation time
         V = np.prod(rd)                                   # Room volume
         S = 2*(rd[0]*rd[1] + rd[0]*rd[2] + rd[1]*rd[2])   # Total room surface area
         alpha = np.minimum(1, 0.161*V/(T60*S))                # Absorption coefficient of the walls
         
         # Call function
-        h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1)
-        
+        if gen_specific_AS:
+            h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False)
+        else:
+            h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True)
+
+        # PLOT
+        # fig, ax = plt.subplots()
+        # ax.plot(np.squeeze(h_ns[:,0,0]))
+        # ax.grid()
+        # plt.show()
+
         # Export
         expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
         nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
-        fname =  "%s\\AS%i_J%i_Ns%i_Nn%i.csv" % (expfolder,nas,J,Ns,Nn)
+        if gen_specific_AS:
+            fname = '%s\\testAS' % expfolder
+            if alpha == 1:
+                fname += '_anechoic'
+            fname += '.csv'
+        else:
+            fname =  "%s\\AS%i_J%i_Ns%i_Nn%i.csv" % (expfolder,nas,J,Ns,Nn)
         header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs}
         export_data(h_ns, h_nn, header, rs, rn, r, fname)
 
@@ -49,7 +71,7 @@ def main():
     return h_ns, h_nn
         
 
-def genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,export=True):
+def genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
     # genAS -- Computes the RIRs in a rectangular cavity where sensors, speech
     # sources, and noise sources are present.
     # 
@@ -71,9 +93,15 @@ def genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,export=True):
     # ------------------------------------
     
     # Random element positioning in 3-D space
-    rs = np.multiply(np.random.rand(Ns,3),rd)   # speech sources positions
-    r  = np.multiply(np.random.rand(J,3),rd)    # nodes positions
-    rn = np.multiply(np.random.rand(Nn,3),rd)   # noise sources positions
+    if random_coords:
+        rs = np.multiply(np.random.rand(Ns,3),rd)   # speech sources positions
+        r  = np.multiply(np.random.rand(J,3),rd)    # nodes positions
+        rn = np.multiply(np.random.rand(Nn,3),rd)   # noise sources positions
+    else:
+        rd, r, rs, rn = get_fixed_values()
+        r = r[:J,:]
+        rs = rs[:Ns,:]
+        rn = rn[:Nn,:]
     
     # ------------------ FIXED ARBITRARY ------------------
     # rs = np.array([[1,2,3],])   # speech sources positions
@@ -145,5 +173,40 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
 
     print('Data exported to CSV: "%s"' % os.path.basename(fname))
 
+def get_fixed_values():
 
-main()
+    rd = np.array([6.74663681, 6.47443158, 5.29141806])
+    rs = np.array([[3.80871696, 3.47644605, 0.13365643],
+       [2.8506613 , 2.24521067, 4.7211736 ],
+       [0.53659517, 2.58889843, 3.93477618],
+       [1.15229464, 2.00410181, 4.44485973],
+       [4.1974679 , 2.43351876, 1.97641962],
+       [1.57881229, 5.03781146, 2.65542962],
+       [6.65379346, 4.44628479, 0.43348834],
+       [4.14120661, 3.94366795, 2.36864132],
+       [1.76631629, 6.15191657, 2.40936931],
+       [0.42973443, 4.18359708, 0.15160593]])
+    r = np.array([[2.48886545, 4.34982861, 2.87315296],
+       [5.24655834, 5.66887148, 4.35400199],
+       [0.12285002, 4.59571634, 3.47397411],
+       [2.78390363, 1.49391502, 0.84512655],
+       [1.1217436 , 6.07061552, 0.86066287],
+       [3.17113765, 5.94627376, 2.11941889],
+       [0.00946956, 1.35901537, 4.40715656],
+       [4.25251161, 4.83032505, 4.59872196],
+       [2.18592129, 2.37155164, 2.28711986],
+       [3.81597077, 4.05754139, 1.48683971]])
+    rn = np.array([[3.17100024, 4.40443333, 2.16296961],
+       [3.60656018, 3.79377093, 1.76541558],
+       [0.25901077, 4.614144  , 2.83299575],
+       [2.73518121, 0.30138353, 0.77814191],
+       [5.74734719, 3.85861567, 2.75872101],
+       [5.18246482, 5.12011156, 3.70950443],
+       [2.67892363, 3.30854761, 3.59350624],
+       [1.23639543, 5.74947558, 2.96543862],
+       [1.68529516, 3.24728082, 4.82935064],
+       [0.04326686, 4.47009184, 3.15532972]])
+
+    return rd, r, rs, rn
+
+main(gen_specific_AS=True)

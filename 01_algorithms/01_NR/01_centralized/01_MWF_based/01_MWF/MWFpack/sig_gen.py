@@ -242,19 +242,10 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     for k in range(J):
         d_k = np.zeros(nmax)
         for ii in range(Ns):
-            t0 = time.time()
             # d_kk = np.convolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
             d_kk = scipy.signal.fftconvolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
             d_k += d_kk[:nmax]
-            t1 = time.time()
-            print('Time elapsed: %f s' % (t1-t0))
         ds[:,k] = d_k
-
-    
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    ax.plot(ds[:,0])
-    plt.show()
 
     # Generate no-speech sensor noise (convolution w/ RIRs only)
     ny = np.zeros((nmax,J))
