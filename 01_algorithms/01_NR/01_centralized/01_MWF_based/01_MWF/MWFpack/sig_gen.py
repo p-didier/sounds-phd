@@ -142,7 +142,7 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
 
     return d, Fs
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech=''):
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in=''):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     
@@ -160,10 +160,19 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         speech_lib = [speech_lib]
 
     if len(speech_lib) == 1 or len(speech_lib) < Ns:
+        print('Using speech library "%s"' % speech_lib)
         speech_lib = [speech_lib for ii in range(Ns)]   # make sure there is one value of <speech_lib> per source
     if len(speech_lib) > Ns:
         print('Too many speech files references were provided. Using first %i.' % Ns)
         speech_lib = speech_lib[:Ns]
+
+    if noise_in != '' and len(noise_in) <= Nn:
+        raise ValueError('Not enough specific noise files provided to cover %i noise sources' % Nn)
+    if len(noise_in) > Nn:
+        print('Too many noise files references were provided. Using first %i.' % Nn)
+        noise_in = noise_in[:Nn]
+
+        
 
     # Load speech signal(s)
     d = np.zeros((nmax,Ns))
@@ -205,38 +214,39 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
 
             chunk = np.concatenate((d[idx_d,:], np.zeros((Ns_p,d.shape[1]))))
             d_wp[idx_ii, :] = chunk[:len(idx_ii),:]
-        # t1 = time.time()
-        # print('Time elapsed: %f s' % (t1-t0))
-
-        # t0 = time.time()
-        # d_wp2 = np.zeros(d.shape)
-        # for ii in range(d_wp.shape[1]):
-
-        #     d_wp2[:,ii] = [0 if (jj/Fs)/(pauseDur + pauseSpace) % 1 >= 0.5 else d_wp[jj,ii]\
-        #          for jj in range(d_wp2.shape[0])]
-        # t1 = time.time()
-        # print('Time elapsed: %f s' % (t1-t0))
-
-        # import matplotlib.pyplot as plt
-        # fig, ax = plt.subplots()
-        # ax.plot(d_wp[:,0])
-        # ax.plot(d_wp2[:,0]+10)
-        # plt.show()
 
         d = d_wp
     
 
     # Generate noise signals
     noise = np.zeros((nmax, Nn))
-    for ii in range(Nn):
-        if noise_type == 'white':
-            noisecurr = np.random.normal(0,1,nmax)
-        else:
-            print('<sig_gen>: WARNING - Other options for noise than "white" have not been implemented yet. Will use white noise.')
-            noisecurr = np.random.normal(0,1,nmax)
-        noisecurr = preprocessing.scale(noisecurr)   # normalize
-        noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
-
+    if noise_in == '':
+        # Generate new noise
+        for ii in range(Nn):
+            if noise_type == 'white':
+                noisecurr = np.random.normal(0,1,nmax)
+            else:
+                print('<sig_gen>: WARNING - Other options for noise than "white" have not been implemented yet. Will use white noise.')
+                noisecurr = np.random.normal(0,1,nmax)
+            noisecurr = preprocessing.scale(noisecurr)   # normalize
+            noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
+    else:
+        for ii in range(Nn):
+            noisecurr, Fsn = sf.read(noise_in[ii])
+            if Fsn != Fs:
+                raise ValueError('The noise file provided has a mismatching sampling frequency')
+            # Adapt length (trim or repeat noise file if needed)
+            if len(noisecurr) > nmax:
+                noisecurr = noisecurr[:nmax]
+            else:
+                while len(noisecurr) < nmax:
+                    noisecurr = np.concatenate(noisecurr, noisecurr)
+                    if len(noisecurr) > nmax:
+                        noisecurr = noisecurr[:nmax]
+                        break
+            noisecurr = preprocessing.scale(noisecurr)   # normalize
+            noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
+            
     # Generate no-noise sensor signals ("desired signals" -- convolution w/ RIRs only)
     ds = np.zeros((nmax,J))
     for k in range(J):

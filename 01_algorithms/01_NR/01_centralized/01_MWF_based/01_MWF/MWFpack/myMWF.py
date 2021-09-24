@@ -1,5 +1,4 @@
 import numpy as np
-import scipy
 import scipy.signal as sig
 import time
 from numba import jit
@@ -11,10 +10,12 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates):
     #
     # >>> Inputs: 
     # -y [Nt*J (complex) float matrix, -] - Raw sensor signals. 
-    # -VAD [Nt*1 binary vector] - Voice Activity Detector.
-    # -beta [float [[0,1]], -] - Covariance matrices exponential average constant.
+    # -Fs [int, samples/s] - Sampling frequency. 
+    # -win [L*1 float vector, -] - STFT window. 
     # -L [int, samples] - Length of individual STFT time frame.
     # -R [int, samples] - Overlap size between STFT time frames.
+    # -VAD [Nt*1 binary vector] - Voice Activity Detector.
+    # -beta [float [[0,1]], -] - Covariance matrices exponential average constant.
     # -min_covUpdates [int, -] - Minimum # of covariance matrices updates
     #                            before first filter weights update.
     # >>> Outputs:
@@ -29,11 +30,12 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates):
     nbins = int(L/2)+1
     
     # Compute STFT
-    print('Computing STFTs of sensor observations with %i frames and %i bins....' % (nframes,nbins))    
+    print('Computing STFTs of sensor observations with %i frames and %i bins...' % (nframes,nbins))    
     if y.shape[1] > 1:
         Y = np.zeros((nbins,nframes,y.shape[1]), dtype=complex)
         for ii in range(y.shape[1]):
-            Y[:,:,ii] = sig.stft(y[:,ii], fs=Fs, window=win, nperseg=L, noverlap=R, return_onesided=True)[2]
+            Y[:,:,ii] = sig.stft(y[:,ii], fs=Fs, window=win,\
+                 nperseg=L, noverlap=R, return_onesided=True)[2]
     else:
         Y = sig.stft(y, fs=Fs, window=win, nperseg=L, noverlap=R, return_onesided=True)[2]
 
@@ -99,7 +101,7 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates):
             D_hat[kp,l,:] = np.squeeze(w_hat[:,:,kp]).conj().T @ Ytf
 
         t1 = time.time()
-        print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
+        # print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
 
     print('MW-filtering done.')
 
