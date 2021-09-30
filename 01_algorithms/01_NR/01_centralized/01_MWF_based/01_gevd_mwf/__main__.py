@@ -119,19 +119,6 @@ def run_script():
     # Get corresponding time-domain signal(s)
     d_hat = calcISTFT(D_hat, win, L, R, 'onesided')
 
-    # TMP - Export data for comparison with MATLAB implementation
-    if 0:
-        for ii in range(D_hat.shape[-1]):
-            dfr = pd.DataFrame(np.squeeze(np.real(D_hat[:,:,ii])))
-            dfi = pd.DataFrame(np.squeeze(np.imag(D_hat[:,:,ii])))
-            currdir = os.path.dirname(os.path.abspath(__file__))
-            if useGEVD:
-                dfr.to_csv('%s\\02_outputs\\DhatPyGEVD_sensor%i_real.csv' % (currdir,ii))
-                dfi.to_csv('%s\\02_outputs\\DhatPyGEVD_sensor%i_imag.csv' % (currdir,ii))
-            else:
-                dfr.to_csv('%s\\02_outputs\\DhatPy_sensor%i_real.csv' % (currdir,ii))
-                dfi.to_csv('%s\\02_outputs\\DhatPy_sensor%i_imag.csv' % (currdir,ii))
-
     # IV) SNR improvement estimates
     SNRd_hat = np.zeros(J)
     SNRimp = np.zeros(J)
