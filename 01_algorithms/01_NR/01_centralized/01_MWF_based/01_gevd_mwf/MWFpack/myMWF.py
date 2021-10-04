@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.lib.shape_base import column_stack
 import scipy.signal as sig
 import time
 from numba import jit
@@ -36,7 +37,8 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     
     # Compute STFT
     print('Computing STFTs of sensor observations with %i frames and %i bins...' % (nframes,nbins))    
-    Y = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
+    y_STFT = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
+    # y2 = calcISTFT(y_STFT, win, L, R, 'onesided')  # Check ISTFT outcome
 
     print('Filtering sensor signals...\n\n')
 
@@ -44,19 +46,27 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     VAD_l = np.zeros(nframes)
 
     # Number of sensors
-    J = y.shape[1]
+    nNodes = y.shape[1]
 
     # Init arrays
-    Ryy = np.zeros((J,J,nbins),dtype=complex)                   # initiate sensor signals covariance matrix estimate
-    Rnn = np.zeros((J,J,nbins),dtype=complex)                   # initiate noise covariance matrix estimate
+    Ryy = np.zeros((nNodes,nNodes,nbins),dtype=complex)                   # initiate sensor signals covariance matrix estimate
+    Rnn = np.zeros((nNodes,nNodes,nbins),dtype=complex)                   # initiate noise covariance matrix estimate
+    #
+    Sigma_yy = np.zeros((nNodes,nNodes,nbins),dtype=complex)              # initiate GEVD eigenvalues matrix 
+    Qmat = np.zeros((nNodes,nNodes,nbins),dtype=complex)                  # initiate GEVD eigenvectors matrix 
+    #
     VAD_l = np.zeros(nframes)                               # initiate frame-wise VAD
-    w_hat = np.identity(J,dtype=complex)
+    w_hat = np.identity(nNodes,dtype=complex)
     w_hat = np.repeat(w_hat[:, :, np.newaxis], nbins, axis=2)   # initiate filter weight estimates 
     nUpdatesRnn = np.zeros(nbins)                
     nUpdatesRyy = np.zeros(nbins)
 
-    D_hat = np.zeros_like(Y, dtype=complex) 
+    D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update 
+
+    # TMP
+    Sigma_nn = np.zeros((nNodes,nNodes,nbins),dtype=complex)              # initiate GEVD eigenvalues matrix FOR NOISE ONLY PERIODS
+    Qmat_n = np.zeros((nNodes,nNodes,nbins),dtype=complex)                  # initiate GEVD eigenvectors matrix FOR NOISE ONLY PERIODS
 
     # Loop over time frames
     for l in range(nframes):
@@ -64,7 +74,7 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
         t0 = time.time()
         
         # Time-frame samples' indices
-        idxChunk = np.arange((l-1)*(L - R), np.amin([l*(L - R), y.shape[0]]), dtype=int)
+        idxChunk = np.arange(l*(L - R), np.amin([l*(L - R) + L, y.shape[0]]), dtype=int)
         
         # Current frame VAD (majority of speech-active or speech-inactive samples?)
         VAD_l[l] = np.count_nonzero(VAD[idxChunk]) > len(idxChunk)/2
@@ -72,7 +82,7 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
         # Loop over frequency bins
         for kp in range(nbins):
 
-            Ytf = np.squeeze(Y[kp,l,:])
+            Ytf = np.squeeze(y_STFT[kp,l,:])
 
             if VAD_l[l]:        # "speech + noise" time frame
                 Ryy[:,:,kp] = expavg_covmat(np.squeeze(Ryy[:,:,kp]), beta, Ytf)
@@ -84,8 +94,8 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
             # ---- Check quality of covariance estimates ----
             if not updateWeights[kp]:
                 # Check #1 - Need full rank covariance matrices
-                if np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])) == J and\
-                    np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp])) == J:
+                if np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])) == nNodes and\
+                    np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp])) == nNodes:
                     # Check #2 - Must have had a min. # of updates on each matrix
                     if nUpdatesRyy[kp] >= min_covUpdates and nUpdatesRnn[kp] >= min_covUpdates:
                         updateWeights[kp] = True
@@ -93,27 +103,75 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
             # Update filter coefficients
             if updateWeights[kp]:
                 if useGEVD:
-                    # Perform generalized eigenvalue decomposition
-                    Sigma_yy,Q = mygevd(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
-                    # Sort eigenvalues in descending order
-                    idx = np.flip(np.argsort(np.diag(Sigma_yy)))
-                    Sigma_yy = np.diag(np.flip(np.sort(np.diag(Sigma_yy))))
-                    Q = Q[:,idx]
+                    if VAD_l[l]:
+                        # Perform generalized eigenvalue decomposition
+                        sig,q = mygevd(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                        # Sort eigenvalues in descending order
+                        Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(sig,q)
+                        # idx = np.flip(np.argsort(np.diag(Sigma_yy[:,:,kp])))
+                        # Sigma_yy[:,:,kp] = np.diag(np.flip(np.sort(np.diag(Sigma_yy[:,:,kp]))))
+                        # Qmat[:,:,kp] = Qmat[:,idx,kp]
+                    else: 
+                        # Do not do anything (keep previous-frame <Sigma_yy> and <Qmat>)
+                        pass
+                        # Sigma_nn[:,:,kp], Qmat_n[:,:,kp] = mygevd(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                        # # Sort eigenvalues in descending order
+                        # idx = np.flip(np.argsort(np.diag(Sigma_nn[:,:,kp])))
+                        # Sigma_nn[:,:,kp] = np.diag(np.flip(np.sort(np.diag(Sigma_nn[:,:,kp]))))
+                        # Qmat_n[:,:,kp] = Qmat_n[:,idx,kp]
+
+                        # import pandas as pd
+                        # df = pd.DataFrame(np.squeeze(np.real(Qmat[:,:,kp])))
+                        # df_n = pd.DataFrame(np.squeeze(np.real(Qmat_n[:,:,kp])))
+                        # print(df)
+                        # print(df_n)
+
+                        # # idx = compare_cols(Qmat[:,:,kp], Qmat_n[:,:,kp])
+
+                        # import matplotlib.pyplot as plt
+                        # # fig, ax = plt.subplots(1,3)
+                        # fig, ax = plt.subplots(1,2)
+                        # ax[0].imshow(np.squeeze(np.real(Qmat[:,:,kp])))
+                        # ax[0].set(title='$Q_\mathrm{VAD1}$')
+                        # ax[1].imshow(np.squeeze(np.real(Qmat_n[:,:,kp])))
+                        # ax[1].set(title='$Q_\mathrm{VAD0}$')
+                        # # ax[2].imshow(np.squeeze(np.real(Qmat_n[:,idx,kp])))
+                        # # ax[2].set(title='$Q_\mathrm{VAD0}$ rearranged')
+                        # plt.show()
+
+                        # stop = 1
+
                     # LMMSE weights 
-                    w_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy,Q,GEVDrank) 
+                    w_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp],Qmat[:,:,kp],GEVDrank) 
+                    w_hat[:,:,kp] = w_hat[:,:,kp].conj()#-to check why is needed....
                 else:
                     w_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
 
             # Desired signal estimates
             D_hat[kp,l,:] = np.squeeze(w_hat[:,:,kp]).conj().T @ Ytf
 
+            # # Get output SNR for current TF-bin
+            # snrout = SNRout(np.squeeze(w_hat[:,:,kp]), np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
+
         t1 = time.time()
-        print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
+        if l % 10 == 0:
+            print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
 
     print('MW-filtering done.')
+    
+    import pandas as pd
+    w_hatr = w_hat.transpose(2,0,1).reshape(nbins,-1)
+    df = pd.DataFrame(w_hatr)
+    df.to_csv('C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\02_outputs\\tmp\\what.csv')
 
     return D_hat
 
+def SNRout(w,Rxx,Rnn):
+    # Derives output SNR for current TF-bin (see equation 2.59 in Randy's thesis)
+    a = w.conj().T @ Rxx @ w
+    b = w.conj().T @ Rnn @ w
+    snr = a @ np.linalg.pinv(b)
+    return snr
 
 @jit(nopython=True)
 def expavg_covmat(Ryy, beta, Y):
@@ -129,9 +187,8 @@ def update_w_MWF(Ryy,Rnn):
 @jit(nopython=True)
 def update_w_GEVDMWF(S,Q,GEVDrank):
     # Estimate speech covariance matrix
-    sig_nn = np.ones(S.shape[0])
     sig_yy = np.diag(S)
-    diagveig = 1 - sig_nn[:GEVDrank] / sig_yy[:GEVDrank]   # rank <R> approximation
+    diagveig = np.ones(GEVDrank) - np.ones(GEVDrank) / sig_yy[:GEVDrank]   # rank <R> approximation
     diagveig = np.append(diagveig, np.zeros(S.shape[0] - GEVDrank))
     # LMMSE weights
     return np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
@@ -142,8 +199,8 @@ def mygevd(A,B):
     # of the matrix pencil {A,B}. 
     #
     # >>> Inputs: 
-    # -A [N*N (complex) float matrix, -] - Symmetrical matrix.
-    # -B [N*N (complex) float matrix, -] - Symmetrical positive-definite matrix.
+    # -A [N*N (complex) float matrix, -] - Symmetrical matrix, full rank.
+    # -B [N*N (complex) float matrix, -] - Symmetrical positive-definite matrix, full rank.
     # >>> Outputs:
     # -S [N*N (complex) float matrix, -] - Diagonal matrix of generalized eigenvalues. 
     # -Q [N*N (complex) float matrix, -] - Corresponding matrix of generalized eigenvectors. 
@@ -154,15 +211,49 @@ def mygevd(A,B):
     # ------------------------------------
 
     # Cholesky factorization
-    G = np.linalg.cholesky(B - 1j*np.imag(B))       # B = G*G^H
+    Gmat = np.linalg.cholesky(B - 1j*np.imag(B))       # B = G*G^H
 
-    C1 = np.linalg.solve(G,A)
-    C = np.linalg.solve(G.conj(),C1.T)    # C = G^(-1)*A*G^(-H)
+    C1mat = np.linalg.solve(Gmat,A)
+    Cmat = np.linalg.solve(Gmat.conj(),C1mat.T)    # C = G^(-1)*A*G^(-H)
 
-    s, Qa = np.linalg.eig(C)
-    S = np.diag(s)
+    s, Qa = np.linalg.eig(Cmat)
+    Smat = np.diag(s)
 
-    X = np.linalg.solve(G.conj().T, Qa)   # X = G^(-H)*Qa
-    Q = np.linalg.pinv(X.conj().T)
+    Xmat = np.linalg.solve(Gmat.conj().T, Qa)   # X = G^(-H)*Qa
+    Qmat = np.linalg.pinv(Xmat.conj().T)
 
-    return S,Q
+    # print(Qmat)
+
+    stop =1 
+
+    return Smat,Qmat
+
+def sortgevd(S,Q):
+    # Sorts outcome of GEVD in descending eigenvalues order
+    idx = np.flip(np.argsort(np.diag(S)))
+    S_sorted = np.diag(np.flip(np.sort(np.diag(S))))
+    Q_sorted = Q[:,idx]
+    return S_sorted,Q_sorted
+
+
+# TEMPORARY FUNCTIONS
+def compare_cols(A,B):
+
+    # Check inputs format
+    if not all(len (row) == len (A) for row in A):
+        raise ValueError('First argument must be a square matrix')
+    if not all(len (row) == len (B) for row in B):
+        raise ValueError('Second argument must be a square matrix')
+
+    nCols = A.shape[1]
+    idx = np.zeros(nCols, dtype=int)
+    for ii in range(nCols):
+        mycol = A[:,ii]
+
+        dist_to_B = np.zeros(nCols)
+        for jj in range(nCols):
+            dist_to_B[jj] = np.linalg.norm(mycol - B[:,jj])
+        
+        idx[ii] = np.argmin(dist_to_B)
+
+    return idx

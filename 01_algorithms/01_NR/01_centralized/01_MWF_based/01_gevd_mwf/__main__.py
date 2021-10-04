@@ -24,9 +24,10 @@ import playsounds.playsounds as ps
 # SOUNDS ETN - KU Leuven ESAT STADIUS
 
 # Global variables
-SAVEFIGS = 1
-EXPORTDATA = 1
-LISTEN_TO_MICS = 0
+SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
+EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
+LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
+SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
 
 
 def run_script():
@@ -35,14 +36,14 @@ def run_script():
     speech_in = 'libri'     # name of speech signals library to be used
     noise_type = 'white'    # type of noise to be used
     #
-    Tmax = 15               # maximum signal duration [s]
+    Tmax = 5               # maximum signal duration [s]
     baseSNR = 10            # SNR pre-RIR application [dB]
     #
     pauseDur = 1            # duration of pauses in-between speech segments [s]
     pauseSpace = 3          # duration of speech segments (btw. pauses) [s]
     #
     useGEVD = True          # if True, use GEVD, do not otherwise
-    GEVDrank = 1
+    GEVDrank = 2
 
     # Exports
     # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\onesource_reverberant' % os.getcwd()
@@ -53,7 +54,7 @@ def run_script():
     # ----- Acoustic scenario + specific speech/noise signal(s) selection
     # ASref = 'J5_Ns1_Nn1\\AS9'       # acoustic scenario (if empty, random selection)
     ASref = 'J5_Ns2_Nn3\\AS0'       # acoustic scenario (if empty, random selection)
-    # ASref = 'testAS_anechoic'     # acoustic scenario (if empty, random selection)
+    # ASref = 'J5_Ns2_Nn3\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = ''                    # acoustic scenario (if empty, random selection)
     # speech = ''                    # speech signals (if empty, random selection)
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
@@ -78,6 +79,9 @@ def run_script():
     ref_sensor = 0          # index of reference sensor
     VAD_fact = 400          # VAD threshold factor w.r.t. max(y**2)
 
+    # ----------------------------------------------------------------------------------------
+    # -------------------------------------- PROCESSING --------------------------------------
+    # ----------------------------------------------------------------------------------------
 
     # I) Generate microphone signals
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
@@ -103,13 +107,30 @@ def run_script():
     for k in range(J):
         SNRy[k] = VAD.SNRest(y[:,k],myVAD)
 
+    # II.3) Get STFTs
+    ref_sensor = np.argmin(SNRy)
+    Ymat = calcSTFT(y[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
+    Ds = calcSTFT(ds[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
+
     if LISTEN_TO_MICS:
         # Listen
         sPbIdx = np.argmin(SNRy)
+        maxplaytime = 5     # Maximal play-time in seconds
         print('Playing the target signal for sensor #%i...' % (sPbIdx+1))
-        ps.playthis(ds[:,sPbIdx], Fs)
+        ps.playthis(ds[:int(maxplaytime*Fs),sPbIdx], Fs)
         print('Playing the raw mic. signal for sensor #%i...' % (sPbIdx+1))
-        ps.playthis(y[:,sPbIdx], Fs)
+        ps.playthis(y[:int(maxplaytime*Fs),sPbIdx], Fs)
+
+    if SHOW_WAVEFORMS:
+        # PLot
+        fig, ax = plt.subplots()
+        ax.plot(t, y[:,ref_sensor])
+        ax.plot(t, ds[:,ref_sensor])
+        ax.set(xlabel='time (s)',
+            title='Waveforms')
+        plt.legend('Raw mic signal', 'Target signal (clean)')
+        ax.grid()
+        plt.show()
 
     # III) Compute (GEVD-)MWF 
     t0 = time.time()
@@ -138,17 +159,42 @@ def run_script():
     print('SNR improvements (time-domain only) (per sensor, in [dB]):')
     print(SNRimp)
 
-    # PLOTTING
+    if 0:
+        # V) SNR estimates per bin
+        Ns = 20       # Nr. of STFT frames in time section
+        Nss = Ns/2    # Nr. of STFT frames overlapping between time sections
+        SNRm_acNodes,SNRstd_acNodes = SNR_perband(D_hat,Ds,Ns,Nss,VAD_fact,Fs)
+
+        # Plot statistics across nodse of SNR improvement per bin
+        fig, ax = plt.subplots(1,2)
+        fig.set_size_inches(5, 3, forward=True)   # figure size
+        # Mean across nodes
+        mapp = ax[0].imshow(SNRm_acNodes.T, extent=[0, SNRm_acNodes.shape[0], Fs/2, 0], interpolation='none')
+        ax[0].invert_yaxis()
+        ax[0].set_aspect('auto')
+        ax[0].set(xlabel='Time frame nr.', ylabel='$f$ [kHz]',
+            title='$\\mathrm{E}_{\\mathrm{Nodes}}\\{SNR(t,\\kappa)\\}$')
+        ax[0].axes.yaxis.set_ticks(np.arange(0,Fs/2+1e3,1e3))
+        ax[0].axes.yaxis.set_ticklabels([str(ii) for ii in np.arange(0,Fs/1e3/2 + 1)])
+        # Mean across nodes
+        mapp = ax[1].imshow(SNRstd_acNodes.T, extent=[0, SNRm_acNodes.shape[0], Fs/2, 0], interpolation='none')
+        ax[1].invert_yaxis()
+        ax[1].set_aspect('auto')
+        ax[1].set(xlabel='Time frame nr.', ylabel='$f$ [kHz]',
+            title='$\\sigma_{\\mathrm{Nodes}}\\{SNR(t,\\kappa)\\}$')
+        ax[1].axes.yaxis.set_ticks(np.arange(0,Fs/2+1e3,1e3))
+        ax[1].axes.yaxis.set_ticklabels([str(ii) for ii in np.arange(0,Fs/1e3/2 + 1)])
+        plt.show()
+
+    # ----------------------------------------------------------------------------------------
+    # -------------------------------------- PLOTTING --------------------------------------
+    # ----------------------------------------------------------------------------------------
+
     if 1:
         fig, ax = plt.subplots(1,3)
         fig.set_size_inches(12, 4.5, forward=True)   # figure size
         vminn = -120.0
-        vmaxx = 0.0
-
-        # Get STFTs
-        ref_sensor = np.argmin(SNRy)
-        Ymat = calcSTFT(y[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
-        Ds = calcSTFT(ds[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
+        vmaxx = 10.0
 
         # Raw microphone signal
         mapp = ax[0].imshow(20*np.log10(np.abs(Ymat)), extent=[0, t[-1], Fs/2, 0], vmin=vminn, vmax=vmaxx)
@@ -188,33 +234,6 @@ def run_script():
 
         plt.show()
 
-    if 0:
-        # V) SNR estimates per bin
-        Ns = 20       # Nr. of STFT frames in time section
-        Nss = Ns/2    # Nr. of STFT frames overlapping between time sections
-        SNRm_acNodes,SNRstd_acNodes = SNR_perband(D_hat,Ds,Ns,Nss,VAD_fact,Fs)
-
-        # Plot statistics across nodse of SNR improvement per bin
-        fig, ax = plt.subplots(1,2)
-        fig.set_size_inches(5, 3, forward=True)   # figure size
-        # Mean across nodes
-        mapp = ax[0].imshow(SNRm_acNodes.T, extent=[0, SNRm_acNodes.shape[0], Fs/2, 0], interpolation='none')
-        ax[0].invert_yaxis()
-        ax[0].set_aspect('auto')
-        ax[0].set(xlabel='Time frame nr.', ylabel='$f$ [kHz]',
-            title='$\\mathrm{E}_{\\mathrm{Nodes}}\\{SNR(t,\\kappa)\\}$')
-        ax[0].axes.yaxis.set_ticks(np.arange(0,Fs/2+1e3,1e3))
-        ax[0].axes.yaxis.set_ticklabels([str(ii) for ii in np.arange(0,Fs/1e3/2 + 1)])
-        # Mean across nodes
-        mapp = ax[1].imshow(SNRstd_acNodes.T, extent=[0, SNRm_acNodes.shape[0], Fs/2, 0], interpolation='none')
-        ax[1].invert_yaxis()
-        ax[1].set_aspect('auto')
-        ax[1].set(xlabel='Time frame nr.', ylabel='$f$ [kHz]',
-            title='$\\sigma_{\\mathrm{Nodes}}\\{SNR(t,\\kappa)\\}$')
-        ax[1].axes.yaxis.set_ticks(np.arange(0,Fs/2+1e3,1e3))
-        ax[1].axes.yaxis.set_ticklabels([str(ii) for ii in np.arange(0,Fs/1e3/2 + 1)])
-        plt.show()
-
     # Bar chart for SNR improvements at each sensor
     if 1:
         barw = 0.3
@@ -233,6 +252,10 @@ def run_script():
             plt.savefig('%s\\barchart_%ip_ev%i_%s.png' % (exportDir,pauseDur,pauseSpace,reftxt))
 
         plt.show()
+
+# ---------------------------------------------------------------------------------------
+# ------------------------------------ SUB-FUNCTIONS ------------------------------------
+# ---------------------------------------------------------------------------------------
 
 def SNR_perband(Ymat,Dmat,Ns,Nss,VAD_fact,Fs):
     # SNR_perband -- Computes the SNR per frequency bin across time sections.
@@ -271,5 +294,9 @@ def SNR_perband(Ymat,Dmat,Ns,Nss,VAD_fact,Fs):
     print('All done. Ready for plotting.')
 
     return SNRm_acrossNodes,SNRstd_acrossNodes
+
+# ------------------------------------------------------------------------------------
+# ------------------------------------ RUN SCRIPT ------------------------------------
+# ------------------------------------------------------------------------------------
 
 run_script()
