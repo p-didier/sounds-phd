@@ -6,16 +6,17 @@ import pandas as pd
 import math
 from sklearn import preprocessing
 import soundfile as sf
-import time
+import matplotlib.pyplot as plt
 import scipy.signal
 
-def load_AS(fname, path_to):
+def load_AS(fname, path_to, plot_AS=False):
     # load_AS -- Loads an Acoustic Scenario (AS) from a CSV file.
     # CSV file creation done with <ASgen.py>.
     #
     # >>> Inputs:
     # -fname [string] - Name of CSV file (w/ or w/out ".csv" extension).
     # -path_to [string] - Relative or absolute path to AS files directory.
+    # -plot_AS [bool] - If True, shows the Acoustic Scenario's geometry in figure.
     # >>> Outputs:
     # -h_sn [N*J*Ns float matrix, - ] - Source-to-node RIRs. 
     # -h_nn [N*J*Nn float matrix, - ] - Noise-to-node RIRs. 
@@ -59,7 +60,7 @@ def load_AS(fname, path_to):
     alpha = [f for f in AS.alpha if not math.isnan(f)]      # absorption coefficient
     alpha = alpha[1]
     Fs = [f for f in AS.Fs if not math.isnan(f)]            # sampling frequency
-    Fs = Fs[1]
+    Fs = int(Fs[1])
 
     # Count sources and receivers
     Ns = sum('Source' in s for s in AS.index)
@@ -96,7 +97,28 @@ def load_AS(fname, path_to):
         for jj in range(Nn):
             h_nn[:,ii,jj] = ASchunk['h_nn ' + str(jj+1)].to_numpy()    # noise-to-node RIRs
 
-    return h_sn,h_nn,rs,r,rn,rd,alpha,Fs
+    # Reference text for the AS
+    reftxt = fname.replace('\\','_')[:-4]
+
+    # Plot
+    if plot_AS:
+        scatsize = 20
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        plot_room(ax, rd)
+        for ii in range(Ns):
+            p1 = ax.scatter(rs[ii,0],rs[ii,1],rs[ii,2],s=scatsize,c='blue',marker='d')
+        for ii in range(Nn):
+            p2 = ax.scatter(rn[ii,0],rn[ii,1],rn[ii,2],s=scatsize,c='red',marker='P')
+        for ii in range(J):
+            p3 = ax.scatter(r[ii,0],r[ii,1],r[ii,2],s=scatsize,c='green',marker='o')
+        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
+            title='Acoustic scenario geometry ($\\alpha$ = %.2f)' % alpha)
+        ax.grid()
+        ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Node'])
+        plt.show()
+
+    return h_sn,h_nn,rs,r,rn,rd,alpha,Fs,reftxt
 
 
 def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals'):
@@ -142,14 +164,19 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
 
     return d, Fs
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in=''):
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     
     # Load acoustic scenario
-    h_sn,h_nn,rs,r,rn,rd,alpha,Fs = load_AS(ASref, path_to)
+    h_sn,h_nn,rs,r,rn,rd,alpha,Fs,reftxt = load_AS(ASref, path_to, plotAS)
+
+    print('Loading acoustic scenario: %.1fx%.1fx%.1f = %.1f m^3; alpha = %.2f...' % (rd[0],rd[1],rd[2],np.prod(rd),alpha))
+    if alpha == 1:
+        print('--> Fully anechoic scenario')
+    print('\n')
     Ns = h_sn.shape[-1]            # number of speech sources
-    Nn = h_sn.shape[-1]            # number of noise sources
+    Nn = h_nn.shape[-1]            # number of noise sources
     J = h_sn.shape[1]              # number of nodes
     nmax = int(np.floor(Fs*Tmax))    # max number of samples in speech signal
 
@@ -166,13 +193,11 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         print('Too many speech files references were provided. Using first %i.' % Ns)
         speech_lib = speech_lib[:Ns]
 
-    if noise_in != '' and len(noise_in) <= Nn:
+    if noise_in != '' and len(noise_in) < Nn:
         raise ValueError('Not enough specific noise files provided to cover %i noise sources' % Nn)
     if len(noise_in) > Nn:
         print('Too many noise files references were provided. Using first %i.' % Nn)
         noise_in = noise_in[:Nn]
-
-        
 
     # Load speech signal(s)
     d = np.zeros((nmax,Ns))
@@ -240,7 +265,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                 noisecurr = noisecurr[:nmax]
             else:
                 while len(noisecurr) < nmax:
-                    noisecurr = np.concatenate(noisecurr, noisecurr)
+                    noisecurr = np.concatenate((noisecurr, noisecurr))
                     if len(noisecurr) > nmax:
                         noisecurr = noisecurr[:nmax]
                         break
@@ -261,7 +286,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     ny = np.zeros((nmax,J))
     for k in range(J):
         n_k = np.zeros(nmax)
-        for ii in range(Ns):
+        for ii in range(Nn):
             # n_kk = np.convolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
             n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
             n_k += n_kk[:nmax]
@@ -273,4 +298,24 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # Time vector
     t = np.arange(nmax)/Fs
 
-    return y,ds,ny,t,Fs
+    return y,ds,ny,t,Fs,reftxt
+
+
+def plot_room(ax, rd):
+    # Plots the edges of a cuboid in 3D on the axes <ax>.
+    
+    ax.plot([0,rd[0]], [0,0], [0,0], 'k')
+    ax.plot([0,0], [0,rd[1]], [0,0], 'k')
+    ax.plot([0,0], [0,0], [0,rd[2]], 'k')
+    ax.plot([rd[0],rd[0]], [0,0], [0,rd[2]], 'k')
+    ax.plot([rd[0],rd[0]], [0,rd[1]], [0,0], 'k')
+    ax.plot([0,rd[0]], [rd[1],rd[1]], [0,0], 'k')
+    ax.plot([0,0], [rd[1],rd[1]], [0,rd[2]], 'k')
+    ax.plot([0,rd[0]], [0,0], [rd[2],rd[2]], 'k')
+    ax.plot([0,0], [0,rd[1]], [rd[2],rd[2]], 'k')
+    ax.plot([rd[0],rd[0]], [0,0], [rd[2],rd[2]], 'k')
+    ax.plot([rd[0],rd[0]], [0,rd[1]], [rd[2],rd[2]], 'k')
+    ax.plot([0,rd[0]], [rd[1],rd[1]], [rd[2],rd[2]], 'k')
+    ax.plot([rd[0],rd[0]], [rd[1],rd[1]], [0,rd[2]], 'k')
+
+    return None
