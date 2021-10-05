@@ -2,6 +2,7 @@ import random
 import numpy as np
 import os
 import random
+from numpy.core.defchararray import add
 import pandas as pd
 import math
 from sklearn import preprocessing
@@ -164,17 +165,35 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
 
     return d, Fs
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False):
+
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False,ms='overlap'):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
+    #
+    # >>> Inputs:
+    # -path_to [str] - Path to folder containing acoustic scenarios files. 
+    # -speech_lib [str] - Path or keyword corresponding to speech database to be used.
+    # -Tmax [float, s] - Duration of output signal.
+    # -noise_type [str] - Type of background noise. Possible values: 'white'.
+    # -baseSNR [float, dB] - Dry speech-to-dry noise SNR.
+    # -pauseDur [float, s] - Duration of forced pauses in speech.
+    # -pauseSpace [float, s] - Duration of forced-pause-free segments in-between forced pauses.
+    # -ASref [str] - If not '', path to specific acoustic scenario (AS) to be used. Else, random AS is chosen. 
+    # -speech [str /or/ list of str] - Path(s) to specific speech file(s) to be used.
+    # -noise [str /or/ list of str] - Path(s) to specific noise file(s) to be used.
+    # -plotAS [bool] - If true, plot the AS's geometry (room + placement of nodes & sources).
+    # -ms [str] - Option for multi-speakers speech signal generation:
+                #   -'overlap': the speakers may speak simultaneously.
+                #   -'distinct': the speakers may never speak simultaneously.
     
     # Load acoustic scenario
     h_sn,h_nn,rs,r,rn,rd,alpha,Fs,reftxt = load_AS(ASref, path_to, plotAS)
-
     print('Loading acoustic scenario: %.1fx%.1fx%.1f = %.1f m^3; alpha = %.2f...' % (rd[0],rd[1],rd[2],np.prod(rd),alpha))
     if alpha == 1:
         print('--> Fully anechoic scenario')
     print('\n')
+
+    # Extract useful values
     Ns = h_sn.shape[-1]            # number of speech sources
     Nn = h_nn.shape[-1]            # number of noise sources
     J = h_sn.shape[1]              # number of nodes
@@ -199,7 +218,8 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         print('Too many noise files references were provided. Using first %i.' % Nn)
         noise_in = noise_in[:Nn]
 
-    # Load speech signal(s)
+
+    # Load DRY speech signal(s)
     d = np.zeros((nmax,Ns))
     for ii in range(Ns):
         d_curr, Fs2 = load_speech(speech_lib[ii])
@@ -222,28 +242,15 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
 
         d[:,ii] = d_curr
 
-    # Add pauses, if asked
-    if pauseDur > 0:
-        Ns_p = int(Fs*pauseDur)                  # number of samples per in-between-speech pause
-        Ns_ibp = int(Fs*pauseSpace)              # number of samples between two consecutive pauses
-        Np = int(np.ceil(nmax/(Ns_p + Ns_ibp)))  # number of pauses, given the speech signal length
+    # Deal with user-input speech characteristics: forced pauses in speech + multi-speakers scheme
+    d = add_pauses(d, pauseDur, pauseSpace, Fs, ms)
 
-        # Build signal with pauses
-        # t0 = time.time()
-        d_wp = np.zeros(d.shape)
-        for ii in range(Np):
-            # Indices of output vector to be filled during current iteration
-            idx_ii = range(np.amin([nmax, ii*(Ns_p + Ns_ibp)]), np.amin([nmax, (ii+1)*(Ns_p + Ns_ibp)]))
-            # Indices of input vector to be used during current iteration
-            idx_d = range(np.amin([nmax, ii*Ns_ibp]), np.amin([nmax, (ii+1)*Ns_ibp]))
-
-            chunk = np.concatenate((d[idx_d,:], np.zeros((Ns_p,d.shape[1]))))
-            d_wp[idx_ii, :] = chunk[:len(idx_ii),:]
-
-        d = d_wp
+    # fig, ax = plt.subplots(1,2)
+    # ax[0].plot(d[:,0])
+    # ax[1].plot(d_wp[:,0])
+    # plt.show()
     
-
-    # Generate noise signals
+    # Generate DRY noise signals
     noise = np.zeros((nmax, Nn))
     if noise_in == '':
         # Generate new noise
@@ -272,22 +279,20 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
             noisecurr = preprocessing.scale(noisecurr)   # normalize
             noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
             
-    # Generate no-noise sensor signals ("desired signals" -- convolution w/ RIRs only)
+    # Generate no-noise WET sensor signals ("desired signals" -- convolution w/ RIRs only)
     ds = np.zeros((nmax,J))
     for k in range(J):
         d_k = np.zeros(nmax)
         for ii in range(Ns):
-            # d_kk = np.convolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
             d_kk = scipy.signal.fftconvolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
             d_k += d_kk[:nmax]
         ds[:,k] = d_k
 
-    # Generate no-speech sensor noise (convolution w/ RIRs only)
+    # Generate no-speech WET sensor noise (convolution w/ RIRs only)
     ny = np.zeros((nmax,J))
     for k in range(J):
         n_k = np.zeros(nmax)
         for ii in range(Nn):
-            # n_kk = np.convolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
             n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
             n_k += n_kk[:nmax]
         ny[:,k] = n_k
@@ -299,6 +304,135 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     t = np.arange(nmax)/Fs
 
     return y,ds,ny,t,Fs,reftxt
+
+
+def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
+    # Adds pauses to speech signal <s> in a way that preserves natural pauses.
+    # 
+    # >>> Inputs:
+    # -s [L*Ns float matrix, -] - Input speech signal(s).
+    # -pauseDur [float, s] - Duration of forced pauses in speech.
+    # -pauseSpace [float, s] - Duration of forced-pause-free segments in-between forced pauses.
+    # -Fs [int, samples/s] - Sampling frequency.
+    # -ms [str] - Option for multi-speakers speech signal generation:
+                #   -'overlap': the speakers may speak simultaneously.
+                #   -'distinct': the speakers may never speak simultaneously.
+    #
+    # >>> Outputs:
+    # -s_wp [L*Ns float matrix, -] - Output signal(s), with appropriate forced pauses.
+
+    # Extract parameters from inputs
+    Ns = s.shape[1]                 # Number of speech sources
+    Ns_p = int(Fs*pauseDur)         # Number of samples per in-between-speech pause
+    Ns_ibp = int(Fs*pauseSpace)     # Minimum number of samples between two consecutive pauses
+    Np = int(np.ceil(s.shape[0]/(Ns_p + Ns_ibp)))       # number of pauses, given the speech signal length
+    flagOverlap = Ns == 1 or ms == 'overlap'
+
+    # Segment signals
+    segments = []
+    for ii in range(Ns):
+        # Detect natural pauses in file
+        pauses = detect_pauses(s[:,ii], Fs)
+        # Cut-up files into speech segments at least <Ns_ibp> samples long
+        pauses_sep = [pauses[0]]
+        for p in pauses:
+            if p - pauses_sep[-1] >= Ns_ibp:
+                pauses_sep.append(p)        # Extract pause indices which ensures at least <Ns_ipb> samples in-between them
+        currsegments = [s[int(pauses_sep[jj-1]):int(pauses_sep[jj]), ii] for jj in range(1,len(pauses_sep))]
+        currsegments.append(s[int(pauses_sep[-1]):, ii])
+        segments.append(currsegments)
+
+    # Keep all segments safely copied
+    segments_full = segments.copy()
+
+    # Build output signals
+    s_wp = np.zeros_like(s)
+    idx_end = 0
+    idx_start = 0
+    while idx_start < s.shape[0] and idx_end < s.shape[0]:
+        mysegs = []
+        maxlenseg = 0
+        for ii in range(Ns):   # for each speech source
+            # Select the first segment available
+            mysegs.append(segments[ii][0])
+            # Memorize the maximum segment length
+            if len(mysegs[-1]) > maxlenseg:
+                maxlenseg = len(mysegs[-1])     
+            # Delete the segment
+            segments[ii].pop(0)
+
+        # Update the ending filling-in index
+        idx_end += maxlenseg
+        
+        if flagOverlap:
+            for ii in range(Ns):
+                addition = np.concatenate((mysegs[ii], np.zeros(maxlenseg - len(mysegs[ii]))))
+                if idx_end > s.shape[0]:
+                    addition = addition[:(s.shape[0] - idx_start)]
+                s_wp[idx_start:idx_end, ii] = addition
+            # Increment indices for next iteration
+            idx_start += maxlenseg + Ns_p
+            idx_end += Ns_p
+        else:
+            for ii in range(Ns):
+                idx_end = idx_start + len(mysegs[ii])
+                addition = mysegs[ii]
+                if idx_end > s.shape[0]:
+                    addition = addition[:(s.shape[0] - idx_start)]
+                s_wp[idx_start:idx_end, ii] = addition
+                idx_start += len(addition) + Ns_p
+
+        # for ii in range(Ns):
+
+        #     pause_idx = pauses[ii]  # Current speech file's pauses indices
+            
+        #     idx_start = 0
+        #     idx_start_filler = 0
+        #     s_wp = np.zeros_like(s)
+        #     for ii in range(Np):
+        #         potential_pauses = [ii for ii in pause_idx if ii >= idx_start + Ns_ibp]
+        #         if len(potential_pauses) == 0:
+        #             pause_curr = pause_idx[-1]
+        #         else:
+        #             pause_curr = potential_pauses[0]
+        #         # Indices of the output vector to fill in
+        #         idx_tofill = np.arange(idx_start, pause_curr, dtype=int)
+        #         # Indices of input vector to be used during current iteration
+        #         idx_filler = np.arange(idx_start_filler, np.amin([len(s), idx_start_filler + len(idx_tofill)]), dtype=int)
+        #         # Fill in output vector
+        #         s_wp[idx_tofill] = s[idx_filler]  
+        #         # Increment for next iteration
+        #         idx_start = pause_curr + Ns_p
+        #         idx_start_filler += len(idx_tofill)
+
+    return s_wp
+
+
+def detect_pauses(s, Fs):
+    # Returns indices at the center of natural pauses in speech signal <s>.
+
+    # Parameters
+    tw = 20e-3      # window duration
+    Np = int(tw*Fs)      # window length
+    nw = int(np.floor(len(s)/Np))   # number of window needed to cover the whole signal
+    thrs = np.amax(s**2)/2000   # Energy threshold detecting a pause in speech
+
+    # Label windows as containing speech (False) or pause (True)
+    flags = [np.mean((s[ii*Np:(ii+1)*Np])**2) <= thrs for ii in range(nw)]
+
+    # Detect beginning and ends of pause segments
+    idx_begin = [ii for ii in range(1,nw) if not flags[ii-1] and flags[ii]]
+    idx_end = [ii for ii in range(nw-1) if flags[ii] and not flags[ii+1]]
+    if flags[0]:
+        idx_begin.insert(0,0)
+    if idx_end[-1] < nw and flags[-1]:
+        idx_end.append(nw)
+
+    # Mark middles of pause segments
+    pause_idx = np.round((np.array(idx_end) - np.array(idx_begin))/2) + np.array(idx_begin)
+    pause_idx = np.round(pause_idx * Np + Np/2)     # convert back to original sampling rate indices
+
+    return pause_idx
 
 
 def plot_room(ax, rd):

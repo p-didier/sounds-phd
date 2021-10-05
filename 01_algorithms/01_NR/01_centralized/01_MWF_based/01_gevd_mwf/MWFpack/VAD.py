@@ -35,12 +35,18 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     n = len(x)
 
     # VAD window length
-    Nw = tw*Fs
+    if tw > 0:
+        Nw = tw*Fs
+    else:
+        Nw = 1
 
     # Compute VAD
     oVAD = np.zeros(n)
     for ii in range(n):
-        chunk_x = x[np.arange(ii,int(min(ii+Nw, n)))]
+        if Nw == 1:
+            chunk_x = x[ii]
+        else:
+            chunk_x = x[np.arange(ii,int(min(ii+Nw, n)))]
 
         # Compute short-term signal energy
         E = np.mean(np.abs(chunk_x)**2)
@@ -69,7 +75,7 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
 
 
 # @jit(nopython=True)
-def getSNR(Y,VAD):
+def getSNR(Y,VAD,silent=False):
     # getSNR -- Sub-function for SNRest().
 
     # (c) Paul Didier - 14-Sept-2021
@@ -78,10 +84,17 @@ def getSNR(Y,VAD):
 
     # Only start computing VAD from the first frame where there has been VAD =
     # 0 and VAD = 1 at least once (condition added on 2021/08/25).
+    idx_start = 0
     for ii in range(1,len(VAD)):
         if VAD[ii] != VAD[0]:
             idx_start = ii
             break
+
+    # Check input lengths
+    if len(Y) < len(VAD):
+        if not silent:
+            print('WARNING: VAD is longer than provided signal (possibly due to non-integer Tmax*Fs/(L-R)) --> truncating VAD')
+        VAD = VAD[:len(Y)]
     
     # Truncate signals and VAD accordingly
     VAD = VAD[idx_start:]
@@ -103,10 +116,6 @@ def getSNR(Y,VAD):
         SNR = -1 * float('inf')
     elif Ln == 0:
         SNR = float('inf')
-
-    # fig, ax = plt.subplots()
-    # ax.plot(np.abs(Y)**2 * (1 - VAD))
-    # plt.show()
 
     return SNR
 

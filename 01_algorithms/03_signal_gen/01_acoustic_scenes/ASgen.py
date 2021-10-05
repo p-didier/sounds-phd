@@ -15,8 +15,8 @@ def main(gen_specific_AS=False):
     RIR_l = 2**12   # RIR length [samples]
     minRd = 3       # Smallest room dimension possible [m]
     maxRd = 7       # Largest room dimension possible [m]
-    Ns = 1          # nr. of speech sources
-    Nn = 1          # nr. of noise sources
+    Ns = 2          # nr. of speech sources
+    Nn = 3          # nr. of noise sources
     J = 5           # nr. of nodes
 
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
@@ -24,6 +24,7 @@ def main(gen_specific_AS=False):
 
     if gen_specific_AS:
         nAS = 1
+
     counter = 0
     while counter < nAS:
         
@@ -45,22 +46,19 @@ def main(gen_specific_AS=False):
         else:
             h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True)
 
-        # PLOT
-        # fig, ax = plt.subplots()
-        # ax.plot(np.squeeze(h_ns[:,0,0]))
-        # ax.grid()
-        # plt.show()
-
         # Export
         expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
-        nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
         if gen_specific_AS:
-            fname = '%s\\testAS' % expfolder
+            fname = '%s\\J%i_Ns%i_Nn%i\\testAS' % (expfolder,J,Ns,Nn)
             if alpha == 1:
                 fname += '_anechoic'
             fname += '.csv'
         else:
-            fname =  "%s\\AS%i_J%i_Ns%i_Nn%i.csv" % (expfolder,nas,J,Ns,Nn)
+            expfolder += '\\J%i_Ns%i_Nn%i' % (J,Ns,Nn)
+            if not os.path.isdir(expfolder):   # check if subfolder exists
+                os.mkdir(expfolder)   # if not, make directory
+            nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
+            fname =  "%s\\AS%i.csv" % (expfolder,nas)
         header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs}
         export_data(h_ns, h_nn, header, rs, rn, r, fname)
 
@@ -209,4 +207,4 @@ def get_fixed_values():
 
     return rd, r, rs, rn
 
-main(gen_specific_AS=True)
+main(gen_specific_AS=1)

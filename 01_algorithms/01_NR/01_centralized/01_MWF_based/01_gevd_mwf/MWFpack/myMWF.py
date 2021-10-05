@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.lib.shape_base import column_stack
 import scipy.signal as sig
+import scipy
 import time
 from numba import jit
 import sys, os
@@ -56,8 +57,8 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     Qmat = np.zeros((nNodes,nNodes,nbins),dtype=complex)                  # initiate GEVD eigenvectors matrix 
     #
     VAD_l = np.zeros(nframes)                               # initiate frame-wise VAD
-    w_hat = np.identity(nNodes,dtype=complex)
-    w_hat = np.repeat(w_hat[:, :, np.newaxis], nbins, axis=2)   # initiate filter weight estimates 
+    W_hat = np.identity(nNodes,dtype=complex)
+    W_hat = np.repeat(W_hat[:, :, np.newaxis], nbins, axis=2)   # initiate filter weight estimates 
     nUpdatesRnn = np.zeros(nbins)                
     nUpdatesRyy = np.zeros(nbins)
 
@@ -105,64 +106,29 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
                 if useGEVD:
                     if VAD_l[l]:
                         # Perform generalized eigenvalue decomposition
-                        sig,q = mygevd(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                        sig,vi = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                        q = np.linalg.pinv(vi.conj().T)
+                        # print(sig)
                         # Sort eigenvalues in descending order
-                        Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(sig,q)
-                        # idx = np.flip(np.argsort(np.diag(Sigma_yy[:,:,kp])))
-                        # Sigma_yy[:,:,kp] = np.diag(np.flip(np.sort(np.diag(Sigma_yy[:,:,kp]))))
-                        # Qmat[:,:,kp] = Qmat[:,idx,kp]
+                        Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q)
                     else: 
-                        # Do not do anything (keep previous-frame <Sigma_yy> and <Qmat>)
-                        pass
-                        # Sigma_nn[:,:,kp], Qmat_n[:,:,kp] = mygevd(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
-                        # # Sort eigenvalues in descending order
-                        # idx = np.flip(np.argsort(np.diag(Sigma_nn[:,:,kp])))
-                        # Sigma_nn[:,:,kp] = np.diag(np.flip(np.sort(np.diag(Sigma_nn[:,:,kp]))))
-                        # Qmat_n[:,:,kp] = Qmat_n[:,idx,kp]
+                        pass  # Do not do anything (keep previous-frame <Sigma_yy> and <Qmat>)
 
-                        # import pandas as pd
-                        # df = pd.DataFrame(np.squeeze(np.real(Qmat[:,:,kp])))
-                        # df_n = pd.DataFrame(np.squeeze(np.real(Qmat_n[:,:,kp])))
-                        # print(df)
-                        # print(df_n)
-
-                        # # idx = compare_cols(Qmat[:,:,kp], Qmat_n[:,:,kp])
-
-                        # import matplotlib.pyplot as plt
-                        # # fig, ax = plt.subplots(1,3)
-                        # fig, ax = plt.subplots(1,2)
-                        # ax[0].imshow(np.squeeze(np.real(Qmat[:,:,kp])))
-                        # ax[0].set(title='$Q_\mathrm{VAD1}$')
-                        # ax[1].imshow(np.squeeze(np.real(Qmat_n[:,:,kp])))
-                        # ax[1].set(title='$Q_\mathrm{VAD0}$')
-                        # # ax[2].imshow(np.squeeze(np.real(Qmat_n[:,idx,kp])))
-                        # # ax[2].set(title='$Q_\mathrm{VAD0}$ rearranged')
-                        # plt.show()
-
-                        # stop = 1
-
-                    # LMMSE weights 
-                    w_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp],Qmat[:,:,kp],GEVDrank) 
-                    w_hat[:,:,kp] = w_hat[:,:,kp].conj()#-to check why is needed....
+                    W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
                 else:
-                    w_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
+                    W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
 
-            # Desired signal estimates
-            D_hat[kp,l,:] = np.squeeze(w_hat[:,:,kp]).conj().T @ Ytf
+            # Desired signal estimates for each node separately (last dimension of <D_hat>)
+            D_hat[kp,l,:] = np.squeeze(W_hat[:,:,kp]).conj().T @ Ytf
 
             # # Get output SNR for current TF-bin
-            # snrout = SNRout(np.squeeze(w_hat[:,:,kp]), np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
+            # snrout = SNRout(np.squeeze(W_hat[:,:,kp]), np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
 
         t1 = time.time()
         if l % 10 == 0:
             print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
 
     print('MW-filtering done.')
-    
-    import pandas as pd
-    w_hatr = w_hat.transpose(2,0,1).reshape(nbins,-1)
-    df = pd.DataFrame(w_hatr)
-    df.to_csv('C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\02_outputs\\tmp\\what.csv')
 
     return D_hat
 
@@ -190,6 +156,9 @@ def update_w_GEVDMWF(S,Q,GEVDrank):
     sig_yy = np.diag(S)
     diagveig = np.ones(GEVDrank) - np.ones(GEVDrank) / sig_yy[:GEVDrank]   # rank <R> approximation
     diagveig = np.append(diagveig, np.zeros(S.shape[0] - GEVDrank))
+    # diagveig = np.array([1 - 1 / sig_yy[0],0,0,0,0])   # TMP - listening to each rank individually
+    # diagveig = np.array([0,1 - 1 / sig_yy[1],0,0,0])   # TMP - listening to each rank individually
+    # diagveig = np.array([0,0,1 - 1 / sig_yy[2],0,0])   # TMP - listening to each rank individually
     # LMMSE weights
     return np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
 
@@ -224,14 +193,18 @@ def mygevd(A,B):
 
     # print(Qmat)
 
-    stop =1 
+    stop = 1 
 
     return Smat,Qmat
 
-def sortgevd(S,Q):
+def sortgevd(S,Q,order='descending'):
     # Sorts outcome of GEVD in descending eigenvalues order
-    idx = np.flip(np.argsort(np.diag(S)))
-    S_sorted = np.diag(np.flip(np.sort(np.diag(S))))
+    if order == 'descending':
+        idx = np.flip(np.argsort(np.diag(S)))
+        S_sorted = np.diag(np.flip(np.sort(np.diag(S))))
+    elif order == 'ascending':
+        idx = np.argsort(np.diag(S))
+        S_sorted = np.diag(np.sort(np.diag(S)))
     Q_sorted = Q[:,idx]
     return S_sorted,Q_sorted
 

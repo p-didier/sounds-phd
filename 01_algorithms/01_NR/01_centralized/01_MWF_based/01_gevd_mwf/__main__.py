@@ -9,6 +9,7 @@ import matplotlib
 matplotlib.rcParams['text.usetex'] = False
 import scipy.signal as sig
 import pandas as pd
+import scipy.io.wavfile
 # Third party imports
 #
 # Local application imports
@@ -26,21 +27,26 @@ import playsounds.playsounds as ps
 # Global variables
 SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
 EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
-LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
-SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
+LISTEN_TO_MICS = 1  # If true, plays examples of target and raw mic signal
+SHOW_WAVEFORMS = 1  # If true, plots waveforms of target and raw mic signals
+LISTEN_OUTPUT = 1   # If true, plays enhanced and original signals
 
 
 def run_script():
 
     path_acoustic_scenarios = '%s\\02_data\\01_acoustic_scenarios' % os.getcwd()  # path to acoustic scenarios
-    speech_in = 'libri'     # name of speech signals library to be used
-    noise_type = 'white'    # type of noise to be used
+    speech_in = 'libri'         # name of speech signals library to be used
+    noise_type = 'white'        # type of noise to be used
+    multispeakers = 'overlap'   # option for multi-speakers speech signal generation
+    multispeakers = 'distinct'   # option for multi-speakers speech signal generation
+                                #   -'overlap': the speakers may speak simultaneously.
+                                #   -'distinct': the speakers may never speak simultaneously.
     #
-    Tmax = 5               # maximum signal duration [s]
-    baseSNR = 10            # SNR pre-RIR application [dB]
+    Tmax = 10               # maximum signal duration [s]
+    baseSNR = 20            # SNR pre-RIR application [dB]
     #
     pauseDur = 1            # duration of pauses in-between speech segments [s]
-    pauseSpace = 3          # duration of speech segments (btw. pauses) [s]
+    pauseSpace = 1          # duration of speech segments (btw. pauses) [s]
     #
     useGEVD = True          # if True, use GEVD, do not otherwise
     GEVDrank = 2
@@ -55,11 +61,13 @@ def run_script():
     # ASref = 'J5_Ns1_Nn1\\AS9'       # acoustic scenario (if empty, random selection)
     ASref = 'J5_Ns2_Nn3\\AS0'       # acoustic scenario (if empty, random selection)
     # ASref = 'J5_Ns2_Nn3\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
+    # ASref = 'testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = ''                    # acoustic scenario (if empty, random selection)
     # speech = ''                    # speech signals (if empty, random selection)
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'
     speech = [speech1,speech2]
+    # speech = ['C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\02_signals\\01_speech\\test2speakers.wav']
     noise1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\99_noises\\white_Fs16e3\\whitenoise1.wav'
     noise2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\99_noises\\white_Fs16e3\\whitenoise2.wav'
     noise3 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\99_noises\\white_Fs16e3\\whitenoise3.wav'
@@ -86,7 +94,7 @@ def run_script():
     # I) Generate microphone signals
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
     y,ds,ny,t,Fs,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
-                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=False)
+                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=False,ms=multispeakers)
     print('Microphone signals created using "%s"' % ASref)
 
     # Set useful data as variables
@@ -115,7 +123,7 @@ def run_script():
     if LISTEN_TO_MICS:
         # Listen
         sPbIdx = np.argmin(SNRy)
-        maxplaytime = 5     # Maximal play-time in seconds
+        maxplaytime = 10     # Maximal play-time in seconds
         print('Playing the target signal for sensor #%i...' % (sPbIdx+1))
         ps.playthis(ds[:int(maxplaytime*Fs),sPbIdx], Fs)
         print('Playing the raw mic. signal for sensor #%i...' % (sPbIdx+1))
@@ -139,6 +147,15 @@ def run_script():
     print('Enhanced signals (%is x %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)
     d_hat = calcISTFT(D_hat, win, L, R, 'onesided')
+
+    if LISTEN_OUTPUT:
+        # Listen
+        sPbIdx = np.argmin(SNRy)
+        print('Playing the raw mic. signal for sensor #%i...' % (sPbIdx+1))
+        ps.playthis(y[:,sPbIdx], Fs)
+        print('Playing the enhanced signal for sensor #%i...' % (sPbIdx+1))
+        ps.playthis(d_hat[:,sPbIdx], Fs)
+        scipy.io.wavfile.write('tmp_enhanced.wav',Fs,d_hat[:,sPbIdx])
 
     # IV) SNR improvement estimates
     SNRd_hat = np.zeros(J)

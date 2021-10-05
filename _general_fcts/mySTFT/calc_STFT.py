@@ -21,22 +21,26 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
     # Translated to Python by Paul Didier (First: Sept. 2021).
 
     # Check input format
-    if x.shape[0] < x.shape[1]:
-        print('<calcSTFT>: Input <x> seems transposed --> flipping dimensions.')
-        x = x.T
+    if len(x.shape) == 2:
+        if x.shape[0] < x.shape[1]:
+            print('<calcSTFT>: Input <x> seems transposed --> flipping dimensions.')
+            x = x.T
 
     # Use only half of the FFT spectrum  
     N_STFT_half = int(N_STFT/2 + 1)
 
     # Get frequency vector
     f = np.linspace(0, Fs/2, N_STFT_half)
-    # f2 = scipy.fft.fftfreq(N_STFT) * Fs   # equivalent
     if sides == 'twosided':
         f = np.concatenate((f, -np.flip(f[1:-1])))
 
     # Init
-    L = int(np.floor((len(x) - N_STFT + R_STFT)/R_STFT))
-    M = x.shape[1]
+    L = int(np.floor((x.shape[0] - N_STFT + R_STFT)/R_STFT))
+    if len(x.shape) == 2:
+        M = x.shape[1]
+    else: 
+        M = 1
+
     if sides == 'onesided':
         X = np.zeros((N_STFT_half, L, M), dtype=complex) 
     elif sides == 'twosided':
@@ -46,8 +50,12 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
     for m in range(M):
         for l in range(L): 
             idxx = range(int(l*R_STFT), int(l*R_STFT + N_STFT))
-            x_frame = x[idxx, m]
-            X_frame = scipy.fft.fft(win * x_frame)
+            if len(x.shape) == 2:
+                x_frame = x[idxx, m]
+            else:
+                x_frame = x[idxx]
+                
+            X_frame = scipy.fft.fft(win *   x_frame)
             if sides == 'onesided':
                 X[:,l,m] = X_frame[:N_STFT_half]
             elif sides == 'twosided':              
@@ -90,4 +98,4 @@ def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
         sampIdx = range(int(l*R_STFT), int(l*R_STFT+N_STFT))
         x[sampIdx,:] += np.squeeze(x_frames[:,l,:])
 
-    return x,X
+    return x

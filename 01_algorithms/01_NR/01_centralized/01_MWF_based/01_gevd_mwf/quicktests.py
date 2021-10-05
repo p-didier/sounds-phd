@@ -43,33 +43,40 @@ import scipy
 
 
 
-def mygevd(A,B):
+# def mygevd(A,B):
 
-    # Cholesky factorization
-    G = np.linalg.cholesky(np.real(B))       # B = G*G^H
+#     # Cholesky factorization
+#     G = np.linalg.cholesky(np.real(B))       # B = G*G^H
 
-    C1 = np.linalg.solve(G,A)
-    C = np.linalg.solve(G.conj(),C1.T)    # C = G^(-1)*A*G^(-H)
+#     C1 = np.linalg.solve(G,A)
+#     C = np.linalg.solve(G.conj(),C1.T)    # C = G^(-1)*A*G^(-H)
 
-    s, Qa = np.linalg.eig(C)
+#     s, Qa = np.linalg.eig(C)
 
-    # Sort eigenvalues in descending order
-    idx = np.flip(np.argsort(s))
-    s = np.flip(np.sort(s))
-    S = np.real(np.diag(s))
-    Qa = Qa[:,idx]
+#     # Sort eigenvalues in descending order
+#     idx = np.flip(np.argsort(s))
+#     s = np.flip(np.sort(s))
+#     S = np.real(np.diag(s))
+#     Qa = Qa[:,idx]
 
-    X = np.linalg.solve(G.conj().T, Qa)   # X = G^(-H)*Qa
-    Q = np.linalg.pinv(X.conj().T)
+#     X = np.linalg.solve(G.conj().T, Qa)   # X = G^(-H)*Qa
+#     Q = np.linalg.pinv(X.conj().T)
 
-    return S,Q
+#     return S,Q
 
-# COMPARING MATLAB AND PYTHON EIG()
-A = np.array([[1,2,3],[4,5,6],[7,8,9]])
-Q = np.array([[5,6,3],[2,3,4],[1,3,4]])
+# # COMPARING MATLAB AND PYTHON EIG()
+# A = np.array([[1,2,3],[4,5,6],[7,8,9]])
+# Q = np.array([[5,6,3],[2,3,4],[1,3,4]])
 
-B = np.dot(Q, Q.transpose())
+# B = np.dot(Q, Q.transpose())
 
-S,Q = mygevd(A,B)
-print(S)
-print(Q)
+# S,Q = mygevd(A,B)
+# print(S)
+# print(Q)
+
+
+
+import winsound
+
+# winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
+winsound.PlaySound('tmp.wav', winsound.SND_FILENAME)
