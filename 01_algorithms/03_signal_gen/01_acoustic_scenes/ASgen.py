@@ -202,15 +202,15 @@ def generate_array_pos(r, Mk, array_type, min_d):
         # Center
         x -= np.mean(x)
         # Make 3D
-        r_sensors = np.zeros((3, Mk))
-        r_sensors[0,:] = x
+        r_sensors = np.zeros((Mk,3))
+        r_sensors[:,0] = x
         
         # Rotate in 3D through randomized rotation vector 
         rotvec = np.random.uniform(low=0, high=1, size=(3,))
         r_sensors_rot = np.zeros_like(r_sensors)
         for ii in range(Mk):
             myrot = rot.from_rotvec(np.pi/2 * rotvec)
-            r_sensors_rot[:,ii] = myrot.apply(r_sensors[:,ii]) + r
+            r_sensors_rot[ii,:] = myrot.apply(r_sensors[:,ii]) + r
     else:
         raise ValueError('No sensor array geometry defined for array type "%s"' % array_type)
 

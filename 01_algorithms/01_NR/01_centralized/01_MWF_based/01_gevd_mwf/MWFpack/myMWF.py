@@ -65,10 +65,6 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update 
 
-    # TMP
-    Sigma_nn = np.zeros((nNodes,nNodes,nbins),dtype=complex)              # initiate GEVD eigenvalues matrix FOR NOISE ONLY PERIODS
-    Qmat_n = np.zeros((nNodes,nNodes,nbins),dtype=complex)                  # initiate GEVD eigenvectors matrix FOR NOISE ONLY PERIODS
-
     # Loop over time frames
     for l in range(nframes):
         
@@ -91,6 +87,8 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
             else:                # "noise only" time frame
                 Rnn[:,:,kp] = expavg_covmat(np.squeeze(Rnn[:,:,kp]), beta, Ytf)
                 nUpdatesRnn[kp] += 1
+
+            # print('rank(Ryy) = %i; rank(Rnn) = %i' % (np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])), np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp]))))
 
             # ---- Check quality of covariance estimates ----
             if not updateWeights[kp]:

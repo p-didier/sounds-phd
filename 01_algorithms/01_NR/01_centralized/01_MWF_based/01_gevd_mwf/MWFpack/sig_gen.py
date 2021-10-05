@@ -191,7 +191,7 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
     return d, Fs
 
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False,ms='overlap'):
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False,ms='overlap',SNR_in_uncorr=30):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     #
@@ -210,6 +210,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # -ms [str] - Option for multi-speakers speech signal generation:
                 #   -'overlap': the speakers may speak simultaneously.
                 #   -'distinct': the speakers may never speak simultaneously.
+    # -SNR_in_uncorr [float, dB] - Input SNR for microphone self-noise.
     
     # Load acoustic scenario
     h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS)
@@ -243,7 +244,6 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         print('Too many noise files references were provided. Using first %i.' % Nn)
         noise_in = noise_in[:Nn]
 
-
     # Load DRY speech signal(s)
     d = np.zeros((nmax,Ns))
     for ii in range(Ns):
@@ -269,11 +269,6 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
 
     # Deal with user-input speech characteristics: forced pauses in speech + multi-speakers scheme
     d = add_pauses(d, pauseDur, pauseSpace, Fs, ms)
-
-    # fig, ax = plt.subplots(1,2)
-    # ax[0].plot(d[:,0])
-    # ax[1].plot(d_wp[:,0])
-    # plt.show()
     
     # Generate DRY noise signals
     noise = np.zeros((nmax, Nn))
@@ -325,10 +320,32 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # Generate microphone signals (speech + noise)
     y = ds + ny
 
+    # Add self-noise
+    y = add_selfnoise(y,SNR_in_uncorr)
+
     # Time vector
     t = np.arange(nmax)/Fs
 
     return y,ds,ny,t,Fs,nNodes,reftxt
+
+
+def add_selfnoise(y, SNR):
+    # Adds microphone self-noise to microphone signals.
+
+    nchannels = 1
+    if len(y.shape) == 2:
+        if y.shape[0] < y.shape[1]:
+            y = np.transpose(y)
+        nchannels = np.amin(y.shape[1])
+
+    y_sn = np.copy(y)
+    for ii in range(nchannels):
+        sp_pow = np.var(y[:,ii])
+        sf_uncorr = np.sqrt(sp_pow/10**(SNR/10))            # Scale factor for desired SNR for uncorr noise, assume initial std. dev of uncorr noise = 1
+        n_uncorr = sf_uncorr*(2 * np.random.uniform(size=(y.shape[0],)) - 1)      # Uncorrelated noise to be added
+        y_sn[:,ii] += n_uncorr
+
+    return y_sn
 
 
 def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):

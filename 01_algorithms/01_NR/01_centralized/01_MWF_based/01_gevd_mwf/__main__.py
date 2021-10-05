@@ -98,7 +98,8 @@ def run_script():
     print('Microphone signals created using "%s"' % ASref)
 
     # Set useful data as variables
-    M = y.shape[-1]
+    M = y.shape[-1]     # total number of sensors
+    Mk = M/J            # number of sensor(s) per node
 
     # I.2) Checks on input parameters
     if not (Tmax*Fs/(L-R)).is_integer():
@@ -111,8 +112,8 @@ def run_script():
     print('Oracle VAD computed')
 
     # II.2) Initial SNR estimates
-    SNRy = np.zeros(J)
-    for k in range(J):
+    SNRy = np.zeros(M)
+    for k in range(M):
         SNRy[k] = VAD.SNRest(y[:,k],myVAD)
 
     # II.3) Get STFTs
@@ -135,7 +136,7 @@ def run_script():
         ax.plot(t, y[:,ref_sensor])
         ax.plot(t, ds[:,ref_sensor])
         ax.set(xlabel='time (s)',
-            title='Waveforms')
+            title='Waveforms for sensor #%i (node #%i)' % (ref_sensor, int(np.floor(ref_sensor/Mk))))
         plt.legend('Raw mic signal', 'Target signal (clean)')
         ax.grid()
         plt.show()
