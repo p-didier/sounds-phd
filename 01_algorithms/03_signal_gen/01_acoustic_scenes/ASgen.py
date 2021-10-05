@@ -2,23 +2,36 @@
 # coding: utf-8
 import numpy as np
 import matplotlib.pyplot as plt
-import os 
+import os
+from numpy.core.defchararray import array 
 import pandas as pd
 import random
 from rimPy import rimPy
+from scipy.spatial.transform import Rotation as rot
 
 # Acoustic Scenario (AS) generation script.
 
-def main(gen_specific_AS=False):
-    nAS = 10        # Number of AS to generate
-    Fs = 16e3       # Sampling frequency [samples/s]
-    RIR_l = 2**12   # RIR length [samples]
-    minRd = 3       # Smallest room dimension possible [m]
-    maxRd = 7       # Largest room dimension possible [m]
-    Ns = 2          # nr. of speech sources
-    Nn = 3          # nr. of noise sources
-    J = 5           # nr. of nodes
+class Node:
+    def __init__(self, Mk, arraygeom, mic_sep):
+        self.Mk = Mk
+        self.array = arraygeom
+        self.mic_sep = mic_sep
 
+
+def main(gen_specific_AS=False):
+
+    nAS = 1                    # Number of AS to generate
+    Fs = 16e3                   # Sampling frequency [samples/s]
+    RIR_l = 2**12               # RIR length [samples]
+    minRd = 3                   # Smallest room dimension possible [m]
+    maxRd = 7                   # Largest room dimension possible [m]
+    #
+    Ns = 1                      # nr. of speech sources
+    Nn = 1                      # nr. of noise sources
+    #
+    nNodes = 5                  # nr. of nodes
+    node = Node(3, 'linear', 0.1)
+    #
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
     T60min = 0.4*RIR_l/Fs   # Smallest possible T60
 
@@ -42,24 +55,27 @@ def main(gen_specific_AS=False):
         
         # Call function
         if gen_specific_AS:
-            h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False)
+            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False)
         else:
-            h_ns, h_nn, rs, rn, r = genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True)
+            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True)
 
         # Export
         expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
         if gen_specific_AS:
-            fname = '%s\\J%i_Ns%i_Nn%i\\testAS' % (expfolder,J,Ns,Nn)
+            fname = '%s\\J%i_Ns%i_Nn%i\\testAS' % (expfolder,nNodes,Ns,Nn)
             if alpha == 1:
                 fname += '_anechoic'
             fname += '.csv'
         else:
-            expfolder += '\\J%i_Ns%i_Nn%i' % (J,Ns,Nn)
+            expfolder += '\\J%i_Ns%i_Nn%i' % (nNodes,Ns,Nn)
             if not os.path.isdir(expfolder):   # check if subfolder exists
                 os.mkdir(expfolder)   # if not, make directory
             nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
             fname =  "%s\\AS%i.csv" % (expfolder,nas)
-        header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs}
+        #
+        header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs,\
+             'nNodes': nNodes, 'd_intersensor': node.mic_sep}
+        #  
         export_data(h_ns, h_nn, header, rs, rn, r, fname)
 
         counter += 1
@@ -69,19 +85,22 @@ def main(gen_specific_AS=False):
     return h_ns, h_nn
         
 
-def genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
+def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
     # genAS -- Computes the RIRs in a rectangular cavity where sensors, speech
     # sources, and noise sources are present.
     # 
     # >>> Inputs:
     # -rd [3*1 (or 1*3) float array, m] - Room dimensions [x,y,z].
-    # -J [int, -] - # of sensors.
+    # -J [int, -] - # of nodes.
+    # -node [<Node> class object] - Node object containing # of sensors, array type, and inter-sensor distance.
     # -Ns [int, -] - # of desired sources.
     # -Nn [int, -] - # of noise sources.
     # -alpha [float, -] - Walls absorption coefficient (norm. inc.).
     # -RIR_l [int, #samples] - Length of RIRs to produce.
     # -Fs [float, Hz] - Sampling frequency.
     # -export [bool] - If true, export AS (RIRs + parameters) as .MAT.
+    # -random_coords [bool] - If true, use randomly-generated source/receiver positions.
+    #
     # >>> Outputs:
     # -h_sn [RIR_l*J*Ns (complex) float 3-D array, -] - RIRs between desired sources and sensors.  
     # -h_nn [RIR_l*J*Nn (complex) float 3-D array, -] - RIRs between noise sources and sensors.  
@@ -101,26 +120,28 @@ def genAS(rd,J,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
         rs = rs[:Ns,:]
         rn = rn[:Nn,:]
     
-    # ------------------ FIXED ARBITRARY ------------------
-    # rs = np.array([[1,2,3],])   # speech sources positions
-    # r = np.array([[0.1,0.1,0.1],])  # speech sources positions
-    # alpha = 0.5
-    # rd = np.array([5,6,7])
-    # -----------------------------------------------------
+    # Generate sensor arrays
+    M = J*node.Mk
+    r_sensors = np.zeros((M,3))
+    for ii in range(J):
+        r_sensors[ii*node.Mk:(ii+1)*node.Mk,:] = generate_array_pos(r[ii,:], node.Mk, node.array, node.mic_sep)
+
+    # Walls reflection coefficient  
+    R = -1*np.sqrt(1 - alpha)   
     
-    R = -1*np.sqrt(1 - alpha)   # Walls reflection coefficient
-    
-    h_sn = np.zeros((RIR_l, J, Ns))
+    # Compute RIRs from speech source to sensors
+    h_sn = np.zeros((RIR_l, M, Ns))
     for ii in range(Ns):
-        print('Computing RIRs from speech source #', ii+1, '...')
-        h_sn[:,:,ii] = rimPy(r, rs[ii,:], rd, R, RIR_l/Fs, Fs)
+        print('Computing RIRs from speech source #%i at %i sensors' % (ii+1, M))
+        h_sn[:,:,ii] = rimPy(r_sensors, rs[ii,:], rd, R, RIR_l/Fs, Fs)
     
-    h_nn = np.zeros((RIR_l, J, Nn))
+    # Compute RIRs from noise source to sensors
+    h_nn = np.zeros((RIR_l, M, Nn))
     for ii in range(Nn):
-        print('Computing RIRs from noise source #', ii+1, '...')
-        h_nn[:,:,ii] = rimPy(r, rn[ii,:], rd, R, RIR_l/Fs, Fs)
+        print('Computing RIRs from noise source #%i at %i sensors' % (ii+1, M))
+        h_nn[:,:,ii] = rimPy(r_sensors, rn[ii,:], rd, R, RIR_l/Fs, Fs)
     
-    return h_sn, h_nn, rs, rn, r
+    return h_sn, h_nn, rs, rn, r_sensors
     
 def export_data(h_sn, h_nn, header, rs, rn, r, fname):
 
@@ -135,7 +156,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     for ii in range(h_sn.shape[-1]):
         # Build dataframe for current matrix slice
         data_df_curr = pd.DataFrame(np.squeeze(h_sn[:,:,ii]),\
-            columns=['Node %i' % (idx+1) for idx in range(h_sn.shape[1])],\
+            columns=['Sensor %i' % (idx+1) for idx in range(h_sn.shape[1])],\
             index=['h_sn %i' % (ii+1) for idx in range(h_sn.shape[0])])
 
         # Concatenate to global dataframe
@@ -145,7 +166,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     for ii in range(h_nn.shape[-1]):
         # Build dataframe for current matrix slice
         data_df_curr = pd.DataFrame(np.squeeze(h_nn[:,:,ii]),\
-            columns=['Node %i' % (idx+1) for idx in range(h_nn.shape[1])],\
+            columns=['Sensor %i' % (idx+1) for idx in range(h_nn.shape[1])],\
             index=['h_nn %i' % (ii+1) for idx in range(h_nn.shape[0])])
 
         # Concatenate to global dataframe
@@ -162,7 +183,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
                 index=['Noise %i' % (idx+1) for idx in range(rn.shape[0])],\
                 columns=['x','y','z'])
     r_df = pd.DataFrame(r,\
-                index=['Node %i' % (idx+1) for idx in range(r.shape[0])],\
+                index=['Sensor %i' % (idx+1) for idx in range(r.shape[0])],\
                 columns=['x','y','z'])
 
     # Concatenate header + coordinates with rest of data
@@ -170,6 +191,31 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     big_df.to_csv(fname)
 
     print('Data exported to CSV: "%s"' % os.path.basename(fname))
+
+
+def generate_array_pos(r, Mk, array_type, min_d):
+    # Define node positions based on node position, number of nodes, and array type
+
+    if array_type == 'linear':
+        # 1D local geometry
+        x = np.linspace(start=0, stop=Mk*min_d, num=Mk)
+        # Center
+        x -= np.mean(x)
+        # Make 3D
+        r_sensors = np.zeros((3, Mk))
+        r_sensors[0,:] = x
+        
+        # Rotate in 3D through randomized rotation vector 
+        rotvec = np.random.uniform(low=0, high=1, size=(3,))
+        r_sensors_rot = np.zeros_like(r_sensors)
+        for ii in range(Mk):
+            myrot = rot.from_rotvec(np.pi/2 * rotvec)
+            r_sensors_rot[:,ii] = myrot.apply(r_sensors[:,ii]) + r
+    else:
+        raise ValueError('No sensor array geometry defined for array type "%s"' % array_type)
+
+    return r_sensors_rot
+
 
 def get_fixed_values():
 

@@ -56,17 +56,33 @@ def load_AS(fname, path_to, plot_AS=False):
     # Load dataframe
     AS = pd.read_csv(myfile,index_col=0)
 
-    # Extract data
-    rd = [f for f in AS.rd if not math.isnan(f)]            # room dimensions
-    alpha = [f for f in AS.alpha if not math.isnan(f)]      # absorption coefficient
-    alpha = alpha[1]
-    Fs = [f for f in AS.Fs if not math.isnan(f)]            # sampling frequency
-    Fs = int(Fs[1])
+    # Versioning check - new dataframe format as of 5/10/2021
+    flag_old_df = False
+    if not hasattr(AS, 'nNodes'):
+        flag_old_df = True
 
     # Count sources and receivers
-    Ns = sum('Source' in s for s in AS.index)
-    J = sum('Node' in s for s in AS.index)
-    Nn = sum('Noise' in s for s in AS.index)
+    Ns = sum('Source' in s for s in AS.index)       # number of speech sources
+    Nn = sum('Noise' in s for s in AS.index)        # number of noise sources
+    if flag_old_df:
+        M = sum('Node' in s for s in AS.index)        # number of sensors
+    else:
+        M = sum('Sensor' in s for s in AS.index)        # number of sensors
+
+    # Extract single-valued data
+    rd              = [f for f in AS.rd if not math.isnan(f)]               # room dimensions
+    alpha           = [f for f in AS.alpha if not math.isnan(f)]            # absorption coefficient
+    alpha           = alpha[1]
+    Fs              = [f for f in AS.Fs if not math.isnan(f)]               # sampling frequency
+    Fs              = int(Fs[1])
+    if flag_old_df:       # new dataframe format as of 5/10/2021
+        nNodes = M
+        d_intersensor = None
+    else:                           # old dataframe format
+        nNodes          = [f for f in AS.nNodes if not math.isnan(f)]           # number of nodes
+        nNodes          = int(nNodes[1])
+        d_intersensor   = [f for f in AS.d_intersensor if not math.isnan(f)]    # inter-sensor distance
+        d_intersensor  = int(d_intersensor[1])
 
     # Extract coordinates
     rs = np.zeros((Ns,3))
@@ -75,11 +91,17 @@ def load_AS(fname, path_to, plot_AS=False):
         rs[ii,1] = AS.y['Source ' + str(ii + 1)]
         rs[ii,2] = AS.z['Source ' + str(ii + 1)]
 
-    r = np.zeros((J,3))
-    for ii in range(J):
-        r[ii,0] = AS.x['Node ' + str(ii + 1)]
-        r[ii,1] = AS.y['Node ' + str(ii + 1)]
-        r[ii,2] = AS.z['Node ' + str(ii + 1)]
+    r = np.zeros((M,3))
+    if flag_old_df:
+        for ii in range(M):
+            r[ii,0] = AS.x['Node ' + str(ii + 1)]
+            r[ii,1] = AS.y['Node ' + str(ii + 1)]
+            r[ii,2] = AS.z['Node ' + str(ii + 1)]
+    else:
+        for ii in range(M):
+            r[ii,0] = AS.x['Sensor ' + str(ii + 1)]
+            r[ii,1] = AS.y['Sensor ' + str(ii + 1)]
+            r[ii,2] = AS.z['Sensor ' + str(ii + 1)]
 
     rn = np.zeros((Nn,3))
     for ii in range(Nn):
@@ -89,10 +111,13 @@ def load_AS(fname, path_to, plot_AS=False):
 
     # Extract RIRs
     RIR_length = int(1/Ns*sum('h_sn' in s for s in AS.index))    # number of samples in one RIR
-    h_sn = np.zeros((RIR_length,J,Ns))
-    h_nn = np.zeros((RIR_length,J,Nn))
-    for ii in range(J):
-        ASchunk = AS['Node ' + str(ii+1)]
+    h_sn = np.zeros((RIR_length,M,Ns))
+    h_nn = np.zeros((RIR_length,M,Nn))
+    for ii in range(M):
+        if flag_old_df:
+            ASchunk = AS['Node ' + str(ii+1)]
+        else:
+            ASchunk = AS['Sensor ' + str(ii+1)]
         for jj in range(Ns):
             h_sn[:,ii,jj] = ASchunk['h_sn ' + str(jj+1)].to_numpy()    # source-to-node RIRs
         for jj in range(Nn):
@@ -111,7 +136,7 @@ def load_AS(fname, path_to, plot_AS=False):
             p1 = ax.scatter(rs[ii,0],rs[ii,1],rs[ii,2],s=scatsize,c='blue',marker='d')
         for ii in range(Nn):
             p2 = ax.scatter(rn[ii,0],rn[ii,1],rn[ii,2],s=scatsize,c='red',marker='P')
-        for ii in range(J):
+        for ii in range(M):
             p3 = ax.scatter(r[ii,0],r[ii,1],r[ii,2],s=scatsize,c='green',marker='o')
         ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
             title='Acoustic scenario geometry ($\\alpha$ = %.2f)' % alpha)
@@ -119,7 +144,7 @@ def load_AS(fname, path_to, plot_AS=False):
         ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Node'])
         plt.show()
 
-    return h_sn,h_nn,rs,r,rn,rd,alpha,Fs,reftxt
+    return h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt
 
 
 def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals'):
@@ -187,17 +212,17 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                 #   -'distinct': the speakers may never speak simultaneously.
     
     # Load acoustic scenario
-    h_sn,h_nn,rs,r,rn,rd,alpha,Fs,reftxt = load_AS(ASref, path_to, plotAS)
+    h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS)
     print('Loading acoustic scenario: %.1fx%.1fx%.1f = %.1f m^3; alpha = %.2f...' % (rd[0],rd[1],rd[2],np.prod(rd),alpha))
     if alpha == 1:
         print('--> Fully anechoic scenario')
     print('\n')
 
     # Extract useful values
-    Ns = h_sn.shape[-1]            # number of speech sources
-    Nn = h_nn.shape[-1]            # number of noise sources
-    J = h_sn.shape[1]              # number of nodes
-    nmax = int(np.floor(Fs*Tmax))    # max number of samples in speech signal
+    Ns = h_sn.shape[-1]             # number of speech sources
+    Nn = h_nn.shape[-1]             # number of noise sources
+    M = h_sn.shape[1]               # number of sensors
+    nmax = int(np.floor(Fs*Tmax))   # max number of samples in speech signal
 
     # Check inputs
     if speech != '':
@@ -280,8 +305,8 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
             noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
             
     # Generate no-noise WET sensor signals ("desired signals" -- convolution w/ RIRs only)
-    ds = np.zeros((nmax,J))
-    for k in range(J):
+    ds = np.zeros((nmax,M))
+    for k in range(M):
         d_k = np.zeros(nmax)
         for ii in range(Ns):
             d_kk = scipy.signal.fftconvolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
@@ -289,8 +314,8 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         ds[:,k] = d_k
 
     # Generate no-speech WET sensor noise (convolution w/ RIRs only)
-    ny = np.zeros((nmax,J))
-    for k in range(J):
+    ny = np.zeros((nmax,M))
+    for k in range(M):
         n_k = np.zeros(nmax)
         for ii in range(Nn):
             n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
@@ -303,7 +328,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # Time vector
     t = np.arange(nmax)/Fs
 
-    return y,ds,ny,t,Fs,reftxt
+    return y,ds,ny,t,Fs,nNodes,reftxt
 
 
 def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
@@ -320,7 +345,7 @@ def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
     #
     # >>> Outputs:
     # -s_wp [L*Ns float matrix, -] - Output signal(s), with appropriate forced pauses.
-
+    
     # Extract parameters from inputs
     Ns = s.shape[1]                 # Number of speech sources
     Ns_p = int(Fs*pauseDur)         # Number of samples per in-between-speech pause
@@ -364,6 +389,7 @@ def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
         # Update the ending filling-in index
         idx_end += maxlenseg
         
+        # Build output signals
         if flagOverlap:
             for ii in range(Ns):
                 addition = np.concatenate((mysegs[ii], np.zeros(maxlenseg - len(mysegs[ii]))))
@@ -381,29 +407,6 @@ def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
                     addition = addition[:(s.shape[0] - idx_start)]
                 s_wp[idx_start:idx_end, ii] = addition
                 idx_start += len(addition) + Ns_p
-
-        # for ii in range(Ns):
-
-        #     pause_idx = pauses[ii]  # Current speech file's pauses indices
-            
-        #     idx_start = 0
-        #     idx_start_filler = 0
-        #     s_wp = np.zeros_like(s)
-        #     for ii in range(Np):
-        #         potential_pauses = [ii for ii in pause_idx if ii >= idx_start + Ns_ibp]
-        #         if len(potential_pauses) == 0:
-        #             pause_curr = pause_idx[-1]
-        #         else:
-        #             pause_curr = potential_pauses[0]
-        #         # Indices of the output vector to fill in
-        #         idx_tofill = np.arange(idx_start, pause_curr, dtype=int)
-        #         # Indices of input vector to be used during current iteration
-        #         idx_filler = np.arange(idx_start_filler, np.amin([len(s), idx_start_filler + len(idx_tofill)]), dtype=int)
-        #         # Fill in output vector
-        #         s_wp[idx_tofill] = s[idx_filler]  
-        #         # Increment for next iteration
-        #         idx_start = pause_curr + Ns_p
-        #         idx_start_filler += len(idx_tofill)
 
     return s_wp
 

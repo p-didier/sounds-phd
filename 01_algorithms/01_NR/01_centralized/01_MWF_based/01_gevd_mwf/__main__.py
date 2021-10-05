@@ -27,8 +27,8 @@ import playsounds.playsounds as ps
 # Global variables
 SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
 EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
-LISTEN_TO_MICS = 1  # If true, plays examples of target and raw mic signal
-SHOW_WAVEFORMS = 1  # If true, plots waveforms of target and raw mic signals
+LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
+SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
 LISTEN_OUTPUT = 1   # If true, plays enhanced and original signals
 
 
@@ -38,18 +38,18 @@ def run_script():
     speech_in = 'libri'         # name of speech signals library to be used
     noise_type = 'white'        # type of noise to be used
     multispeakers = 'overlap'   # option for multi-speakers speech signal generation
-    multispeakers = 'distinct'   # option for multi-speakers speech signal generation
+    # multispeakers = 'distinct'   # option for multi-speakers speech signal generation
                                 #   -'overlap': the speakers may speak simultaneously.
                                 #   -'distinct': the speakers may never speak simultaneously.
     #
-    Tmax = 10               # maximum signal duration [s]
-    baseSNR = 20            # SNR pre-RIR application [dB]
+    Tmax = 15               # maximum signal duration [s]
+    baseSNR = 10            # SNR pre-RIR application [dB]
     #
     pauseDur = 1            # duration of pauses in-between speech segments [s]
     pauseSpace = 1          # duration of speech segments (btw. pauses) [s]
     #
     useGEVD = True          # if True, use GEVD, do not otherwise
-    GEVDrank = 2
+    GEVDrank = 1
 
     # Exports
     # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\onesource_reverberant' % os.getcwd()
@@ -59,7 +59,7 @@ def run_script():
 
     # ----- Acoustic scenario + specific speech/noise signal(s) selection
     # ASref = 'J5_Ns1_Nn1\\AS9'       # acoustic scenario (if empty, random selection)
-    ASref = 'J5_Ns2_Nn3\\AS0'       # acoustic scenario (if empty, random selection)
+    ASref = 'J5_Ns1_Nn1\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = 'J5_Ns2_Nn3\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = 'testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = ''                    # acoustic scenario (if empty, random selection)
@@ -93,12 +93,12 @@ def run_script():
 
     # I) Generate microphone signals
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
-    y,ds,ny,t,Fs,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
+    y,ds,ny,t,Fs,J,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
                             pauseDur,pauseSpace,ASref,speech,noise,plotAS=False,ms=multispeakers)
     print('Microphone signals created using "%s"' % ASref)
 
     # Set useful data as variables
-    J = y.shape[-1]
+    M = y.shape[-1]
 
     # I.2) Checks on input parameters
     if not (Tmax*Fs/(L-R)).is_integer():

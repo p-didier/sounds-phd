@@ -61,7 +61,7 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     W_hat = np.repeat(W_hat[:, :, np.newaxis], nbins, axis=2)   # initiate filter weight estimates 
     nUpdatesRnn = np.zeros(nbins)                
     nUpdatesRyy = np.zeros(nbins)
-
+    #
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update 
 
@@ -104,16 +104,11 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
             # Update filter coefficients
             if updateWeights[kp]:
                 if useGEVD:
-                    if VAD_l[l]:
-                        # Perform generalized eigenvalue decomposition
-                        sig,vi = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
-                        q = np.linalg.pinv(vi.conj().T)
-                        # print(sig)
-                        # Sort eigenvalues in descending order
-                        Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q)
-                    else: 
-                        pass  # Do not do anything (keep previous-frame <Sigma_yy> and <Qmat>)
-
+                    # Perform generalized eigenvalue decomposition
+                    sig,Xmat = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                    q = np.linalg.pinv(Xmat.conj().T)     
+                    # Sort eigenvalues in descending order
+                    Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q)
                     W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
                 else:
                     W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
@@ -156,9 +151,6 @@ def update_w_GEVDMWF(S,Q,GEVDrank):
     sig_yy = np.diag(S)
     diagveig = np.ones(GEVDrank) - np.ones(GEVDrank) / sig_yy[:GEVDrank]   # rank <R> approximation
     diagveig = np.append(diagveig, np.zeros(S.shape[0] - GEVDrank))
-    # diagveig = np.array([1 - 1 / sig_yy[0],0,0,0,0])   # TMP - listening to each rank individually
-    # diagveig = np.array([0,1 - 1 / sig_yy[1],0,0,0])   # TMP - listening to each rank individually
-    # diagveig = np.array([0,0,1 - 1 / sig_yy[2],0,0])   # TMP - listening to each rank individually
     # LMMSE weights
     return np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
 
