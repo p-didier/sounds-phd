@@ -1,9 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-# from numba import jit
+from numba import jit
 # import time
 
-# @jit(nopython=True)
 def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # oracleVAD -- Oracle Voice Activity Detection (VAD) function. Returns the
     # oracle VAD for a given speech (+ background noise) signal <x>.
@@ -43,17 +42,7 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # Compute VAD
     oVAD = np.zeros(n)
     for ii in range(n):
-        if Nw == 1:
-            chunk_x = x[ii]
-        else:
-            chunk_x = x[np.arange(ii,int(min(ii+Nw, n)))]
-
-        # Compute short-term signal energy
-        E = np.mean(np.abs(chunk_x)**2)
-
-        # Assign VAD value
-        if E > thrs:
-            oVAD[ii] = 1
+        oVAD[ii] = compute_VAD(x,ii,Nw,thrs)
 
     # Time vector
     t = np.arange(n)/Fs
@@ -74,10 +63,104 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     return oVAD,t
 
 
-# @jit(nopython=True)
+def oracleSPP(X,plotSPP=False):
+    # oracleSPP -- Oracle Speech Presence Probability (SPP) computation.
+    # Returns the oracle SPP for a given speech STFT <X>.
+    #
+    # Based on implementation by R.Ali (2018) (itself based on implementation by T.Gerkmann (2011)).
+    #
+    # >>> Inputs:
+    # -X [Nf*Nt complex float matrix, -] - Signal STFT (onesided, freqbins x time frames) - SINGLE CHANNEL.
+    # -thrs [float, [<x>]^2] - Energy threshold.
+    # -plotSPP [bool] - If true, plots function output on a figure.
+    # >>> Outputs:
+    # -SPPout [Nf*Nt binary vector] - Oracle SPP corresponding to <X>.
+
+    # (c) Paul Didier - 6-Oct-2021
+    # SOUNDS ETN - KU Leuven ESAT STADIUS
+    # ------------------------------------
+
+    # Useful constants
+    nFrames = X.shape[1]
+
+    # Allocate memory
+    noisePowMat = np.zeros_like(X)
+    SPPout = np.zeros_like(X, dtype=float)
+
+    # Compute initial noise PSD estimate --> Assumes that the first 5 time-frames are noise-only.
+    noise_psd_init = np.mean(np.abs(X[:,:5])**2, 1)
+    noisePowMat[:,0] = noise_psd_init
+
+    # Parmeters
+    PH1mean  = 0.5
+    alphaPH1mean = 0.9
+    alphaPSD = 0.8
+
+    # constants for a posteriori SPP
+    q          = 0.5                    # a priori probability of speech presence
+    priorFact  = q/(1 - q)
+    xiOptDb    = 15                     # optimal fixed a priori SNR for SPP estimation
+    xiOpt      = 10**(xiOptDb/10)
+    logGLRFact = np.log(1/(1 + xiOpt))
+    GLRexp     = xiOpt/(1 + xiOpt)
+
+    for indFr in range(nFrames):  # All frequencies are kept in a vector
+
+        noisyDftFrame = X[:,indFr]
+        noisyPer = noisyDftFrame * noisyDftFrame.conj()
+        snrPost1 =  noisyPer / noise_psd_init  # a posteriori SNR based on old noise power estimate
+
+        # Noise power estimation
+        inside_exp = logGLRFact + GLRexp*snrPost1
+        inside_exp[inside_exp > 200] = 200
+        GLR     = priorFact * np.exp(inside_exp)
+        PH1     = GLR/(1 + GLR) # a posteriori speech presence probability
+        PH1mean  = alphaPH1mean * PH1mean + (1 - alphaPH1mean) * PH1
+        tmp = PH1[PH1mean > 0.99]
+        tmp[tmp > 0.99] = 0.99
+        PH1[PH1mean > 0.99] = tmp
+        estimate =  PH1 * noise_psd_init + (1 - PH1) * noisyPer 
+        noise_psd_init = alphaPSD * noise_psd_init + (1 - alphaPSD) * estimate
+        
+        SPPout[:,indFr] = np.real(PH1)    
+        noisePowMat[:,indFr] = noise_psd_init
+
+    if plotSPP:
+        fig, ax = plt.subplots()
+        ax.imshow(SPPout)
+        ax.invert_yaxis()
+        ax.set_aspect('auto')
+        ax.set(title='SPP')
+        ax.grid()
+        plt.show()
+    
+    return SPPout
+
+
+@jit(nopython=True)
+def compute_VAD(x,ii,Nw,thrs):
+    # JIT-ed time-domain VAD computation
+    #
+    # (c) Paul Didier - 6-Oct-2021
+    # SOUNDS ETN - KU Leuven ESAT STADIUS
+    # ------------------------------------
+    VADout = 0
+    chunk_x = np.zeros(int(Nw))
+    if Nw == 1:
+        chunk_x[0] = x[ii]
+    else:
+        chunk_x = x[np.arange(ii,int(min(ii+Nw, len(x))))]
+    # Compute short-term signal energy
+    E = np.mean(np.abs(chunk_x)**2)
+    # Assign VAD value
+    if E > thrs:
+        VADout = 1
+    return VADout
+
+
 def getSNR(Y,VAD,silent=False):
     # getSNR -- Sub-function for SNRest().
-
+    #
     # (c) Paul Didier - 14-Sept-2021
     # SOUNDS ETN - KU Leuven ESAT STADIUS
     # ------------------------------------
@@ -120,7 +203,6 @@ def getSNR(Y,VAD,silent=False):
     return SNR
 
 
-# @jit(nopython=True)
 def SNRest(Y,VAD):
     # SNRest -- Estimate SNR from time-domain or STFT-domain signal + VAD.
     #

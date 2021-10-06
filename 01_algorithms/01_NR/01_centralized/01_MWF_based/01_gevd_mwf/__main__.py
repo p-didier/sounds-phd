@@ -25,11 +25,11 @@ import playsounds.playsounds as ps
 # SOUNDS ETN - KU Leuven ESAT STADIUS
 
 # Global variables
-SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
-EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
+SAVEFIGS = 1        # If true, saves figures as PNG and PDF files
+EXPORTDATA = 1      # If true, exports I/O SNRs as CSV files
 LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
 SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
-LISTEN_OUTPUT = 1   # If true, plays enhanced and original signals
+LISTEN_OUTPUT = 0   # If true, plays enhanced and original signals
 
 
 def run_script():
@@ -49,18 +49,22 @@ def run_script():
     pauseSpace = 1          # duration of speech segments (btw. pauses) [s]
     #
     useGEVD = True          # if True, use GEVD, do not otherwise
-    GEVDrank = 1
+    GEVDrank = 2
 
     # Exports
     # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\onesource_reverberant' % os.getcwd()
     # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\onesource_anechoic' % os.getcwd()
-    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_GEVDrank1' % os.getcwd()
-    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_GEVDrank2' % os.getcwd()
+    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_anechoic\\GEVDrank1' % os.getcwd()
+    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_anechoic\\GEVDrank2' % os.getcwd()
+    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_reverberant\\GEVDrank1' % os.getcwd()
+    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\twosources_reverberant\\GEVDrank2' % os.getcwd()
 
     # ----- Acoustic scenario + specific speech/noise signal(s) selection
     # ASref = 'J5_Ns1_Nn1\\AS9'       # acoustic scenario (if empty, random selection)
-    ASref = 'J5_Ns1_Nn1\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
-    # ASref = 'J5_Ns2_Nn3\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
+    # ASref = 'J3Mk2_Ns1_Nn1\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
+    # ASref = 'J3Mk2_Ns1_Nn1\\AS1'       # acoustic scenario (if empty, random selection)
+    ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'       # acoustic scenario (if empty, random selection)
+    # ASref = 'J3Mk2_Ns2_Nn3\\AS3'       # acoustic scenario (if empty, random selection)
     # ASref = 'testAS_anechoic'       # acoustic scenario (if empty, random selection)
     # ASref = ''                    # acoustic scenario (if empty, random selection)
     # speech = ''                    # speech signals (if empty, random selection)
@@ -94,12 +98,15 @@ def run_script():
     # I) Generate microphone signals
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
     y,ds,ny,t,Fs,J,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
-                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=False,ms=multispeakers)
+                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=None,\
+                                plot_AS_dir='%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20210930meeting\\GIFs' % os.getcwd(),\
+                                    ms=multispeakers)
     print('Microphone signals created using "%s"' % ASref)
+
 
     # Set useful data as variables
     M = y.shape[-1]     # total number of sensors
-    Mk = M/J            # number of sensor(s) per node
+    Mk = M/J            # number of sensors per node
 
     # I.2) Checks on input parameters
     if not (Tmax*Fs/(L-R)).is_integer():
@@ -120,6 +127,10 @@ def run_script():
     ref_sensor = np.argmin(SNRy)
     Ymat = calcSTFT(y[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
     Ds = calcSTFT(ds[:,ref_sensor], Fs, win, L, R, 'onesided')[0]
+    Y_best_sensor = calcSTFT(y[:,np.argmax(SNRy)], Fs, win, L, R, 'onesided')[0]
+
+    # Get Speech Presence Probability
+    spp = VAD.oracleSPP(Y_best_sensor,plotSPP=True)
 
     if LISTEN_TO_MICS:
         # Listen
@@ -143,9 +154,9 @@ def run_script():
 
     # III) Compute (GEVD-)MWF 
     t0 = time.time()
-    D_hat = myMWF.MWF(y,Fs,win,L,R,myVAD,beta,min_cov_updates,useGEVD,GEVDrank)
+    D_hat = myMWF.MWF(y,Fs,win,L,R,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
     t1 = time.time()
-    print('Enhanced signals (%is x %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
+    print('Enhanced signals (%i s for %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)
     d_hat = calcISTFT(D_hat, win, L, R, 'onesided')
 
@@ -159,9 +170,9 @@ def run_script():
         scipy.io.wavfile.write('tmp_enhanced.wav',Fs,d_hat[:,sPbIdx])
 
     # IV) SNR improvement estimates
-    SNRd_hat = np.zeros(J)
-    SNRimp = np.zeros(J)
-    for k in range(J):
+    SNRd_hat = np.zeros(M)
+    SNRimp = np.zeros(M)
+    for k in range(M):
         SNRd_hat[k] = VAD.SNRest(d_hat[:,k],myVAD)
         SNRimp[k] = SNRd_hat[k] - SNRy[k]
 
@@ -257,8 +268,8 @@ def run_script():
         barw = 0.3
         fig, ax = plt.subplots()
         fig.set_size_inches(5, 3, forward=True)   # figure size
-        b1 = ax.bar(np.arange(1,J+1)-barw/2, height=SNRy, width=barw)
-        b2 = ax.bar(np.arange(1,J+1)+barw/2, height=SNRd_hat, width=barw)
+        b1 = ax.bar(np.arange(1,M+1)-barw/2, height=SNRy, width=barw)
+        b2 = ax.bar(np.arange(1,M+1)+barw/2, height=SNRd_hat, width=barw)
         plt.legend([b1,b2],['SNR($y_k$)','SNR($\hat{d}_k$)'])
         ax.set(title='Average SNR improvement: %.1f dB' % (np.round(np.mean(SNRimp),1)))
         
