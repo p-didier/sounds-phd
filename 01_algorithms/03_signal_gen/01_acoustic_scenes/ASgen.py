@@ -8,6 +8,7 @@ import pandas as pd
 import random
 from rimPy import rimPy
 from scipy.spatial.transform import Rotation as rot
+from pathlib import Path
 
 # Acoustic Scenario (AS) generation script.
 
@@ -20,17 +21,18 @@ class Node:
 
 def main(gen_specific_AS=False):
 
-    nAS = 1                    # Number of AS to generate
+    nAS = 5                    # Number of AS to generate
     Fs = 16e3                   # Sampling frequency [samples/s]
     RIR_l = 2**12               # RIR length [samples]
     minRd = 3                   # Smallest room dimension possible [m]
     maxRd = 7                   # Largest room dimension possible [m]
     #
-    Ns = 1                      # nr. of speech sources
-    Nn = 1                      # nr. of noise sources
+    Ns = 2                      # nr. of speech sources
+    Nn = 3                      # nr. of noise sources
     #
-    nNodes = 5                  # nr. of nodes
-    node = Node(3, 'linear', 0.1)
+    nNodes = 3                  # nr. of nodes
+    Mk = 2
+    node = Node(Mk, 'linear', 0.1)
     #
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
     T60min = 0.4*RIR_l/Fs   # Smallest possible T60
@@ -44,7 +46,7 @@ def main(gen_specific_AS=False):
         if gen_specific_AS:
             rd = get_fixed_values()[0]
             # T60 = 0.25
-            T60 = 0
+            T60 = 0.33
         else:
             rd = np.random.uniform(low=minRd, high=maxRd, size=(3,))    # Generate random room dimensions
             T60 = random.uniform(T60min, T60max)
@@ -62,12 +64,12 @@ def main(gen_specific_AS=False):
         # Export
         expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
         if gen_specific_AS:
-            fname = '%s\\J%i_Ns%i_Nn%i\\testAS' % (expfolder,nNodes,Ns,Nn)
+            fname = '%s\\J%iMk%i_Ns%i_Nn%i\\testAS' % (expfolder,nNodes,Mk,Ns,Nn)
             if alpha == 1:
                 fname += '_anechoic'
             fname += '.csv'
         else:
-            expfolder += '\\J%i_Ns%i_Nn%i' % (nNodes,Ns,Nn)
+            expfolder += '\\J%iMk%i_Ns%i_Nn%i' % (nNodes,Mk,Ns,Nn)
             if not os.path.isdir(expfolder):   # check if subfolder exists
                 os.mkdir(expfolder)   # if not, make directory
             nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
@@ -142,7 +144,8 @@ def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
         h_nn[:,:,ii] = rimPy(r_sensors, rn[ii,:], rd, R, RIR_l/Fs, Fs)
     
     return h_sn, h_nn, rs, rn, r_sensors
-    
+
+  
 def export_data(h_sn, h_nn, header, rs, rn, r, fname):
 
     # Check if export folder exists
@@ -191,6 +194,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     big_df.to_csv(fname)
 
     print('Data exported to CSV: "%s"' % os.path.basename(fname))
+    print('Find it in folder: %s' % str(Path(fname).parent))
 
 
 def generate_array_pos(r, Mk, array_type, min_d):
@@ -210,7 +214,7 @@ def generate_array_pos(r, Mk, array_type, min_d):
         r_sensors_rot = np.zeros_like(r_sensors)
         for ii in range(Mk):
             myrot = rot.from_rotvec(np.pi/2 * rotvec)
-            r_sensors_rot[ii,:] = myrot.apply(r_sensors[:,ii]) + r
+            r_sensors_rot[ii,:] = myrot.apply(r_sensors[ii,:]) + r
     else:
         raise ValueError('No sensor array geometry defined for array type "%s"' % array_type)
 
@@ -253,4 +257,4 @@ def get_fixed_values():
 
     return rd, r, rs, rn
 
-main(gen_specific_AS=1)
+main(gen_specific_AS = 1)

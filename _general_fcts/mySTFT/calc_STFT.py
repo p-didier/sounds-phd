@@ -61,6 +61,9 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
             elif sides == 'twosided':              
                 X[:,l,m] = X_frame
 
+    # Reduce dimension if m == 1
+    X = np.squeeze(X)
+
     return X,f
 
 

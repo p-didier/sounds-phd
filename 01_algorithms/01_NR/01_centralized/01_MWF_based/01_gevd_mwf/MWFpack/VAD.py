@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from numba import jit
-# import time
 
 def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # oracleVAD -- Oracle Voice Activity Detection (VAD) function. Returns the
@@ -204,13 +203,11 @@ def getSNR(Y,VAD,silent=False):
 
 
 def SNRest(Y,VAD):
-    # SNRest -- Estimate SNR from time-domain or STFT-domain signal + VAD.
+    # SNRest -- Estimate SNR from time-domain VAD.
     #
     # >>> Inputs:
-    # -Y [Nt*1 float vector /or/ Nf*Nt (complex) float matrix, - ] -
-    # Time-domain or STFT of signal.
-    # -VAD [Nt*1 binary vector /or/ Nf*Nt binary matrix] - Voice activity
-    # detector output (1 = speech present; 0 = speech absent).
+    # -Y [Nt*1 float vector /or/ Nf*J float matrix, - ] - Time-domain signal(s) | frames x channels.
+    # -VAD [Nt*1 binary vector] - Voice activity detector output (1 = speech present; 0 = speech absent).
     # >>> Outputs:
     # -SNR [float, dB] - Signal-to-Noise Ratio.
 
@@ -218,12 +215,13 @@ def SNRest(Y,VAD):
     # SOUNDS ETN - KU Leuven ESAT STADIUS
     # ------------------------------------
 
-    if len(Y.shape) > 1:   # if STFT format
-        SNR = np.zeros(Y.shape[0])
-        for k in range(Y.shape[0]):
-            SNR[k] = getSNR(Y[k,:], VAD[k,:])
-        SNR = np.mean(SNR[np.abs(SNR) != float('inf')])
-    else:                   # if time-domain format
-        SNR = getSNR(Y, VAD)
+    # Input format check
+    if Y.shape[1] > Y.shape[0]:
+        Y = Y.T
 
-    return SNR
+    nChannels = Y.shape[1]
+    SNRy = np.zeros(nChannels)
+    for ii in range(nChannels):
+        SNRy[ii] = getSNR(Y[:,ii], VAD)
+
+    return SNRy

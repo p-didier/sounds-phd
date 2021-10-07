@@ -1,6 +1,6 @@
 import random
 import numpy as np
-import os
+import os, time
 import random
 from numpy.core.defchararray import add
 import pandas as pd
@@ -8,16 +8,25 @@ import math
 from sklearn import preprocessing
 import soundfile as sf
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
+from mpl_toolkits.mplot3d import Axes3D
 import scipy.signal
 
-def load_AS(fname, path_to, plot_AS=False):
+def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
     # load_AS -- Loads an Acoustic Scenario (AS) from a CSV file.
     # CSV file creation done with <ASgen.py>.
     #
     # >>> Inputs:
     # -fname [string] - Name of CSV file (w/ or w/out ".csv" extension).
     # -path_to [string] - Relative or absolute path to AS files directory.
-    # -plot_AS [bool] - If True, shows the Acoustic Scenario's geometry in figure.
+    # -plot_AS [str or None] - Plot and export of the Acoustic Scenario's geometry as figure or GIF.
+                            # -None: Do not plot.
+                            # -'plot': Just plot, do not export.
+                            # -'PNG': Plot and export as PNG.
+                            # -'PDF': Plot and export as PDF.
+                            # -'GIF': Plot and export for GIF making (many rotated PNGs).
+    # -plot_AS_dir [str] - Directory where to export the plots (if asked).
+    #  
     # >>> Outputs:
     # -h_sn [N*J*Ns float matrix, - ] - Source-to-node RIRs. 
     # -h_nn [N*J*Nn float matrix, - ] - Noise-to-node RIRs. 
@@ -127,10 +136,10 @@ def load_AS(fname, path_to, plot_AS=False):
     reftxt = fname.replace('\\','_')[:-4]
 
     # Plot
-    if plot_AS:
+    if plot_AS is not None:
         scatsize = 20
         fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
+        ax = fig.add_subplot(111, projection=Axes3D.name)
         plot_room(ax, rd)
         for ii in range(Ns):
             p1 = ax.scatter(rs[ii,0],rs[ii,1],rs[ii,2],s=scatsize,c='blue',marker='d')
@@ -141,8 +150,25 @@ def load_AS(fname, path_to, plot_AS=False):
         ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
             title='Acoustic scenario geometry ($\\alpha$ = %.2f)' % alpha)
         ax.grid()
-        ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Node'])
-        plt.show()
+        set_axes_equal(ax)
+        exportname = 'AS_%s' % (reftxt)
+        if plot_AS_dir != '':
+            exportname = '%s\\%s' % (plot_AS_dir,exportname)
+        if plot_AS == 'PDF':
+            ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Sensor'], loc=1)
+            plt.savefig('%s.pdf' % exportname)
+        if plot_AS == 'PNG':
+            ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Sensor'], loc=1)
+            plt.show()
+            plt.savefig('%s.png' % exportname)
+        if plot_AS == 'GIF':
+            ax.set(title='')
+            angles = np.linspace(0, 360, 50)
+            for idx, angle in enumerate(angles):
+                ax.view_init(20, angle)
+                plt.savefig('%s_%i.png' % (exportname, int(idx)), bbox_inches='tight')
+                # plt.show()
+                stop = 1
 
     return h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt
 
@@ -191,7 +217,7 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
     return d, Fs
 
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=False,ms='overlap',SNR_in_uncorr=30):
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=None, plot_AS_dir='',ms='overlap',SNR_in_uncorr=30):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     #
@@ -206,14 +232,20 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # -ASref [str] - If not '', path to specific acoustic scenario (AS) to be used. Else, random AS is chosen. 
     # -speech [str /or/ list of str] - Path(s) to specific speech file(s) to be used.
     # -noise [str /or/ list of str] - Path(s) to specific noise file(s) to be used.
-    # -plotAS [bool] - If true, plot the AS's geometry (room + placement of nodes & sources).
+    # -plot_AS [str or None] - Plot and export of the Acoustic Scenario's geometry as figure or GIF.
+                            # -None: Do not plot.
+                            # -'plot': Just plot, do not export.
+                            # -'PNG': Plot and export as PNG.
+                            # -'PDF': Plot and export as PDF.
+                            # -'GIF': Plot and export for GIF making (many rotated PNGs).
+    # -plot_AS_dir [str] - Directory where to export the plots (if asked).
     # -ms [str] - Option for multi-speakers speech signal generation:
                 #   -'overlap': the speakers may speak simultaneously.
                 #   -'distinct': the speakers may never speak simultaneously.
     # -SNR_in_uncorr [float, dB] - Input SNR for microphone self-noise.
     
     # Load acoustic scenario
-    h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS)
+    h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS, plot_AS_dir)
     print('Loading acoustic scenario: %.1fx%.1fx%.1f = %.1f m^3; alpha = %.2f...' % (rd[0],rd[1],rd[2],np.prod(rd),alpha))
     if alpha == 1:
         print('--> Fully anechoic scenario')
@@ -367,22 +399,24 @@ def add_pauses(s,pauseDur,pauseSpace,Fs,ms='overlap'):
     Ns = s.shape[1]                 # Number of speech sources
     Ns_p = int(Fs*pauseDur)         # Number of samples per in-between-speech pause
     Ns_ibp = int(Fs*pauseSpace)     # Minimum number of samples between two consecutive pauses
-    Np = int(np.ceil(s.shape[0]/(Ns_p + Ns_ibp)))       # number of pauses, given the speech signal length
     flagOverlap = Ns == 1 or ms == 'overlap'
 
     # Segment signals
     segments = []
     for ii in range(Ns):
-        # Detect natural pauses in file
-        pauses = detect_pauses(s[:,ii], Fs)
-        # Cut-up files into speech segments at least <Ns_ibp> samples long
-        pauses_sep = [pauses[0]]
-        for p in pauses:
-            if p - pauses_sep[-1] >= Ns_ibp:
-                pauses_sep.append(p)        # Extract pause indices which ensures at least <Ns_ipb> samples in-between them
-        currsegments = [s[int(pauses_sep[jj-1]):int(pauses_sep[jj]), ii] for jj in range(1,len(pauses_sep))]
-        currsegments.append(s[int(pauses_sep[-1]):, ii])
-        segments.append(currsegments)
+        if pauseDur > 0:
+            # Detect natural pauses in file
+            pauses = detect_pauses(s[:,ii], Fs)
+            # Cut-up files into speech segments at least <Ns_ibp> samples long
+            pauses_sep = [pauses[0]]
+            for p in pauses:
+                if p - pauses_sep[-1] >= Ns_ibp:
+                    pauses_sep.append(p)        # Extract pause indices which ensures at least <Ns_ipb> samples in-between them
+            currsegments = [s[int(pauses_sep[jj-1]):int(pauses_sep[jj]), ii] for jj in range(1,len(pauses_sep))]
+            currsegments.append(s[int(pauses_sep[-1]):, ii])
+            segments.append(currsegments)
+        else:
+            segments.append([s[:,ii]])
 
     # Keep all segments safely copied
     segments_full = segments.copy()
@@ -456,6 +490,7 @@ def detect_pauses(s, Fs):
 
 
 def plot_room(ax, rd):
+
     # Plots the edges of a cuboid in 3D on the axes <ax>.
     
     ax.plot([0,rd[0]], [0,0], [0,0], 'k')
@@ -473,3 +508,31 @@ def plot_room(ax, rd):
     ax.plot([rd[0],rd[0]], [rd[1],rd[1]], [0,rd[2]], 'k')
 
     return None
+
+def set_axes_equal(ax):
+    '''Make axes of 3D plot have equal scale so that spheres appear as spheres,
+    cubes as cubes, etc..  This is one possible solution to Matplotlib's
+    ax.set_aspect('equal') and ax.axis('equal') not working for 3D.
+
+    Input
+      ax: a matplotlib axis, e.g., as output from plt.gca().
+    '''
+
+    x_limits = ax.get_xlim3d()
+    y_limits = ax.get_ylim3d()
+    z_limits = ax.get_zlim3d()
+
+    x_range = abs(x_limits[1] - x_limits[0])
+    x_middle = np.mean(x_limits)
+    y_range = abs(y_limits[1] - y_limits[0])
+    y_middle = np.mean(y_limits)
+    z_range = abs(z_limits[1] - z_limits[0])
+    z_middle = np.mean(z_limits)
+
+    # The plot bounding box is a sphere in the sense of the infinity
+    # norm, hence I call half the max range the plot radius.
+    plot_radius = 0.5*max([x_range, y_range, z_range])
+
+    ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])

@@ -8,7 +8,7 @@ import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT, calcISTFT
 
-def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
+def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5):
     # MWF -- Compute the standard MWF for a given set of sensor signals
     # capturing the same acoustic scenario from different locations (speech +
     # noise in rectangular, damped room), in the STFT domain, using WOLA. 
@@ -19,27 +19,30 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     # -win [L*1 float vector, -] - STFT window. 
     # -L [int, samples] - Length of individual STFT time frame.
     # -R [int, samples] - Overlap size between STFT time frames.
-    # -VAD [Nt*1 binary vector] - Voice Activity Detector.
+    # -voiceactivity [Nt*1 binary vector /or/ Nt*Nf matrix] - Voice Activity Detector or Speech Presence Probability.
     # -beta [float [[0,1]], -] - Covariance matrices exponential average constant.
     # -min_covUpdates [int, -] - Minimum # of covariance matrices updates
     #                            before first filter weights update.
     # -useGEVD [bool] - If true, use the GEVD, do not otherwise (standard MWF).
     # -GEVDrank [int, -] - GEVD rank approximation (default: 1).
+    # -SPP_thrs [float [[0,1]], -] - SPP threshold above which speech is considered present.
     # >>> Outputs:
-    # -d_hat [Nt*J (complex) float matrix, -] - Estimated desired signals. 
+    # -D_hat [Nt*Nf*J (complex) float tensor, -] - Estimated desired signals (STFT domain). 
 
     # (c) Paul Didier - 14-Sept-2021
     # SOUNDS ETN - KU Leuven ESAT STADIUS
     # ------------------------------------
 
-    # Number of frames needed to cover the whole signal
-    nframes = int(np.floor(y.shape[0]/(L-R))) - 1
-    nbins = int(L/2)+1
+    # Useful parameters
+    nframes = int(np.floor(y.shape[0]/(L-R))) - 1   # Number of necessary time frames to cover the whole signal
+    nbins = int(L/2)+1                              # Number of frequency bins
+    flagSPP = len(voiceactivity.shape) == 2         # Flag to know that we will be using a SPP and not a time-domain VAD
     
     # Compute STFT
     print('Computing STFTs of sensor observations with %i frames and %i bins...' % (nframes,nbins))    
     y_STFT = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
     # y2 = calcISTFT(y_STFT, win, L, R, 'onesided')  # Check ISTFT outcome
+    Ds = calcSTFT(desired, Fs, win, L, R, 'onesided')[0]
 
     print('Filtering sensor signals...\n\n')
 
@@ -64,31 +67,37 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
     #
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update 
+    #
+    # TEMPORARY
+    sig_export = np.zeros_like(D_hat)
 
     # Loop over time frames
     for l in range(nframes):
-        
-        t0 = time.time()
-        
-        # Time-frame samples' indices
-        idxChunk = np.arange(l*(L - R), np.amin([l*(L - R) + L, y.shape[0]]), dtype=int)
-        
-        # Current frame VAD (majority of speech-active or speech-inactive samples?)
-        VAD_l[l] = np.count_nonzero(VAD[idxChunk]) > len(idxChunk)/2
+        t0 = time.time()    
+
+        if not flagSPP:
+            # Time-frame samples' indices
+            idxChunk = np.arange(l*(L - R), np.amin([l*(L - R) + L, y.shape[0]]), dtype=int)
+            # Current frame VAD (majority of speech-active or speech-inactive samples?)
+            VAD_l[l] = np.count_nonzero(voiceactivity[idxChunk]) > len(idxChunk)/2
         
         # Loop over frequency bins
         for kp in range(nbins):
 
-            Ytf = np.squeeze(y_STFT[kp,l,:])
+            Ytf = np.squeeze(y_STFT[kp,l,:]) # Current TF bin
 
-            if VAD_l[l]:        # "speech + noise" time frame
+            # Speech activity detection (VAD (time-domain) or SPP (STFT-domain))
+            if not flagSPP:
+                speech_now = VAD_l[l]
+            else:
+                speech_now = voiceactivity[kp,l] >= SPP_thrs
+
+            if speech_now:        # "speech + noise" time frame
                 Ryy[:,:,kp] = expavg_covmat(np.squeeze(Ryy[:,:,kp]), beta, Ytf)
                 nUpdatesRyy[kp] += 1   
             else:                # "noise only" time frame
                 Rnn[:,:,kp] = expavg_covmat(np.squeeze(Rnn[:,:,kp]), beta, Ytf)
                 nUpdatesRnn[kp] += 1
-
-            # print('rank(Ryy) = %i; rank(Rnn) = %i' % (np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])), np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp]))))
 
             # ---- Check quality of covariance estimates ----
             if not updateWeights[kp]:
@@ -104,9 +113,10 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
                 if useGEVD:
                     # Perform generalized eigenvalue decomposition
                     sig,Xmat = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
-                    q = np.linalg.pinv(Xmat.conj().T)     
+                    q = np.linalg.pinv(Xmat.conj().T)
                     # Sort eigenvalues in descending order
-                    Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q)
+                    Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q) 
+                    sig_export[kp,l,:] = np.diag(Sigma_yy[:,:,kp])# TMP --------------
                     W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
                 else:
                     W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
@@ -122,6 +132,44 @@ def MWF(y,Fs,win,L,R,VAD,beta,min_covUpdates,useGEVD=False,GEVDrank=1):
             print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
 
     print('MW-filtering done.')
+
+    # # TEMPORARY
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2,3)
+    plottype = ''
+    # plottype = 'norm'
+    # tmp = np.std(sig_export, axis=-1)
+    for ii in range(6):
+        # Current subplot indexing
+        iax = int(np.ceil((ii+1)/3))-1
+        jax = ii % 3
+        # Plot
+        if plottype != 'norm':
+            tmp = np.real(sig_export[:,:,ii])
+            mapp = ax[iax,jax].imshow(20*np.log10(tmp), vmin=0, vmax=70)
+            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL [dB-scale]' % (ii+1))
+        else:
+            tmp = np.real(sig_export[:,:,ii]) / np.real(sig_export[:,:,0])
+            tmp[tmp == np.nan] = 0
+            mapp = ax[iax,jax].imshow(tmp, vmin=0, vmax=1)
+            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL' % (ii+1))
+        ax[iax,jax].invert_yaxis()
+        ax[iax,jax].set_aspect('auto')
+        # ax[iax,jax].grid()
+        fig.colorbar(mapp, ax=ax[iax,jax])
+        if ii > 2:
+            ax[iax,jax].set(xlabel='Frame index $l$')
+        if ii == 0 or ii == 3:
+            ax[iax,jax].set(ylabel='Freq. bin index $\kappa$')
+    if plottype != 'norm':
+        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs')
+    else:
+        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs, normalized to largest GEVL')
+    #     plt.savefig('GEVD_EVLs_norm.png')
+    #     plt.savefig('GEVD_EVLs.png')
+    plt.show()
+
+    stop = 1
 
     return D_hat
 
@@ -150,7 +198,8 @@ def update_w_GEVDMWF(S,Q,GEVDrank):
     diagveig = np.ones(GEVDrank) - np.ones(GEVDrank) / sig_yy[:GEVDrank]   # rank <R> approximation
     diagveig = np.append(diagveig, np.zeros(S.shape[0] - GEVDrank))
     # LMMSE weights
-    return np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
+    What = np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
+    return What
 
 @jit(nopython=True)
 def mygevd(A,B):
