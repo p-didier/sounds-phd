@@ -8,7 +8,6 @@ import math
 from sklearn import preprocessing
 import soundfile as sf
 import matplotlib.pyplot as plt
-from matplotlib.transforms import Bbox
 from mpl_toolkits.mplot3d import Axes3D
 import scipy.signal
 
@@ -159,7 +158,6 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
             plt.savefig('%s.pdf' % exportname)
         if plot_AS == 'PNG':
             ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Sensor'], loc=1)
-            plt.show()
             plt.savefig('%s.png' % exportname)
         if plot_AS == 'GIF':
             ax.set(title='')
@@ -198,6 +196,8 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
         foundit = False
         while not foundit:
             dir_files = os.listdir(datasetsPath + '\\' + dataset)
+            # Randomly shuffle the directories
+            dir_files = sorted(dir_files, key=lambda _: random.randint(0, 1))
             for currsubdir in dir_files:
                 ext = os.path.splitext(currsubdir)[1]   # get extension
                 if ext != '' and any(substring in ext for substring in ['.wav','.flac','.mp3']): # check whether current folder contains audio files
@@ -209,6 +209,8 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
                     
                     d, Fs = sf.read(datasetsPath + '\\' + dataset + '\\' + dir_files[idx])
                     foundit = True
+                    print('Loaded speech file "%s" from data set "%s"' % (dir_files[idx],dataset))
+                    break
                 elif os.path.isdir(datasetsPath + '\\' + dataset + '\\' + currsubdir):
                     dataset = dataset + '\\' + currsubdir
                     break

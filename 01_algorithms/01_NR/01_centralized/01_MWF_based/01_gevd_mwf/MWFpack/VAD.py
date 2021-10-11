@@ -216,8 +216,11 @@ def SNRest(Y,VAD):
     # ------------------------------------
 
     # Input format check
-    if Y.shape[1] > Y.shape[0]:
-        Y = Y.T
+    if len(Y.shape) == 2:
+        if Y.shape[1] > Y.shape[0]:
+            Y = Y.T
+    elif len(Y.shape) == 1:
+        Y = Y[:, np.newaxis] 
 
     nChannels = Y.shape[1]
     SNRy = np.zeros(nChannels)

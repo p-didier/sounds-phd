@@ -19,7 +19,7 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     #  
     #    RIMPY(mic_pos, source_pos, room_dim, beta, rir_length) gives the room
     #    impulse response where:
-    #    - mic_pos is the 3xM array with the position of M omnidirectional
+    #    - mic_pos is the Mx3 array with the position of M omnidirectional
     #    microphones [meters]. 
     #    - source_pos is the 3x1 array with the position of the omni sound
     #    source in [meters].
@@ -92,7 +92,11 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     M = mic_pos.shape[0]
 
     # Check that room dimensions are not too small
-    if any(np.linalg.norm(mic_pos,None,axis=1) > np.linalg.norm(room_dim)):
+    if len(mic_pos.shape) == 2:
+        condition = np.linalg.norm(mic_pos,None,axis=1) > np.linalg.norm(room_dim)
+    else:
+        condition = np.linalg.norm(mic_pos,None) > np.linalg.norm(room_dim)
+    if condition.any():
         raise ValueError("Some microphones are located outside the room")
     if np.linalg.norm(source_pos) > np.linalg.norm(room_dim):
         raise ValueError("Some sources are located outside the room")

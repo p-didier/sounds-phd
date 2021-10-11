@@ -6,7 +6,7 @@ import os
 from numpy.core.defchararray import array 
 import pandas as pd
 import random
-from rimPy import rimPy
+from rimPypack.rimPy import rimPy
 from scipy.spatial.transform import Rotation as rot
 from pathlib import Path
 

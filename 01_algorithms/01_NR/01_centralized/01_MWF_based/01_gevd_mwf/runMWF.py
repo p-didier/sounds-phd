@@ -13,7 +13,7 @@ import scipy.io.wavfile
 # Third party imports
 #
 # Local application imports
-from MWFpack import myMWF, sig_gen, VAD
+from MWFpack import myMWF, sig_gen, VAD, eval_enhancement
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT, calcISTFT
 import playsounds.playsounds as ps
@@ -25,11 +25,11 @@ import playsounds.playsounds as ps
 # SOUNDS ETN - KU Leuven ESAT STADIUS
 
 # Global variables
-SAVEFIGS = 1        # If true, saves figures as PNG and PDF files
-EXPORTDATA = 1      # If true, exports I/O SNRs as CSV files
+SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
+EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
 LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
 SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
-LISTEN_OUTPUT = 0   # If true, plays enhanced and original signals
+LISTEN_OUTPUT = 1   # If true, plays enhanced and original signals
 CWD = os.getcwd()
 PLOT_RESULTS = 1    # If true, plots speech enhancement results on figures (+ exports if SAVEFIGS) 
 
@@ -59,6 +59,7 @@ def main():
     exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20211007meeting\\onesource_anechoic' % CWD
     # ----- Acoustic scenario + specific speech/noise signal(s) selection (if empty, random selection) 
     ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
+    # ASref = 'J3Mk2_Ns2_Nn3\\testAS'      
     # Specific speech/noise files 
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'
@@ -99,6 +100,7 @@ def main():
     M = y.shape[-1]                 # total number of sensors
     Mk = M/J                        # number of sensors per node
     beta = 1 - (R_fft/(Fs*Tavg))    # Forgetting factor
+    # beta = 1 - 1/16e3    # Forgetting factor (TMP)
     # Check on input parameters
     if not (Tmax*Fs/(L_fft-R_fft)).is_integer():
         print('WARNING: the chosen <Tmax>=%is conflicts with the frame length <L_fft-R_fft>=%i\n' % (Tmax, L_fft-R_fft))
@@ -139,13 +141,16 @@ def main():
     print('Entering MWF routine...')
     t0 = time.time()
     if voicedetection == 'VAD':
-        D_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
+        D_hat, W_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
     elif voicedetection == 'SPP':
-        D_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold)
+        D_hat, W_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold)
     t1 = time.time()
     print('Enhanced signals (%i s for %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)
     d_hat = calcISTFT(D_hat, win, L_fft, R_fft, 'onesided')
+    # Zero-pad if needed to get the same output signal length
+    if d_hat.shape[0] < y.shape[0]:
+        d_hat = np.concatenate((d_hat, np.zeros((y.shape[0]-d_hat.shape[0], d_hat.shape[1]))), axis=0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if LISTEN_OUTPUT:
@@ -156,24 +161,21 @@ def main():
         print('Playing the enhanced signal for sensor #%i...' % (sPbIdx+1))
         ps.playthis(d_hat[:,sPbIdx], Fs)
 
-    # ~~~~~~~~~~~~~~~~~~ SNR improvements ~~~~~~~~~~~~~~~~~~~ 
-    SNRd_hat = np.zeros(M)
-    SNRimp = np.zeros(M)
-    for k in range(M):
-        SNRd_hat[k] = VAD.SNRest(d_hat[int(d_hat.shape[0]/2):,k],myVAD[int(d_hat.shape[0]/2):])
-        SNRimp[k] = SNRd_hat[k] - SNRy[k]
+    # ~~~~~~~~~~~~~~~~~~ Speech enhancement performance evaluation (metrics - <pysepm> module) ~~~~~~~~~~~~~~~~~~~ 
+    fwSNRseg_noisy,SNRseg_noisy,stoi_noisy = eval_enhancement.eval(ds, y, Fs)
+    fwSNRseg_enhanced,SNRseg_enhanced,stoi_enhanced = eval_enhancement.eval(ds, d_hat, Fs)
 
-    print('Raw sensor SNRs (time-domain only) [dB]')
-    print(SNRy)
-    print('Post-processed sensor SNRs (time-domain only) [dB]:')
-    print(SNRd_hat)
-    print('SNR improvements (time-domain only) (per sensor, in [dB]):')
-    print(SNRimp)
+    print('fwSNRseg improvement:')
+    print(fwSNRseg_enhanced - fwSNRseg_noisy)
+    print('SNRseg improvement:')
+    print(SNRseg_enhanced - SNRseg_noisy)
+    print('STOI improvement:')
+    print(stoi_enhanced - stoi_noisy)
 
-    if EXPORTDATA:
-        # Export SNRs in time domain
-        npa = np.stack((SNRy,SNRd_hat,SNRimp))
-        pd.DataFrame(npa, index=['y', 'dhat', 'imp']).to_csv('%s\\SNRs_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+    # if EXPORTDATA:
+    #     # Export SNRs in time domain
+    #     npa = np.stack((SNRy,SNRd_hat,SNRimp))
+    #     pd.DataFrame(npa, index=['y', 'dhat', 'imp']).to_csv('%s\\SNRs_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 
     # ----------------------------------------------------------------------------------------
@@ -196,7 +198,7 @@ def main():
         ax[0].invert_yaxis()
         ax[0].set_aspect('auto')
         ax[0].set(xlabel='$t$ [s]', ylabel='$f$ [kHz]',
-            title='$y_%i(t,f)$ - SNR = %.2fdB' % (ref_sensor+1, SNRy[ref_sensor]))
+            title='$y_%i(t,f)$ - STOI = %.2f' % (ref_sensor+1, stoi_noisy[ref_sensor]))
         ax[0].axes.yaxis.set_ticks(np.arange(0,Fs/2+1e3,1e3))
         ax[0].axes.yaxis.set_ticklabels([str(ii) for ii in np.arange(0,Fs/1e3/2 + 1)])
         fig.colorbar(mapp, ax=ax[0])
@@ -206,7 +208,7 @@ def main():
         ax[1].invert_yaxis()
         ax[1].set_aspect('auto')
         ax[1].set(xlabel='$t$ [s]',
-            title='$\hat{d}_%i(t,f)$ - SNR = %.2fdB' % (ref_sensor+1, SNRd_hat[ref_sensor]))
+            title='$\hat{d}_%i(t,f)$ - STOI = %.2f' % (ref_sensor+1, stoi_enhanced[ref_sensor]))
         ax[1].axes.yaxis.set_ticklabels([])
         fig.colorbar(mapp, ax=ax[1])
         # Raw microphone signal
@@ -218,7 +220,7 @@ def main():
         ax[2].axes.yaxis.set_ticklabels([])
         fig.colorbar(mapp, ax=ax[2])
 
-        plt.suptitle('Centralized MWF, sensor #%i (worst initial SNR) -- $\\beta$ = %2f -- SNR imp.: +%.2fdB' % (ref_sensor+1,beta,SNRimp[ref_sensor]))
+        plt.suptitle('Centralized MWF, sensor #%i (worst initial SNR) -- $\\beta$ = %2f -- STOI imp.: +%.2f' % (ref_sensor+1,beta,stoi_enhanced[ref_sensor] - stoi_noisy[ref_sensor]))
 
         if SAVEFIGS:
             if not os.path.isdir(exportDir):
@@ -229,23 +231,23 @@ def main():
 
         plt.show()
 
-        # Bar chart for SNR improvements at each sensor
-        barw = 0.3
-        fig, ax = plt.subplots()
-        fig.set_size_inches(5, 3, forward=True)   # figure size
-        b1 = ax.bar(np.arange(1,M+1)-barw/2, height=SNRy, width=barw)
-        b2 = ax.bar(np.arange(1,M+1)+barw/2, height=SNRd_hat, width=barw)
-        plt.legend([b1,b2],['SNR($y_k$)','SNR($\hat{d}_k$)'])
-        ax.set(title='Average SNR improvement: %.1f dB' % (np.round(np.mean(SNRimp),1)))
+        # # Bar chart for SNR improvements at each sensor
+        # barw = 0.3
+        # fig, ax = plt.subplots()
+        # fig.set_size_inches(5, 3, forward=True)   # figure size
+        # b1 = ax.bar(np.arange(1,M+1)-barw/2, height=SNRy, width=barw)
+        # b2 = ax.bar(np.arange(1,M+1)+barw/2, height=SNRd_hat, width=barw)
+        # plt.legend([b1,b2],['SNR($y_k$)','SNR($\hat{d}_k$)'])
+        # ax.set(title='Average SNR improvement: %.1f dB' % (np.round(np.mean(SNRimp),1)))
         
-        if SAVEFIGS:
-            if not os.path.isdir(exportDir):
-                os.mkdir(exportDir)
-                time.sleep(0.1)
-            plt.savefig('%s\\barchart_%ip_ev%i_%s.pdf' % (exportDir,pauseDur,pauseSpace,reftxt))
-            plt.savefig('%s\\barchart_%ip_ev%i_%s.png' % (exportDir,pauseDur,pauseSpace,reftxt))
+        # if SAVEFIGS:
+        #     if not os.path.isdir(exportDir):
+        #         os.mkdir(exportDir)
+        #         time.sleep(0.1)
+        #     plt.savefig('%s\\barchart_%ip_ev%i_%s.pdf' % (exportDir,pauseDur,pauseSpace,reftxt))
+        #     plt.savefig('%s\\barchart_%ip_ev%i_%s.png' % (exportDir,pauseDur,pauseSpace,reftxt))
 
-        plt.show()
+        # plt.show()
 
     return None
 
@@ -254,4 +256,4 @@ def main():
 # ------------------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    sys.exit(main())  # next section explains the use of sys.exit
+    sys.exit(main())

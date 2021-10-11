@@ -124,9 +124,6 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
             # Desired signal estimates for each node separately (last dimension of <D_hat>)
             D_hat[kp,l,:] = np.squeeze(W_hat[:,:,kp]).conj().T @ Ytf
 
-            # # Get output SNR for current TF-bin
-            # snrout = SNRout(np.squeeze(W_hat[:,:,kp]), np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))
-
         t1 = time.time()
         if l % 10 == 0:
             print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
@@ -134,44 +131,44 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     print('MW-filtering done.')
 
     # # TEMPORARY
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(2,3)
-    plottype = ''
-    # plottype = 'norm'
-    # tmp = np.std(sig_export, axis=-1)
-    for ii in range(6):
-        # Current subplot indexing
-        iax = int(np.ceil((ii+1)/3))-1
-        jax = ii % 3
-        # Plot
-        if plottype != 'norm':
-            tmp = np.real(sig_export[:,:,ii])
-            mapp = ax[iax,jax].imshow(20*np.log10(tmp), vmin=0, vmax=70)
-            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL [dB-scale]' % (ii+1))
-        else:
-            tmp = np.real(sig_export[:,:,ii]) / np.real(sig_export[:,:,0])
-            tmp[tmp == np.nan] = 0
-            mapp = ax[iax,jax].imshow(tmp, vmin=0, vmax=1)
-            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL' % (ii+1))
-        ax[iax,jax].invert_yaxis()
-        ax[iax,jax].set_aspect('auto')
-        # ax[iax,jax].grid()
-        fig.colorbar(mapp, ax=ax[iax,jax])
-        if ii > 2:
-            ax[iax,jax].set(xlabel='Frame index $l$')
-        if ii == 0 or ii == 3:
-            ax[iax,jax].set(ylabel='Freq. bin index $\kappa$')
-    if plottype != 'norm':
-        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs')
-    else:
-        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs, normalized to largest GEVL')
-    #     plt.savefig('GEVD_EVLs_norm.png')
-    #     plt.savefig('GEVD_EVLs.png')
-    plt.show()
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(2,3)
+    # plottype = ''
+    # # plottype = 'norm'
+    # # tmp = np.std(sig_export, axis=-1)
+    # for ii in range(6):
+    #     # Current subplot indexing
+    #     iax = int(np.ceil((ii+1)/3))-1
+    #     jax = ii % 3
+    #     # Plot
+    #     if plottype != 'norm':
+    #         tmp = np.real(sig_export[:,:,ii])
+    #         mapp = ax[iax,jax].imshow(20*np.log10(tmp), vmin=0, vmax=70)
+    #         ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL [dB-scale]' % (ii+1))
+    #     else:
+    #         tmp = np.real(sig_export[:,:,ii]) / np.real(sig_export[:,:,0])
+    #         tmp[tmp == np.nan] = 0
+    #         mapp = ax[iax,jax].imshow(tmp, vmin=0, vmax=1)
+    #         ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL' % (ii+1))
+    #     ax[iax,jax].invert_yaxis()
+    #     ax[iax,jax].set_aspect('auto')
+    #     # ax[iax,jax].grid()
+    #     fig.colorbar(mapp, ax=ax[iax,jax])
+    #     if ii > 2:
+    #         ax[iax,jax].set(xlabel='Frame index $l$')
+    #     if ii == 0 or ii == 3:
+    #         ax[iax,jax].set(ylabel='Freq. bin index $\kappa$')
+    # if plottype != 'norm':
+    #     plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs')
+    # else:
+    #     plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs, normalized to largest GEVL')
+    # #     plt.savefig('GEVD_EVLs_norm.png')
+    # #     plt.savefig('GEVD_EVLs.png')
+    # plt.show()
 
     stop = 1
 
-    return D_hat
+    return D_hat, W_hat
 
 def SNRout(w,Rxx,Rnn):
     # Derives output SNR for current TF-bin (see equation 2.59 in Randy's thesis)
