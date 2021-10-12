@@ -1,15 +1,10 @@
 # Standard library imports
-from operator import index, xor
 import numpy as np
 import os, time, sys
-from numpy.core.defchararray import title
-import scipy.signal as sig
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['text.usetex'] = False
 import scipy.signal as sig
-import pandas as pd
-import scipy.io.wavfile
 # Third party imports
 #
 # Local application imports
@@ -29,7 +24,7 @@ SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
 EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
 LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
 SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
-LISTEN_OUTPUT = 1   # If true, plays enhanced and original signals
+LISTEN_OUTPUT = 0   # If true, plays enhanced and original signals
 CWD = os.getcwd()
 PLOT_RESULTS = 1    # If true, plots speech enhancement results on figures (+ exports if SAVEFIGS) 
 
@@ -45,7 +40,7 @@ def main():
                                 #   -'distinct': the speakers may never speak simultaneously.
     voicedetection = 'VAD'      # type of voice activity detection mechanism to use (VAD or SPP)
     #
-    Tmax = 15               # maximum signal duration [s]
+    Tmax = 1               # maximum signal duration [s]
     baseSNR = 10            # SNR pre-RIR application [dB]
     #
     pauseDur = 0            # duration of pauses in-between speech segments [s]
@@ -89,7 +84,7 @@ def main():
 
     # ~~~~~~~~~~~~~~~~~~ Generate signals ~~~~~~~~~~~~~~~~~~~
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
-    y,ds,ny,t,Fs,J,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
+    y,ds,ny,t,Fs,J,rd,r,rs,rn,alpha,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
                                             pauseDur,pauseSpace,ASref,speech,noise,plotAS=None,\
                                             plot_AS_dir='%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20211007meeting\\GIFs\\onesource' % CWD,\
                                             ms=multispeakers)
@@ -141,9 +136,9 @@ def main():
     print('Entering MWF routine...')
     t0 = time.time()
     if voicedetection == 'VAD':
-        D_hat, W_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
     elif voicedetection == 'SPP':
-        D_hat, W_hat = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold)
     t1 = time.time()
     print('Enhanced signals (%i s for %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)
@@ -177,6 +172,10 @@ def main():
     #     npa = np.stack((SNRy,SNRd_hat,SNRimp))
     #     pd.DataFrame(npa, index=['y', 'dhat', 'imp']).to_csv('%s\\SNRs_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+
+
+    # ~~~~~~~~~~~~~~~~~~ MWF SPATIAL EFFECT ~~~~~~~~~~~~~~~~~~~ 
+    myMWF.spatial_visu_MWF(W_hat, freqs, rd, alpha, r, Fs, win, L_fft, R_fft, targetSources=rs, noiseSources=rn)
 
     # ----------------------------------------------------------------------------------------
     # -------------------------------------- PLOTTING --------------------------------------

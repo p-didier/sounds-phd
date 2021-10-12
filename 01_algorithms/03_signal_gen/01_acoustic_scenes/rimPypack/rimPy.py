@@ -1,5 +1,4 @@
 import numpy as np
-import random
 import math
 import itertools
 import matplotlib.pyplot as plt
@@ -48,7 +47,7 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     #    Transactions on Audio, Speech and Language Processing (TASLP) 23.4 
     #    (2015): 774-786.
     # 
-    #    Author: Paul Didier (paul.didier AT kuleuven DOT be).
+    #    Author: Paul Didier (paul.didier AT kuleuven DOT be) - Adapted from MATLAB script by E. De Sena.
     
     # Default input arguments
     if Tw is None:

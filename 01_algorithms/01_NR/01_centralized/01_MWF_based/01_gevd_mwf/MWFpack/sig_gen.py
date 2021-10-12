@@ -360,7 +360,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # Time vector
     t = np.arange(nmax)/Fs
 
-    return y,ds,ny,t,Fs,nNodes,reftxt
+    return y,ds,ny,t,Fs,nNodes,rd,r,rs,rn,alpha,reftxt
 
 
 def add_selfnoise(y, SNR):

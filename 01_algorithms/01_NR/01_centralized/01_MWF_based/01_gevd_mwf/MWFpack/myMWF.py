@@ -5,8 +5,13 @@ import scipy
 import time
 from numba import jit
 import sys, os
+from sklearn import preprocessing
+import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
-from mySTFT.calc_STFT import calcSTFT, calcISTFT
+from mySTFT.calc_STFT import calcSTFT
+from utilities.terminal import loop_progress
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\03_signal_gen\\01_acoustic_scenes')))
+from rimPypack.rimPy import rimPy
 
 def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5):
     # MWF -- Compute the standard MWF for a given set of sensor signals
@@ -40,9 +45,7 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     
     # Compute STFT
     print('Computing STFTs of sensor observations with %i frames and %i bins...' % (nframes,nbins))    
-    y_STFT = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
-    # y2 = calcISTFT(y_STFT, win, L, R, 'onesided')  # Check ISTFT outcome
-    Ds = calcSTFT(desired, Fs, win, L, R, 'onesided')[0]
+    y_STFT, freqs = calcSTFT(y, Fs, win, L, R, 'onesided')
 
     print('Filtering sensor signals...\n\n')
 
@@ -168,7 +171,7 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
 
     stop = 1
 
-    return D_hat, W_hat
+    return D_hat, W_hat, freqs
 
 def SNRout(w,Rxx,Rnn):
     # Derives output SNR for current TF-bin (see equation 2.59 in Randy's thesis)
@@ -245,24 +248,116 @@ def sortgevd(S,Q,order='descending'):
     return S_sorted,Q_sorted
 
 
-# TEMPORARY FUNCTIONS
-def compare_cols(A,B):
+def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSources=None):
+    # Compute the MWF output as function of frequency and spatial location.
 
-    # Check inputs format
-    if not all(len (row) == len (A) for row in A):
-        raise ValueError('First argument must be a square matrix')
-    if not all(len (row) == len (B) for row in B):
-        raise ValueError('Second argument must be a square matrix')
-
-    nCols = A.shape[1]
-    idx = np.zeros(nCols, dtype=int)
-    for ii in range(nCols):
-        mycol = A[:,ii]
-
-        dist_to_B = np.zeros(nCols)
-        for jj in range(nCols):
-            dist_to_B[jj] = np.linalg.norm(mycol - B[:,jj])
+    # Check inputs
+    if len(W.shape) == 2:
+        if len(freqs) > 1:
+            raise ValueError('The frequency vector should contain as many elements as the -1 dimension of <W>')
+        W = W[:, :, np.newaxis]    # Single frequency bin case
+    if W.shape[-1] != len(freqs):
+        raise ValueError('The frequency vector should contain as many elements as the -1 dimension of <W>')
         
-        idx[ii] = np.argmin(dist_to_B)
+    # ------------- HARD CODED PARAMETERS -------------
+    # RIR generation parameters
+    rir_dur = 2**10 / Fs                # Duration [s]
+    refCoeff = -1*np.sqrt(1 - alpha)    # Reflection coefficient 
+    # Signal duration
+    Tsig = 0.5        # [s]
+    # Mesh
+    gridres = 0.25   # Grid spatial resolution [m]
+    # -------------------------------------------------
 
-    return idx
+    # Gridify room or room-slice
+    x_ = np.linspace(0,rd[0],num=int(np.round(rd[0]/gridres)))
+    y_ = np.linspace(0,rd[1],num=int(np.round(rd[1]/gridres)))
+    if targetSources is not None:
+        z_ = targetSources[:,-1]  # Set the z-coordinates of the target sources as slice heights
+        z_ = z_[:,np.newaxis]
+        print('%.1f x %.1f x %.1f m^3 room gridified by slices every %.1f m,\nresulting in %i possible source locations on %i 2D planes.' % (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_),len(z_)))
+    else:
+        z_ = np.linspace(0,rd[2],num=int(np.round(rd[2]/gridres)))
+        print('%.1f x %.1f x %.1f m^3 room gridified every %.1f m,\nresulting in %i possible source locations across the 3D space.' % (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_)))
+    xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
+
+    # Make raw signal
+    raw = np.random.uniform(low=-1.0, high=1.0, size=(int(Tsig*Fs),))
+    raw = preprocessing.scale(raw)   # normalize
+    raw = raw[:, np.newaxis]       # make 2-dimensional
+
+    # Loop over grid points
+    magout = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],len(freqs),r.shape[0]))      # Full volume
+
+    for ii in range(xx.shape[0]):
+        for jj in range(xx.shape[1]):
+            for kk in range(xx.shape[2]):
+                # Source location (grid point)
+                r0 = [xx[ii,jj,kk], yy[ii,jj,kk], zz[ii,jj,kk]]
+                # Compute filter output energy
+                magout[ii,jj,kk,:,:] = compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W)
+                # Monitor loop
+                progress_percent = loop_progress([ii,jj,kk],xx.shape)
+                print('Computing filter output energy for source at (%.1f,%.1f,%.1f) in room [%i%% done]...' % (r0[0],r0[1],r0[2],progress_percent))
+
+    # PLOT PLOT PLOT
+    plotsensor = 2
+    plotfreq = 200
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    if targetSources is not None:       # Slice
+        for ii in range(magout.shape[2]):
+            ax.contourf(xx[:,:,ii], yy[:,:,ii], magout[:,:,ii,plotfreq,plotsensor]/np.amax(magout[:,:,:,plotfreq,plotsensor]), offset=z_[ii], zdir='z', alpha=0.5)
+        for ii in range(targetSources.shape[0]):
+            ax.scatter(targetSources[ii,0],targetSources[ii,1],targetSources[ii,2],c='blue')
+        for ii in range(noiseSources.shape[0]):
+            ax.scatter(noiseSources[ii,0],noiseSources[ii,1],noiseSources[ii,2],c='red')
+        for ii in range(r.shape[0]):
+            ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='green')
+    else:                               # Full volume
+        for ii in range(xx.shape[0]):
+            for jj in range(xx.shape[1]):
+                for kk in range(xx.shape[2]):
+                    ax.scatter(xx[ii,jj,kk], yy[ii,jj,kk], zz[ii,jj,kk], c=str(magout[ii,jj,kk,plotfreq,plotsensor]/np.amax(magout[:,:,:,plotfreq,plotsensor])), marker="o")
+        for ii in range(r.shape[0]):
+            ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='red')
+    ax.set(title='f = %.1f Hz' % freqs[plotfreq])
+    #
+    plt.show()
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.plot(freqs,magout[2,2,2,:,plotsensor])
+
+    return 0
+
+
+def compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W):
+    # Compute MWF filter output energy for a certain combination of source/receivers positions. 
+
+    # Get transfer functions
+    h = rimPy(r, r0, rd, refCoeff, rir_dur, Fs)
+
+    # Generate sensors signal 
+    y = sig.fftconvolve(raw, h, axes=0)
+
+    # Get STFT
+    y_STFT = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
+    y_FFT = np.fft.fft(y, axis=0)
+
+    # fig, ax = plt.subplots()
+    # ax.plot(20*np.log10(np.abs(y_FFT[:,0])))
+    # ax.grid()
+    # plt.show()
+
+    # Apply filter to each TF bin
+    magout = np.zeros((y_STFT.shape[0], y_STFT.shape[2]))
+    for kp in range(y_STFT.shape[0]):
+        z_kp = np.zeros((y_STFT.shape[1],y_STFT.shape[2]), dtype=complex)
+        for l in range(y_STFT.shape[1]):
+            datacurr = np.squeeze(y_STFT[kp,l,:])    
+            z_kp[l,:] = np.squeeze(W[:,:,kp]).conj().T @ datacurr
+        # Get time-averaged filter-output magnitude
+        magout[kp,:] = np.mean(np.abs(z_kp)**2, axis=0)
+        
+    return magout
