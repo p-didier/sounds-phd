@@ -1,19 +1,26 @@
+import pathlib
 import numpy as np
-from numpy.lib.shape_base import column_stack
 import scipy.signal as sig
 import scipy
 import time
-from numba import jit
+from numba import njit
 import sys, os
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
+from PIL import Image
+import glob
+from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT
 from utilities.terminal import loop_progress
+from plotting.threedim import plot_room, set_axes_equal
+from playsounds.playsounds import playthis
+from plotting.exports import makegif
+from general.frequency import noctfr
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\03_signal_gen\\01_acoustic_scenes')))
 from rimPypack.rimPy import rimPy
 
-def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5):
+def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5,exact=False):
     # MWF -- Compute the standard MWF for a given set of sensor signals
     # capturing the same acoustic scenario from different locations (speech +
     # noise in rectangular, damped room), in the STFT domain, using WOLA. 
@@ -31,6 +38,7 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     # -useGEVD [bool] - If true, use the GEVD, do not otherwise (standard MWF).
     # -GEVDrank [int, -] - GEVD rank approximation (default: 1).
     # -SPP_thrs [float [[0,1]], -] - SPP threshold above which speech is considered present.
+    # -exact [bool] - If true, use the exact MWF with the true covariance matrices, not their approximations (overrides everything else).
     # >>> Outputs:
     # -D_hat [Nt*Nf*J (complex) float tensor, -] - Estimated desired signals (STFT domain). 
 
@@ -46,6 +54,8 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     # Compute STFT
     print('Computing STFTs of sensor observations with %i frames and %i bins...' % (nframes,nbins))    
     y_STFT, freqs = calcSTFT(y, Fs, win, L, R, 'onesided')
+    if desired is not None:
+        d_STFT = calcSTFT(desired, Fs, win, L, R, 'onesided')[0]
 
     print('Filtering sensor signals...\n\n')
 
@@ -69,67 +79,70 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     nUpdatesRyy = np.zeros(nbins)
     #
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
-    updateWeights = np.zeros(nbins)    # flag to know whether or not to update 
-    #
-    # TEMPORARY
-    sig_export = np.zeros_like(D_hat)
-
-    # Loop over time frames
-    for l in range(nframes):
-        t0 = time.time()    
-
-        if not flagSPP:
-            # Time-frame samples' indices
-            idxChunk = np.arange(l*(L - R), np.amin([l*(L - R) + L, y.shape[0]]), dtype=int)
-            # Current frame VAD (majority of speech-active or speech-inactive samples?)
-            VAD_l[l] = np.count_nonzero(voiceactivity[idxChunk]) > len(idxChunk)/2
-        
-        # Loop over frequency bins
+    updateWeights = np.zeros(nbins)    # flag to know whether or not to update
+    
+    if exact:
+        if desired is None:
+            raise ValueError('Cannot compute exact MWF without knowledge of the desired signal.')
         for kp in range(nbins):
+            print('Using the given desired signal to compute the exact MWF - bin %i/%i.' % (kp+1, nbins))
+            D_hat[kp,:,:], W_hat[:,:,kp] = get_exact_MWF(y_STFT[kp,:,:], d_STFT[kp,:,:])
+    else:
+        # Loop over time frames
+        for l in range(nframes):
+            t0 = time.time()    
 
-            Ytf = np.squeeze(y_STFT[kp,l,:]) # Current TF bin
-
-            # Speech activity detection (VAD (time-domain) or SPP (STFT-domain))
             if not flagSPP:
-                speech_now = VAD_l[l]
-            else:
-                speech_now = voiceactivity[kp,l] >= SPP_thrs
+                # Time-frame samples' indices
+                idxChunk = np.arange(l*(L - R), np.amin([l*(L - R) + L, y.shape[0]]), dtype=int)
+                # Current frame VAD (majority of speech-active or speech-inactive samples?)
+                VAD_l[l] = np.count_nonzero(voiceactivity[idxChunk]) > len(idxChunk)/2
+            
+            # Loop over frequency bins
+            for kp in range(nbins):
 
-            if speech_now:        # "speech + noise" time frame
-                Ryy[:,:,kp] = expavg_covmat(np.squeeze(Ryy[:,:,kp]), beta, Ytf)
-                nUpdatesRyy[kp] += 1   
-            else:                # "noise only" time frame
-                Rnn[:,:,kp] = expavg_covmat(np.squeeze(Rnn[:,:,kp]), beta, Ytf)
-                nUpdatesRnn[kp] += 1
-
-            # ---- Check quality of covariance estimates ----
-            if not updateWeights[kp]:
-                # Check #1 - Need full rank covariance matrices
-                if np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])) == nNodes and\
-                    np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp])) == nNodes:
-                    # Check #2 - Must have had a min. # of updates on each matrix
-                    if nUpdatesRyy[kp] >= min_covUpdates and nUpdatesRnn[kp] >= min_covUpdates:
-                        updateWeights[kp] = True
-
-            # Update filter coefficients
-            if updateWeights[kp]:
-                if useGEVD:
-                    # Perform generalized eigenvalue decomposition
-                    sig,Xmat = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
-                    q = np.linalg.pinv(Xmat.conj().T)
-                    # Sort eigenvalues in descending order
-                    Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q) 
-                    sig_export[kp,l,:] = np.diag(Sigma_yy[:,:,kp])# TMP --------------
-                    W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
+                Ytf = np.squeeze(y_STFT[kp,l,:]) # Current TF bin
+                
+                # Speech activity detection (VAD (time-domain) or SPP (STFT-domain))
+                if not flagSPP:
+                    speech_now = VAD_l[l]
                 else:
-                    W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
+                    speech_now = voiceactivity[kp,l] >= SPP_thrs
 
-            # Desired signal estimates for each node separately (last dimension of <D_hat>)
-            D_hat[kp,l,:] = np.squeeze(W_hat[:,:,kp]).conj().T @ Ytf
+                if speech_now:        # "speech + noise" time frame
+                    Ryy[:,:,kp] = expavg_covmat(np.squeeze(Ryy[:,:,kp]), beta, Ytf)
+                    nUpdatesRyy[kp] += 1   
+                else:                # "noise only" time frame
+                    Rnn[:,:,kp] = expavg_covmat(np.squeeze(Rnn[:,:,kp]), beta, Ytf)
+                    nUpdatesRnn[kp] += 1
 
-        t1 = time.time()
-        if l % 10 == 0:
-            print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
+                # ---- Check quality of covariance estimates ----
+                if not updateWeights[kp]:
+                    # Check #1 - Need full rank covariance matrices
+                    if np.linalg.matrix_rank(np.squeeze(Ryy[:,:,kp])) == nNodes and\
+                        np.linalg.matrix_rank(np.squeeze(Rnn[:,:,kp])) == nNodes:
+                        # Check #2 - Must have had a min. # of updates on each matrix
+                        if nUpdatesRyy[kp] >= min_covUpdates and nUpdatesRnn[kp] >= min_covUpdates:
+                            updateWeights[kp] = True
+
+                # Update filter coefficients
+                if updateWeights[kp]:
+                    if useGEVD:
+                        # Perform generalized eigenvalue decomposition
+                        sig,Xmat = scipy.linalg.eigh(np.squeeze(Ryy[:,:,kp]),np.squeeze(Rnn[:,:,kp]))
+                        q = np.linalg.pinv(Xmat.conj().T)
+                        # Sort eigenvalues in descending order
+                        Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q) 
+                        W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
+                    else:
+                        W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
+
+                # Desired signal estimates for each node separately (last dimension of <D_hat>)
+                D_hat[kp,l,:] = np.squeeze(W_hat[:,:,kp]).conj().T @ Ytf
+
+            t1 = time.time()
+            if l % 10 == 0:
+                print('Processed time frame %i/%i in %2f s...' % (l,nframes,t1-t0))
 
     print('MW-filtering done.')
 
@@ -180,18 +193,42 @@ def SNRout(w,Rxx,Rnn):
     snr = a @ np.linalg.pinv(b)
     return snr
 
-@jit(nopython=True)
+
+# @njit
+def get_exact_MWF(Yf, Df):
+    # Computes the exact MWF
+    
+    # Check dimensions of input arrays
+    transposed = False
+    if Yf.shape[0] > Yf.shape[1]:
+        Yf = Yf.T
+        transposed = True
+    if Df.shape[0] > Df.shape[1]:
+        Df = Df.T
+
+    Ryy = 1/Yf.shape[1] * Yf @ Yf.conj().T  # Sensor signals autocorrelation
+    Rss = 1/Df.shape[1] * Df @ Df.conj().T  # Desired signals autocorrelation
+    Wfilt = np.linalg.solve(Ryy, Rss)
+    Dout = Wfilt.conj().T @ Yf              # Apply filter to sensor signals
+
+    if transposed:
+        Dout = Dout.T
+
+    return Dout, Wfilt
+
+
+@njit
 def expavg_covmat(Ryy, beta, Y):
     return beta*Ryy + (1 - beta)*np.outer(Y, Y.conj())
 
-@jit(nopython=True)
+@njit
 def update_w_MWF(Ryy,Rnn):
     # Estimate speech covariance matrix
     Rss = Ryy - Rnn
     # LMMSE weights
     return np.linalg.pinv(Ryy) @ Rss  # eq.(19) in ruiz2020a
 
-@jit(nopython=True)
+@njit
 def update_w_GEVDMWF(S,Q,GEVDrank):
     # Estimate speech covariance matrix
     sig_yy = np.diag(S)
@@ -201,7 +238,7 @@ def update_w_GEVDMWF(S,Q,GEVDrank):
     What = np.linalg.pinv(Q.conj().T) @ np.diag(diagveig) @ Q.conj().T
     return What
 
-@jit(nopython=True)
+@njit
 def mygevd(A,B):
     # mygevd -- Compute the generalized eigenvalue decomposition
     # of the matrix pencil {A,B}. 
@@ -251,6 +288,8 @@ def sortgevd(S,Q,order='descending'):
 def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSources=None):
     # Compute the MWF output as function of frequency and spatial location.
 
+    print('\nComputing spatial visualization of MWF effect...\n')
+
     # Check inputs
     if len(W.shape) == 2:
         if len(freqs) > 1:
@@ -260,13 +299,13 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
         raise ValueError('The frequency vector should contain as many elements as the -1 dimension of <W>')
         
     # ------------- HARD CODED PARAMETERS -------------
+    Tsig = 0.25        # Signal duration [s]
     # RIR generation parameters
-    rir_dur = 2**10 / Fs                # Duration [s]
-    refCoeff = -1*np.sqrt(1 - alpha)    # Reflection coefficient 
-    # Signal duration
-    Tsig = 0.5        # [s]
+    rir_dur = np.amin([2**12 / Fs, Tsig])  # Duration [s]
+    refCoeff = -1*np.sqrt(1 - alpha)       # Reflection coefficient 
     # Mesh
     gridres = 0.25   # Grid spatial resolution [m]
+    # gridres = 2   # Grid spatial resolution [m]
     # -------------------------------------------------
 
     # Gridify room or room-slice
@@ -275,11 +314,20 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
     if targetSources is not None:
         z_ = targetSources[:,-1]  # Set the z-coordinates of the target sources as slice heights
         z_ = z_[:,np.newaxis]
-        print('%.1f x %.1f x %.1f m^3 room gridified by slices every %.1f m,\nresulting in %i possible source locations on %i 2D planes.' % (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_),len(z_)))
+        print('%.1f x %.1f x %.1f m^3 room gridified in %i slices every %.1f m,\nresulting in %i possible source locations.' % (rd[0],rd[1],rd[2],len(z_),gridres,len(x_)*len(y_)*len(z_)))
     else:
         z_ = np.linspace(0,rd[2],num=int(np.round(rd[2]/gridres)))
         print('%.1f x %.1f x %.1f m^3 room gridified every %.1f m,\nresulting in %i possible source locations across the 3D space.' % (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_)))
     xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
+
+    # # # TEMPORARY
+    # x_ = r[:,0]  # Set the z-coordinates of the target sources as slice heights
+    # x_ = x_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
+    # y_ = r[:,1]  # Set the z-coordinates of the target sources as slice heights
+    # y_ = y_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
+    # z_ = r[:,2]  # Set the z-coordinates of the target sources as slice heights
+    # z_ = z_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
+    # xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
 
     # Make raw signal
     raw = np.random.uniform(low=-1.0, high=1.0, size=(int(Tsig*Fs),))
@@ -297,37 +345,13 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
                 # Compute filter output energy
                 magout[ii,jj,kk,:,:] = compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W)
                 # Monitor loop
-                progress_percent = loop_progress([ii,jj,kk],xx.shape)
-                print('Computing filter output energy for source at (%.1f,%.1f,%.1f) in room [%i%% done]...' % (r0[0],r0[1],r0[2],progress_percent))
+                progress_percent = loop_progress([ii,jj,kk], xx.shape)
+                print('Computing filter output energy for source at (%.2f,%.2f,%.2f) in room [%.2f %%]...' % (r0[0],r0[1],r0[2],progress_percent))
 
-    # PLOT PLOT PLOT
-    plotsensor = 2
-    plotfreq = 200
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    if targetSources is not None:       # Slice
-        for ii in range(magout.shape[2]):
-            ax.contourf(xx[:,:,ii], yy[:,:,ii], magout[:,:,ii,plotfreq,plotsensor]/np.amax(magout[:,:,:,plotfreq,plotsensor]), offset=z_[ii], zdir='z', alpha=0.5)
-        for ii in range(targetSources.shape[0]):
-            ax.scatter(targetSources[ii,0],targetSources[ii,1],targetSources[ii,2],c='blue')
-        for ii in range(noiseSources.shape[0]):
-            ax.scatter(noiseSources[ii,0],noiseSources[ii,1],noiseSources[ii,2],c='red')
-        for ii in range(r.shape[0]):
-            ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='green')
-    else:                               # Full volume
-        for ii in range(xx.shape[0]):
-            for jj in range(xx.shape[1]):
-                for kk in range(xx.shape[2]):
-                    ax.scatter(xx[ii,jj,kk], yy[ii,jj,kk], zz[ii,jj,kk], c=str(magout[ii,jj,kk,plotfreq,plotsensor]/np.amax(magout[:,:,:,plotfreq,plotsensor])), marker="o")
-        for ii in range(r.shape[0]):
-            ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='red')
-    ax.set(title='f = %.1f Hz' % freqs[plotfreq])
-    #
-    plt.show()
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # ax.plot(freqs,magout[2,2,2,:,plotsensor])
+    # ~~~~~~~~~~ PLOT ~~~~~~~~~~
+    plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='OTOB')
+    plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='all')
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     return 0
 
@@ -338,26 +362,164 @@ def compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W):
     # Get transfer functions
     h = rimPy(r, r0, rd, refCoeff, rir_dur, Fs)
 
+    # TEMPORARY - NORMALIZE ALL H's
+    h /= np.sum(h, axis=0)
+
     # Generate sensors signal 
     y = sig.fftconvolve(raw, h, axes=0)
 
     # Get STFT
-    y_STFT = calcSTFT(y, Fs, win, L, R, 'onesided')[0]
-    y_FFT = np.fft.fft(y, axis=0)
+    y_STFT,f = calcSTFT(y, Fs, win, L, R, 'onesided')
 
-    # fig, ax = plt.subplots()
-    # ax.plot(20*np.log10(np.abs(y_FFT[:,0])))
-    # ax.grid()
-    # plt.show()
+    nSensors = y_STFT.shape[2]
+    nframes = y_STFT.shape[1]
+    nbins = len(f)
 
     # Apply filter to each TF bin
-    magout = np.zeros((y_STFT.shape[0], y_STFT.shape[2]))
-    for kp in range(y_STFT.shape[0]):
-        z_kp = np.zeros((y_STFT.shape[1],y_STFT.shape[2]), dtype=complex)
-        for l in range(y_STFT.shape[1]):
-            datacurr = np.squeeze(y_STFT[kp,l,:])    
-            z_kp[l,:] = np.squeeze(W[:,:,kp]).conj().T @ datacurr
+    magout = np.zeros((nbins, nSensors))
+    magout_justz = np.zeros((nbins, nSensors))
+    magout_justy = np.zeros((nbins, nSensors))
+    z = np.zeros_like(y_STFT, dtype=complex)
+    for kp in range(nbins):
+        for l in range(nframes):
+            z[kp,l,:] = np.squeeze(W[:,:,kp]).conj().T @ np.squeeze(y_STFT[kp,l,:])
         # Get time-averaged filter-output magnitude
-        magout[kp,:] = np.mean(np.abs(z_kp)**2, axis=0)
+        magout[kp,:] = np.mean(np.abs(z[kp,:,:])**2, axis=0) / np.mean(np.abs(y)**2, axis=0)
+
+    if 0:
+        fig = plt.figure()
+        ax = fig.add_subplot(211)
+        ax.plot(f,magout_justy)
+        ax.set_aspect('auto')
+        ax.grid()
+        ax.set(title='Power spectrum input $E\{|y|^2\}$')
+        plt.ylim((0, np.amax(magout_justz)))
+        ax = fig.add_subplot(212)
+        ax.plot(f,magout_justz)
+        ax.set_aspect('auto')
+        ax.grid()
+        ax.set(title='Power spectrum output $E\{|\hat{d}|^2\}$', xlabel='$f$ [Hz]')
+        plt.ylim((0, np.amax(magout_justz)))
+        plt.show()
+
+    if 0:
+        fig = plt.figure()
+        ax = fig.add_subplot(121)
+        mapp = ax.imshow(np.abs(y_STFT[:,:,0])**2)
+        ax.invert_yaxis()
+        ax.set_aspect('auto')
+        ax.grid()
+        plt.colorbar(mapp)
+        ax.set(title = 'STFT($y_1(\mathbf{r}_0)$)')
+        ax = fig.add_subplot(122)
+        mapp = ax.imshow(np.abs(z[:,:,0])**2)
+        ax.invert_yaxis()
+        ax.set_aspect('auto')
+        ax.grid()
+        ax.set(title = 'STFT($\hat{d}_1(\mathbf{r}_0) = \mathbf{w}_1^Hy_1(\mathbf{r}_0)$)')
+        plt.colorbar(mapp)
+        plt.show()
         
     return magout
+
+
+def plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='all'):
+
+    # Export name (HARD-CODED)
+    exportname = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\test' % (os.getcwd())
+
+    fig = plt.figure(figsize=(8,6))
+    if makeGIF:
+        angles = np.linspace(0, 360, len(freqs))
+        for idx_gif in range(len(freqs)):
+            # Choose frequency
+            plotfreq = idx_gif
+            for plotsensor in range(magout.shape[-1]):
+                plot_subfct(fig,xx,yy,zz,magout,targetSources,noiseSources,r,plotfreq,plotsensor,rotate=True,anglerot=angles[idx_gif])
+            plt.suptitle('f = %.1f Hz' % freqs[plotfreq])
+            plt.tight_layout()
+            fname = '%s_%i.png' % (exportname, int(idx_gif))
+            plt.savefig(fname, bbox_inches='tight')
+            fig.clear()
+        # MAKE GIF
+        giffolder = Path(fname).parent
+        gifname = Path(exportname).with_suffix('').stem
+        makegif(giffolder, gifname)
+        print('Spatial MWF output as fct of frequency exported as GIF in:\n"%s\\%s.gif"' % (giffolder, gifname))
+
+    # AVERAGE OVER FREQUENCIES
+    fc, fl, fu = noctfr(n=3, fll=freqs[1], ful=freqs[-1], type='exact')
+    if freqAvType == 'all':
+        fc, fl, fu = [0], [freqs[0]], [freqs[-1]]   # Consider all frequencies
+    for idxOTOB in range(len(fc)):
+        # Select appropriate data chunk
+        idxfreq = [ii for ii in range(len(freqs)) if freqs[ii] >= fl[idxOTOB] and freqs[ii] <= fu[idxOTOB]]
+        if len(idxfreq) > 0:
+            magout_curr = magout[:,:,:,idxfreq,:]  # Extract only relevant info for current "band"
+            for plotsensor in range(magout.shape[-1]):
+                plot_subfct(fig,xx,yy,zz,20*np.log10(np.abs(magout_curr)),targetSources,noiseSources,r,\
+                    np.arange(magout_curr.shape[3]),plotsensor)
+            if freqAvType == 'OTOB':
+                plt.suptitle('Average 1/3-octave band centered on %i Hz (%i to %i Hz)' % (fc[idxOTOB], fl[idxOTOB], fu[idxOTOB]))
+            elif freqAvType == 'all':
+                plt.suptitle('Average over all frequencies (%i to %i Hz)' % (fl[idxOTOB], fu[idxOTOB]))
+            plt.tight_layout()
+            if freqAvType == 'all':
+                fname = '%s_allf.png' % exportname  
+            elif freqAvType == 'OTOB':
+                fname = '%s_OTOBfc%iHz.png' % (exportname, int(np.round(fc[idxOTOB])))   
+            plt.savefig(fname, bbox_inches='tight')
+            fig.clear()
+        else:
+            print('No frequency bins in band centered on %.2f Hz. Skipping band.' % (fc[idxOTOB]))
+    plt.show()
+
+    return None
+
+
+def plot_subfct(fig,xx,yy,zz,magout,targetSources,noiseSources,r,plotfreq,plotsensor,rotate=False,anglerot=0):
+
+    # Generate sub-plot axes
+    if magout.shape[-1] > 2:
+        ax = fig.add_subplot(2, np.ceil(magout.shape[-1]/2), plotsensor+1, projection='3d')
+    else:
+        ax = fig.add_subplot(1, magout.shape[-1], plotsensor+1, projection='3d')
+    
+    # Rotate
+    if rotate:
+        ax.view_init(35, anglerot)   
+    if (r[:,-1] == targetSources[0,-1]).all():
+        ax.view_init(90, 0)
+
+    if targetSources is not None:       # Slice
+        for ii in range(magout.shape[2]):
+            ax.contourf(xx[:,:,ii], yy[:,:,ii],\
+                 np.abs(np.mean(magout[:,:,ii,plotfreq,plotsensor], axis=2)/np.amax(magout[:,:,:,plotfreq,plotsensor])),\
+                      offset=zz[0,0,ii], zdir='z', alpha=0.5)
+        for ii in range(targetSources.shape[0]):
+            ax.scatter(targetSources[ii,0],targetSources[ii,1],targetSources[ii,2],c='blue')
+        for ii in range(noiseSources.shape[0]):
+            ax.scatter(noiseSources[ii,0],noiseSources[ii,1],noiseSources[ii,2],c='red')
+        for ii in range(r.shape[0]):
+            if ii == plotsensor:
+                ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='green',edgecolors='black')
+            else:
+                ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='green')
+    else:                               # Full volume
+        for ii in range(xx.shape[0]):
+            for jj in range(xx.shape[1]):
+                for kk in range(xx.shape[2]):
+                    ax.scatter(xx[ii,jj,kk], yy[ii,jj,kk], zz[ii,jj,kk], c=str(magout[ii,jj,kk,plotfreq,plotsensor]/np.amax(magout[:,:,:,plotfreq,plotsensor])), marker="o")
+        for ii in range(r.shape[0]):
+            ax.scatter(r[ii,0],r[ii,1],r[ii,2],c='red')
+    # if alpha < 1:
+    #     plot_room(ax, rd)       # plot room boundaries
+    ax.set(title='Sensor #%i' % (plotsensor+1)) # title
+    if (r[:,-1] == targetSources[0,-1]).all():
+        ax.set_xticks([])       # get rid of x-axis ticks
+        ax.set_yticks([])       # get rid of y-axis ticks
+        ax.set_zticks([])       # get rid of z-axis ticks
+    else:
+        set_axes_equal(ax)      # set axes equal
+
+    return None

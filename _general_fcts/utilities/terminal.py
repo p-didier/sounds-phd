@@ -1,6 +1,6 @@
 import numpy as np
 
-def loop_progress(indices,limits):
+def loop_progress(indices,limits,printit=False):
     # % loop_progress -- Returns the percentage of progress of a given
     # % n-dimensional loop defined by indices and limits.
     # %
@@ -23,10 +23,21 @@ def loop_progress(indices,limits):
     total_niter = np.prod(limits)
 
     # Current number of iterations done
-    curr_niter = indices[-1]
+    curr_niter = indices[-1] + 1
     for ii in range(len(indices)-1):
-        curr_niter += indices[-1-(ii+1)] * np.prod(limits[-1-ii:-1])
+        limits_curr = limits[-1-ii:]
+        curr_niter += indices[-1-(ii+1)] * np.prod(limits_curr)
 
-    p = curr_niter/total_niter*200
+    p = curr_niter/total_niter*100
+
+    if printit:
+        print('Progress: %.2f%%' % p)
 
     return p
+
+# TESTS
+# limits = [10,20,30]
+# for ii in range(limits[0]):
+#     for jj in range(limits[1]):
+#         for kk in range(limits[2]):
+#             loop_progress([ii,jj,kk],limits,True)

@@ -2,6 +2,7 @@ import numpy as np
 import math
 import itertools
 import matplotlib.pyplot as plt
+from numba import njit
 
 def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=None, Fc=None, c=343):
     # RIMPY  Randomized Image Method, Python implementation
@@ -111,44 +112,70 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     num_permutations = rs.shape[0]
     
     for ii in range(num_permutations):
-        r = rs[ii,:]
-        
-        for jj in range(8):
-            
-            p = ps[jj,:]
-            part1 = np.multiply(1 - 2*p, source_pos + 2*np.multiply(r, room_dim))
-            part2 = rand_dist*(2*np.random.rand(1,3) - np.ones((1,3)))
-            image_pos = part1 + part2
-            
-            for m in range(M):
-                
-                d = np.linalg.norm(image_pos - mic_pos[m,:])
-                
-                if np.round(d/c*Fs) >= 1 and np.round(d/c*Fs) <= npts:
+        h = get_h_outerloop(ps,source_pos,rs[ii,:],room_dim,rand_dist,M,mic_pos,c,Fs,npts,beta,Tw,Fc, h)
 
-                    am = np.multiply(np.power(beta[0,:], np.abs(r + p)), np.power(beta[1,:], np.abs(r)))
-                    if Tw == 0:
-                        n_integer = int(np.round(d/c*Fs))
-                        h[n_integer, m] = h[n_integer, m] + np.prod(am)/(4*math.pi*d)
-                    else:
-
-                        n = np.array(range(int(np.maximum(np.ceil(Fs*(d/c - Tw/2)), 1)),\
-                                 int(np.minimum(np.floor(Fs*(d/c + Tw/2)), npts - 1))))
-                        t = n/Fs - d/c
-                        s = np.multiply(1 + np.cos(2*math.pi*t/Tw), np.sinc(2*Fc*t)/2)
-                        
-                        h[n, m] = h[n, m] + s*np.prod(am)/(4*math.pi*d)    # Build RIR
     return h
+
+
+@njit   
+def get_h_outerloop(ps,source_pos,r,room_dim,rand_dist,M,mic_pos,c,Fs,npts,beta,Tw,Fc,h):
+    
+    # JIT-ed computations
+    for jj in range(8):
+
+        p = ps[jj,:]
+
+        part1 = np.multiply(1 - 2*p, source_pos + 2*np.multiply(r, room_dim))
+        part2 = rand_dist*(2*np.random.rand(1,3) - np.ones((1,3)))
+        image_pos = part1 + part2
+        
+        for m in range(M):
+            vals, n = get_h_innerloop(image_pos, mic_pos[m,:], c, Fs, npts, beta, r, p, Tw, Fc)
+            h[n.astype(np.int_),m] += vals
+
+    return h
+
+
+@njit
+def get_h_innerloop(image_pos, mic_pos, c, Fs, npts, beta, r, p, Tw, Fc):
+    # JIT-ed rimPy deepest inner-loop computations
+    d = np.linalg.norm(image_pos - mic_pos)
+    # init outputs
+    vals = np.array([0.0])
+    n = np.array([0.0])
+    # compute
+    if np.round(d/c*Fs) >= 1 and np.round(d/c*Fs) <= npts:
+
+        am = np.multiply(np.power(beta[0,:], np.abs(r + p)), np.power(beta[1,:], np.abs(r)))
+        if Tw == 0:
+            n = np.array([np.round(d/c*Fs)])
+            vals = np.array([np.prod(am)/(4*math.pi*d)])
+        else:
+            n = np.arange(np.maximum(np.ceil(Fs*(d/c - Tw/2)), 1.0),\
+                        np.minimum(np.floor(Fs*(d/c + Tw/2)), npts - 1.0))
+            t = n/Fs - d/c
+            s = np.multiply(1.0 + np.cos(2*math.pi*t/Tw), np.sinc(2*Fc*t)/2)
+            vals = s*np.prod(am)/(4*math.pi*d)    # Build RIR
+    # if d == 0:
+    #     vals[np.abs(vals) == math.inf] = 1  # Account for the special case where source point and receiver points are the same
+    #     print('The source and receiver points are the same.')
+
+
+    return vals, n
+
 
 def perm(a,b,c):
     s = [a,b,c]
     return np.array(list(itertools.product(*s)))
-    
+
+
 def main():
     
-    alpha = 0.5
-    mic_pos = [[0.1,0.1,0.1],]
-    source_pos = [1,2,3]
+    alpha = 1
+    mic_pos = np.array([[0.1,0.1,0.1],])
+    source_pos = np.array([1,2,3])
+    # Special case
+    # mic_pos = source_pos[:,np.newaxis] + np.array([[0.01],[0.01],[0.01]])
     room_dim = [5,6,7]
     rir_length = 2**11
     Fs = 16e3
@@ -161,6 +188,7 @@ def main():
     ax.plot(h)
     plt.show()
 
+    stop = 1
 
-# -- RUN
+
 # main()

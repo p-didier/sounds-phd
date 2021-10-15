@@ -1,3 +1,4 @@
+from numba.core.decorators import njit
 import numpy as np
 import scipy.fft
 
@@ -65,7 +66,6 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
     X = np.squeeze(X)
 
     return X,f
-
 
 def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
     # x = calcISTFT(X, win, N_STFT, R_STFT, sides)

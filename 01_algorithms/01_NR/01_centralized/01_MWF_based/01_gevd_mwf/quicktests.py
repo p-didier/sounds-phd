@@ -76,7 +76,14 @@ import scipy
 
 
 
-import winsound
+# import winsound
 
-# winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
-winsound.PlaySound('tmp.wav', winsound.SND_FILENAME)
+# # winsound.PlaySound("SystemExit", winsound.SND_ALIAS)
+# winsound.PlaySound('tmp.wav', winsound.SND_FILENAME)'
+
+import matplotlib
+matplotlib.rc('figure', figsize=(12, 6))
+
+
+plt.figure()
+plt.show()

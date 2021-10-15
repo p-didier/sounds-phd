@@ -2,13 +2,14 @@
 # coding: utf-8
 import numpy as np
 import matplotlib.pyplot as plt
-import os
-from numpy.core.defchararray import array 
+import os, sys
 import pandas as pd
 import random
 from rimPypack.rimPy import rimPy
 from scipy.spatial.transform import Rotation as rot
 from pathlib import Path
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
+from plotting.threedim import plot_room
 
 # Acoustic Scenario (AS) generation script.
 
@@ -19,23 +20,29 @@ class Node:
         self.mic_sep = mic_sep
 
 
-def main(gen_specific_AS=False):
+def main():
 
-    nAS = 5                    # Number of AS to generate
+    gen_specific_AS = 0
+
+    nAS = 1                    # Number of AS to generate
     Fs = 16e3                   # Sampling frequency [samples/s]
     RIR_l = 2**12               # RIR length [samples]
     minRd = 3                   # Smallest room dimension possible [m]
     maxRd = 7                   # Largest room dimension possible [m]
     #
-    Ns = 2                      # nr. of speech sources
+    Ns = 1                      # nr. of speech sources
     Nn = 3                      # nr. of noise sources
     #
-    nNodes = 3                  # nr. of nodes
-    Mk = 2
-    node = Node(Mk, 'linear', 0.1)
+    nNodes = 5                  # nr. of nodes
+    Mk = 1
+    node = Node(Mk, 'linear', 0.05)
     #
+    T60fixed = 0
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
     T60min = 0.4*RIR_l/Fs   # Smallest possible T60
+    #
+    flattened = True        # If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2
+    plotit = True           # If true, plots the AS
 
     if gen_specific_AS:
         nAS = 1
@@ -46,10 +53,14 @@ def main(gen_specific_AS=False):
         if gen_specific_AS:
             rd = get_fixed_values()[0]
             # T60 = 0.25
-            T60 = 0.33
+            # T60 = 0.33
+            T60 = 0
         else:
             rd = np.random.uniform(low=minRd, high=maxRd, size=(3,))    # Generate random room dimensions
-            T60 = random.uniform(T60min, T60max)
+            if T60fixed is None:
+                T60 = random.uniform(T60min, T60max)
+            else:
+                T60 = T60fixed
         # T60 = np.random.uniform(low=T60min, high=T60max, size=(1,)) # Generate random reverberation time
         V = np.prod(rd)                                   # Room volume
         S = 2*(rd[0]*rd[1] + rd[0]*rd[2] + rd[1]*rd[2])   # Total room surface area
@@ -57,23 +68,27 @@ def main(gen_specific_AS=False):
         
         # Call function
         if gen_specific_AS:
-            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False)
+            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False,flat=flattened,plotit=plotit)
         else:
-            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True)
+            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True,flat=flattened,plotit=plotit)
 
         # Export
         expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
         if gen_specific_AS:
             fname = '%s\\J%iMk%i_Ns%i_Nn%i\\testAS' % (expfolder,nNodes,Mk,Ns,Nn)
-            if alpha == 1:
-                fname += '_anechoic'
-            fname += '.csv'
         else:
             expfolder += '\\J%iMk%i_Ns%i_Nn%i' % (nNodes,Mk,Ns,Nn)
             if not os.path.isdir(expfolder):   # check if subfolder exists
                 os.mkdir(expfolder)   # if not, make directory
             nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
-            fname =  "%s\\AS%i.csv" % (expfolder,nas)
+            fname =  "%s\\AS%i" % (expfolder,nas)
+        if alpha == 1:
+            fname += '_anechoic'
+        if flattened:
+            fname += '_2D'
+        if nNodes == 1 and Mk > 1:
+            fname += '_array'
+        fname += '.csv'
         #
         header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs,\
              'nNodes': nNodes, 'd_intersensor': node.mic_sep}
@@ -87,7 +102,7 @@ def main(gen_specific_AS=False):
     return h_ns, h_nn
         
 
-def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
+def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True,flat=False,plotit=False):
     # genAS -- Computes the RIRs in a rectangular cavity where sensors, speech
     # sources, and noise sources are present.
     # 
@@ -102,6 +117,7 @@ def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
     # -Fs [float, Hz] - Sampling frequency.
     # -export [bool] - If true, export AS (RIRs + parameters) as .MAT.
     # -random_coords [bool] - If true, use randomly-generated source/receiver positions.
+    # -flat [bool] - If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2.
     #
     # >>> Outputs:
     # -h_sn [RIR_l*J*Ns (complex) float 3-D array, -] - RIRs between desired sources and sensors.  
@@ -119,14 +135,36 @@ def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True):
     else:
         rd, r, rs, rn = get_fixed_values()
         r = r[:J,:]
-        rs = rs[:Ns,:]
-        rn = rn[:Nn,:]
+        # rs = rs[:Ns,:]
+        # rn = rn[:Nn,:]
+
+        # TEMPORARY 2021/10/14 - 12h17
+        rs = rs[1:Ns+1,:]
+        rn = rn[4:Nn+4,:]
+
     
     # Generate sensor arrays
     M = J*node.Mk
     r_sensors = np.zeros((M,3))
     for ii in range(J):
         r_sensors[ii*node.Mk:(ii+1)*node.Mk,:] = generate_array_pos(r[ii,:], node.Mk, node.array, node.mic_sep)
+
+    # Option to generate a 2D-scenario
+    if flat:
+        rs[:,-1] = rd[-1]/2
+        r_sensors[:,-1] = rd[-1]/2
+        rn[:,-1] = rd[-1]/2
+
+    # If asked, show AS on plot
+    if plotit:
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        plot_room(ax, rd)
+        ax.scatter(r_sensors[:,0],r_sensors[:,1],r_sensors[:,2], c='green')
+        ax.scatter(rs[:,0],rs[:,1],rs[:,2], c='blue')
+        ax.scatter(rn[:,0],rn[:,1],rn[:,2], c='red')
+        ax.grid()
+        plt.show()
 
     # Walls reflection coefficient  
     R = -1*np.sqrt(1 - alpha)   
@@ -257,4 +295,6 @@ def get_fixed_values():
 
     return rd, r, rs, rn
 
-main(gen_specific_AS = 1)
+
+if __name__ == '__main__':
+    sys.exit(main())

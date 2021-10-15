@@ -20,13 +20,13 @@ import playsounds.playsounds as ps
 # SOUNDS ETN - KU Leuven ESAT STADIUS
 
 # Global variables
-SAVEFIGS = 0        # If true, saves figures as PNG and PDF files
-EXPORTDATA = 0      # If true, exports I/O SNRs as CSV files
+SAVEFIGS =       0  # If true, saves figures as PNG and PDF files
+EXPORTDATA =     0  # If true, exports I/O speech enhancement quality measures (SNRs, STOIs) as CSV files
 LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
 SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
-LISTEN_OUTPUT = 0   # If true, plays enhanced and original signals
+LISTEN_OUTPUT =  0  # If true, plays enhanced and original signals
 CWD = os.getcwd()
-PLOT_RESULTS = 1    # If true, plots speech enhancement results on figures (+ exports if SAVEFIGS) 
+PLOT_RESULTS =   1  # If true, plots speech enhancement results on figures (+ exports if SAVEFIGS) 
 
 
 def main():
@@ -40,21 +40,33 @@ def main():
                                 #   -'distinct': the speakers may never speak simultaneously.
     voicedetection = 'VAD'      # type of voice activity detection mechanism to use (VAD or SPP)
     #
-    Tmax = 1               # maximum signal duration [s]
-    baseSNR = 10            # SNR pre-RIR application [dB]
+    exactMWF = True             # if True, use the exact MWF with the true covariance matrices, not their approximations
     #
-    pauseDur = 0            # duration of pauses in-between speech segments [s]
-    pauseSpace = 3          # duration of speech segments (btw. pauses) [s]
-    #
-    useGEVD = True          # if True, use GEVD, do not otherwise
+    useGEVD = False             # if True, use GEVD, do not otherwise
     GEVDrank = 1
     #
+    Tmax = 5                    # maximum signal duration [s]
+    baseSNR = 10                # SNR pre-RIR application [dB]
+    #
+    pauseDur = 0                # duration of pauses in-between speech segments [s]
+    pauseSpace = 1              # duration of speech segments (btw. pauses) [s]
+    #
     SPP_threshold = 0.8
+
     # Exports
     exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20211007meeting\\onesource_anechoic' % CWD
     # ----- Acoustic scenario + specific speech/noise signal(s) selection (if empty, random selection) 
-    ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
-    # ASref = 'J3Mk2_Ns2_Nn3\\testAS'      
+    # ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
+    # ASref = 'J3Mk2_Ns2_Nn3\\testAS'            
+    ASref = 'J3Mk2_Ns1_Nn1\\testAS_anechoic'      
+    ASref = 'J5Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
+    ASref = 'J10Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
+    ASref = 'J10Mk1_Ns1_Nn1\\testAS_anechoic_2D'      
+    ASref = 'J1Mk5_Ns1_Nn1\\testAS_anechoic_2D_array'   
+    ASref = 'J1Mk5_Ns1_Nn3\\AS1_anechoic_2D_array' 
+    ASref = 'J5Mk1_Ns1_Nn3\\AS0_anechoic_2D'     
+    plotAS = 'plot'
+    # plotAS = None
     # Specific speech/noise files 
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'
@@ -70,7 +82,7 @@ def main():
     win = np.sqrt(np.hanning(L_fft))    # STFT time window
 
     # Covariance estimates
-    Tavg = 0.5              # Time constant for exp. averaging of corr. mats
+    Tavg = 1              # Time constant for exp. averaging of corr. mats
     min_cov_updates = 10    # min. number of covariance matrices updates before 1st filter weights update
 
     # VAD
@@ -84,8 +96,8 @@ def main():
 
     # ~~~~~~~~~~~~~~~~~~ Generate signals ~~~~~~~~~~~~~~~~~~~
     print('\nGenerating mic. signals, using acoustic scenario "%s"' % ASref)
-    y,ds,ny,t,Fs,J,rd,r,rs,rn,alpha,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
-                                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=None,\
+    y,ds,d,ny,t,Fs,J,rd,r,rs,rn,alpha,reftxt = sig_gen.sig_gen(path_acoustic_scenarios,speech_in,Tmax,noise_type,baseSNR,\
+                                            pauseDur,pauseSpace,ASref,speech,noise,plotAS=plotAS,\
                                             plot_AS_dir='%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20211007meeting\\GIFs\\onesource' % CWD,\
                                             ms=multispeakers)
     print('Microphone signals created using "%s"' % ASref)
@@ -136,9 +148,9 @@ def main():
     print('Entering MWF routine...')
     t0 = time.time()
     if voicedetection == 'VAD':
-        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,exact=exactMWF)
     elif voicedetection == 'SPP':
-        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold,exact=exactMWF)
     t1 = time.time()
     print('Enhanced signals (%i s for %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)
@@ -162,8 +174,6 @@ def main():
 
     print('fwSNRseg improvement:')
     print(fwSNRseg_enhanced - fwSNRseg_noisy)
-    print('SNRseg improvement:')
-    print(SNRseg_enhanced - SNRseg_noisy)
     print('STOI improvement:')
     print(stoi_enhanced - stoi_noisy)
 
@@ -174,8 +184,6 @@ def main():
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 
 
-    # ~~~~~~~~~~~~~~~~~~ MWF SPATIAL EFFECT ~~~~~~~~~~~~~~~~~~~ 
-    myMWF.spatial_visu_MWF(W_hat, freqs, rd, alpha, r, Fs, win, L_fft, R_fft, targetSources=rs, noiseSources=rn)
 
     # ----------------------------------------------------------------------------------------
     # -------------------------------------- PLOTTING --------------------------------------
@@ -229,6 +237,11 @@ def main():
             plt.savefig('%s\\STFTs_%ip_ev%i_%s.png' % (exportDir,pauseDur,pauseSpace,reftxt))
 
         plt.show()
+
+        
+    # ~~~~~~~~~~~~~~~~~~ MWF SPATIAL EFFECT ~~~~~~~~~~~~~~~~~~~ 
+    # myMWF.spatial_visu_MWF(W_hat, freqs, rd, alpha, r, Fs, win, L_fft, R_fft, targetSources=rs, noiseSources=rn, rawsig=d)
+    myMWF.spatial_visu_MWF(W_hat, freqs, rd, alpha, r, Fs, win, L_fft, R_fft, targetSources=rs, noiseSources=rn)
 
         # # Bar chart for SNR improvements at each sensor
         # barw = 0.3
