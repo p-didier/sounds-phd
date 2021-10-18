@@ -40,7 +40,8 @@ def main():
                                 #   -'distinct': the speakers may never speak simultaneously.
     voicedetection = 'VAD'      # type of voice activity detection mechanism to use (VAD or SPP)
     #
-    exactMWF = True             # if True, use the exact MWF with the true covariance matrices, not their approximations
+    MWFtype = 'batch'           # if 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD)
+    # MWFtype = 'online'          # if 'online', compute the covariance matrices iteratively (possibly using GEVD)
     #
     useGEVD = False             # if True, use GEVD, do not otherwise
     GEVDrank = 1
@@ -66,7 +67,7 @@ def main():
     ASref = 'J1Mk5_Ns1_Nn3\\AS1_anechoic_2D_array' 
     ASref = 'J5Mk1_Ns1_Nn3\\AS0_anechoic_2D'     
     plotAS = 'plot'
-    # plotAS = None
+    plotAS = None
     # Specific speech/noise files 
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'
@@ -148,9 +149,9 @@ def main():
     print('Entering MWF routine...')
     t0 = time.time()
     if voicedetection == 'VAD':
-        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,exact=exactMWF)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,myVAD,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,MWFtype=MWFtype)
     elif voicedetection == 'SPP':
-        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold,exact=exactMWF)
+        D_hat, W_hat, freqs = myMWF.MWF(y,Fs,win,L_fft,R_fft,spp,beta,min_cov_updates,useGEVD,GEVDrank,desired=ds,SPP_thrs=SPP_threshold,MWFtype=MWFtype)
     t1 = time.time()
     print('Enhanced signals (%i s for %i sensors) computed in %3f s' % (Tmax,J,t1-t0))
     # Get corresponding time-domain signal(s)

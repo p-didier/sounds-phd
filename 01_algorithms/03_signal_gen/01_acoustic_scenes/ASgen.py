@@ -235,7 +235,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     print('Find it in folder: %s' % str(Path(fname).parent))
 
 
-def generate_array_pos(r, Mk, array_type, min_d):
+def generate_array_pos(r, Mk, array_type, min_d, force2D=False):
     # Define node positions based on node position, number of nodes, and array type
 
     if array_type == 'linear':
@@ -249,6 +249,8 @@ def generate_array_pos(r, Mk, array_type, min_d):
         
         # Rotate in 3D through randomized rotation vector 
         rotvec = np.random.uniform(low=0, high=1, size=(3,))
+        if force2D:
+            rotvec[1:2] = 0
         r_sensors_rot = np.zeros_like(r_sensors)
         for ii in range(Mk):
             myrot = rot.from_rotvec(np.pi/2 * rotvec)

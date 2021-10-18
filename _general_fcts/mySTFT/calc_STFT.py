@@ -26,6 +26,8 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
         if x.shape[0] < x.shape[1]:
             print('<calcSTFT>: Input <x> seems transposed --> flipping dimensions.')
             x = x.T
+    if N_STFT > x.shape[0]:
+        raise ValueError('The chosen STFT frame length is larger than the total signal length.')
 
     # Use only half of the FFT spectrum  
     N_STFT_half = int(N_STFT/2 + 1)
@@ -56,7 +58,7 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
             else:
                 x_frame = x[idxx]
                 
-            X_frame = scipy.fft.fft(win *   x_frame)
+            X_frame = scipy.fft.fft(win * x_frame)
             if sides == 'onesided':
                 X[:,l,m] = X_frame[:N_STFT_half]
             elif sides == 'twosided':              

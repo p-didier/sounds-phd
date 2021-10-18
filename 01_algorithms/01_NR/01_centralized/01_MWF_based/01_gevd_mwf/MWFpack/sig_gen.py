@@ -11,6 +11,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import scipy.signal
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from plotting.threedim import plot_room, set_axes_equal
+from MWFpack.myMWF import spatial_visu_MWF
 
 def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
     # load_AS -- Loads an Acoustic Scenario (AS) from a CSV file.
@@ -222,7 +223,8 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
     return d, Fs
 
 
-def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),ASref='',speech='',noise_in='',plotAS=None, plot_AS_dir='',ms='overlap',SNR_in_uncorr=30):
+def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),\
+    ASref='',speech='',noise_in='',plotAS=None, plot_AS_dir='',ms='overlap',SNR_in_uncorr=30):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     #
@@ -489,3 +491,10 @@ def detect_pauses(s, Fs):
     pause_idx = np.round(pause_idx * Np + Np/2)     # convert back to original sampling rate indices
 
     return pause_idx
+
+
+# def plot_data_indep_BF(W,freqs,rd,alpha,r,Fs,win,L,R,rs,rn):
+
+#     spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=rs,noiseSources=rn)
+
+#     return None

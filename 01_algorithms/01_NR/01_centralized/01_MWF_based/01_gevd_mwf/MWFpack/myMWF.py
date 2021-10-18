@@ -7,6 +7,7 @@ from numba import njit
 import sys, os
 from sklearn import preprocessing
 import matplotlib.pyplot as plt
+from matplotlib import animation
 from PIL import Image
 import glob
 from pathlib import Path
@@ -20,7 +21,7 @@ from general.frequency import noctfr
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\03_signal_gen\\01_acoustic_scenes')))
 from rimPypack.rimPy import rimPy
 
-def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5,exact=False):
+def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,desired=None,SPP_thrs=0.5,MWFtype='online'):
     # MWF -- Compute the standard MWF for a given set of sensor signals
     # capturing the same acoustic scenario from different locations (speech +
     # noise in rectangular, damped room), in the STFT domain, using WOLA. 
@@ -38,7 +39,8 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     # -useGEVD [bool] - If true, use the GEVD, do not otherwise (standard MWF).
     # -GEVDrank [int, -] - GEVD rank approximation (default: 1).
     # -SPP_thrs [float [[0,1]], -] - SPP threshold above which speech is considered present.
-    # -exact [bool] - If true, use the exact MWF with the true covariance matrices, not their approximations (overrides everything else).
+    # -MWFtype [str] - If 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD).s
+                     # If 'online', compute the covariance matrices iteratively (possibly using GEVD).
     # >>> Outputs:
     # -D_hat [Nt*Nf*J (complex) float tensor, -] - Estimated desired signals (STFT domain). 
 
@@ -81,13 +83,13 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update
     
-    if exact:
+    if MWFtype == 'batch':
         if desired is None:
             raise ValueError('Cannot compute exact MWF without knowledge of the desired signal.')
         for kp in range(nbins):
             print('Using the given desired signal to compute the exact MWF - bin %i/%i.' % (kp+1, nbins))
             D_hat[kp,:,:], W_hat[:,:,kp] = get_exact_MWF(y_STFT[kp,:,:], d_STFT[kp,:,:])
-    else:
+    elif MWFtype == 'online':
         # Loop over time frames
         for l in range(nframes):
             t0 = time.time()    
@@ -335,7 +337,7 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
     raw = raw[:, np.newaxis]       # make 2-dimensional
 
     # Loop over grid points
-    magout = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],len(freqs),r.shape[0]))      # Full volume
+    magout = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],len(freqs),r.shape[0]))  # Init output matrix
 
     for ii in range(xx.shape[0]):
         for jj in range(xx.shape[1]):
@@ -343,48 +345,55 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
                 # Source location (grid point)
                 r0 = [xx[ii,jj,kk], yy[ii,jj,kk], zz[ii,jj,kk]]
                 # Compute filter output energy
-                magout[ii,jj,kk,:,:] = compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W)
+                magout[ii,jj,kk,:,:] = compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W, data_indep_MWF=True)
                 # Monitor loop
                 progress_percent = loop_progress([ii,jj,kk], xx.shape)
                 print('Computing filter output energy for source at (%.2f,%.2f,%.2f) in room [%.2f %%]...' % (r0[0],r0[1],r0[2],progress_percent))
 
     # ~~~~~~~~~~ PLOT ~~~~~~~~~~
-    plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='OTOB')
+    # plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='OTOB')
     plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='all')
+    # plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,animateit=True)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     return 0
 
 
-def compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W):
+def compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W, data_indep_MWF=False):
     # Compute MWF filter output energy for a certain combination of source/receivers positions. 
 
-    # Get transfer functions
+    # Get RIRs
     h = rimPy(r, r0, rd, refCoeff, rir_dur, Fs)
-
-    # TEMPORARY - NORMALIZE ALL H's
+    # Normalize individual RIRs
     h /= np.sum(h, axis=0)
-
     # Generate sensors signal 
     y = sig.fftconvolve(raw, h, axes=0)
-
-    # Get STFT
+    # Get STFTs
     y_STFT,f = calcSTFT(y, Fs, win, L, R, 'onesided')
 
+    # Useful numbers
     nSensors = y_STFT.shape[2]
     nframes = y_STFT.shape[1]
     nbins = len(f)
 
-    # Apply filter to each TF bin
-    magout = np.zeros((nbins, nSensors))
-    magout_justz = np.zeros((nbins, nSensors))
-    magout_justy = np.zeros((nbins, nSensors))
-    z = np.zeros_like(y_STFT, dtype=complex)
-    for kp in range(nbins):
-        for l in range(nframes):
-            z[kp,l,:] = np.squeeze(W[:,:,kp]).conj().T @ np.squeeze(y_STFT[kp,l,:])
-        # Get time-averaged filter-output magnitude
-        magout[kp,:] = np.mean(np.abs(z[kp,:,:])**2, axis=0) / np.mean(np.abs(y)**2, axis=0)
+    # Get filter output power 
+    if data_indep_MWF:
+        # Data-independent filter 
+        print('Computing data-independent MWF (Rnn = I)')
+        magout = data_indep_MWF_calc(h,y)
+        magout = np.mean(np.abs(magout)**2, axis=0)
+    else:
+        # Apply filter to each TF bin
+        print('Using data-dependent MWF')
+        magout = np.zeros((nbins, nSensors))
+        magout_justz = np.zeros((nbins, nSensors))
+        magout_justy = np.zeros((nbins, nSensors))
+        z = np.zeros_like(y_STFT, dtype=complex)
+        for kp in range(nbins):
+            for l in range(nframes):
+                z[kp,l,:] = np.squeeze(W[:,:,kp]).conj().T @ np.squeeze(y_STFT[kp,l,:])
+            # Get time-averaged filter-output magnitude
+            magout[kp,:] = np.mean(np.abs(z[kp,:,:])**2, axis=0) #/ np.mean(np.abs(y)**2, axis=0)
 
     if 0:
         fig = plt.figure()
@@ -422,11 +431,27 @@ def compute_filter_output(r, r0, rd, refCoeff, rir_dur, Fs, raw, win, L, R, W):
         
     return magout
 
+@njit
+def data_indep_MWF_calc(h,y):
+    # JITTED function for calculation of data-independent beamformer
+    w_dindep = h @ np.linalg.pinv(h.conj().T @ h)
+    magout = np.zeros_like(y)
+    for ii in range(y.shape[1]):
+        mag = np.convolve(w_dindep[:,ii], y[:,ii])
+        magout[:,ii] = mag[:len(y)]
+    return magout
+
 
 def plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,makeGIF=False,freqAvType='all'):
 
     # Export name (HARD-CODED)
     exportname = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\test' % (os.getcwd())
+
+    # Check inputs
+    if len(magout.shape) == 4:
+        print('Plotting: data-independent result detected (no frequency dependency) --> adapting input format.')
+        magout = magout[:,:,:,np.newaxis,:]
+        freqs = [freqs[0]]
 
     fig = plt.figure(figsize=(8,6))
     if makeGIF:
@@ -448,9 +473,10 @@ def plot_spatial_visu_MWF(xx,yy,zz,magout,freqs,targetSources,noiseSources,r,mak
         print('Spatial MWF output as fct of frequency exported as GIF in:\n"%s\\%s.gif"' % (giffolder, gifname))
 
     # AVERAGE OVER FREQUENCIES
-    fc, fl, fu = noctfr(n=3, fll=freqs[1], ful=freqs[-1], type='exact')
     if freqAvType == 'all':
         fc, fl, fu = [0], [freqs[0]], [freqs[-1]]   # Consider all frequencies
+    elif freqAvType == 'OTOB':
+        fc, fl, fu = noctfr(n=3, fll=freqs[1], ful=freqs[-1], type='exact')
     for idxOTOB in range(len(fc)):
         # Select appropriate data chunk
         idxfreq = [ii for ii in range(len(freqs)) if freqs[ii] >= fl[idxOTOB] and freqs[ii] <= fu[idxOTOB]]
@@ -493,8 +519,12 @@ def plot_subfct(fig,xx,yy,zz,magout,targetSources,noiseSources,r,plotfreq,plotse
 
     if targetSources is not None:       # Slice
         for ii in range(magout.shape[2]):
-            ax.contourf(xx[:,:,ii], yy[:,:,ii],\
-                 np.abs(np.mean(magout[:,:,ii,plotfreq,plotsensor], axis=2)/np.amax(magout[:,:,:,plotfreq,plotsensor])),\
+            if not isinstance(plotfreq, int):
+                datap = np.mean(magout[:,:,ii,plotfreq,plotsensor], axis=2)
+            else:
+                datap = magout[:,:,ii,plotfreq,plotsensor]
+            ln = ax.contourf(xx[:,:,ii], yy[:,:,ii],\
+                 np.abs(datap/np.amax(magout[:,:,:,plotfreq,plotsensor])),\
                       offset=zz[0,0,ii], zdir='z', alpha=0.5)
         for ii in range(targetSources.shape[0]):
             ax.scatter(targetSources[ii,0],targetSources[ii,1],targetSources[ii,2],c='blue')
@@ -522,4 +552,5 @@ def plot_subfct(fig,xx,yy,zz,magout,targetSources,noiseSources,r,plotfreq,plotse
     else:
         set_axes_equal(ax)      # set axes equal
 
-    return None
+    return ln
+
