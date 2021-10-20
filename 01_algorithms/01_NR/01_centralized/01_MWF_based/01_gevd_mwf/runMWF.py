@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.rcParams['text.usetex'] = False
 import scipy.signal as sig
+import pandas as pd
 # Third party imports
 #
 # Local application imports
@@ -40,32 +41,36 @@ def main():
                                 #   -'distinct': the speakers may never speak simultaneously.
     voicedetection = 'VAD'      # type of voice activity detection mechanism to use (VAD or SPP)
     #
-    MWFtype = 'batch'           # if 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD)
-    # MWFtype = 'online'          # if 'online', compute the covariance matrices iteratively (possibly using GEVD)
+    # MWFtype = 'batch'           # if 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD)
+    MWFtype = 'online'          # if 'online', compute the covariance matrices iteratively (possibly using GEVD)
     #
-    useGEVD = False             # if True, use GEVD, do not otherwise
+    useGEVD = True             # if True, use GEVD, do not otherwise
     GEVDrank = 1
     #
-    Tmax = 5                    # maximum signal duration [s]
+    Tmax = 15                    # maximum signal duration [s]
     baseSNR = 10                # SNR pre-RIR application [dB]
     #
     pauseDur = 0                # duration of pauses in-between speech segments [s]
-    pauseSpace = 1              # duration of speech segments (btw. pauses) [s]
+    pauseSpace = 3              # duration of speech segments (btw. pauses) [s]
     #
     SPP_threshold = 0.8
 
     # Exports
     exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\02_for_20211007meeting\\onesource_anechoic' % CWD
+    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\03_metrics\\anechoic\\GEVDrank1' % CWD
+    # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\03_metrics\\anechoic\\GEVDrank2' % CWD
+    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\03_metrics\\reverberant\\GEVDrank1' % CWD
+    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\03_metrics\\reverberant\\GEVDrank2' % CWD
     # ----- Acoustic scenario + specific speech/noise signal(s) selection (if empty, random selection) 
     # ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
-    # ASref = 'J3Mk2_Ns2_Nn3\\testAS'            
-    ASref = 'J3Mk2_Ns1_Nn1\\testAS_anechoic'      
-    ASref = 'J5Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
-    ASref = 'J10Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
-    ASref = 'J10Mk1_Ns1_Nn1\\testAS_anechoic_2D'      
-    ASref = 'J1Mk5_Ns1_Nn1\\testAS_anechoic_2D_array'   
-    ASref = 'J1Mk5_Ns1_Nn3\\AS1_anechoic_2D_array' 
-    ASref = 'J5Mk1_Ns1_Nn3\\AS0_anechoic_2D'     
+    ASref = 'J3Mk2_Ns2_Nn3\\testAS'            
+    # ASref = 'J3Mk2_Ns1_Nn1\\testAS_anechoic'      
+    # ASref = 'J5Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
+    # ASref = 'J10Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
+    # ASref = 'J10Mk1_Ns1_Nn1\\testAS_anechoic_2D'      
+    # ASref = 'J1Mk5_Ns1_Nn1\\testAS_anechoic_2D_array'   
+    # ASref = 'J1Mk5_Ns1_Nn3\\AS1_anechoic_2D_array' 
+    # ASref = 'J5Mk1_Ns1_Nn3\\AS0_anechoic_2D'     
     plotAS = 'plot'
     plotAS = None
     # Specific speech/noise files 
@@ -107,8 +112,9 @@ def main():
     # Set useful data as variables
     M = y.shape[-1]                 # total number of sensors
     Mk = M/J                        # number of sensors per node
-    beta = 1 - (R_fft/(Fs*Tavg))    # Forgetting factor
-    # beta = 1 - 1/16e3    # Forgetting factor (TMP)
+    # beta = 1 - (R_fft/(Fs*Tavg))    # Forgetting factor
+    beta = 1 - 1/16e3    # Forgetting factor (TMP)  --- for PhDSU_N03/N04
+
     # Check on input parameters
     if not (Tmax*Fs/(L_fft-R_fft)).is_integer():
         print('WARNING: the chosen <Tmax>=%is conflicts with the frame length <L_fft-R_fft>=%i\n' % (Tmax, L_fft-R_fft))
@@ -178,10 +184,13 @@ def main():
     print('STOI improvement:')
     print(stoi_enhanced - stoi_noisy)
 
-    # if EXPORTDATA:
-    #     # Export SNRs in time domain
-    #     npa = np.stack((SNRy,SNRd_hat,SNRimp))
-    #     pd.DataFrame(npa, index=['y', 'dhat', 'imp']).to_csv('%s\\SNRs_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+    if EXPORTDATA:
+        # Export fwSNRseg values
+        npa = np.stack((fwSNRseg_noisy,fwSNRseg_enhanced))
+        pd.DataFrame(npa, index=['fwSNRseg_noisy', 'fwSNRseg_enhanced']).to_csv('%s\\fwSNRseg_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+        # Export STOI values
+        npa = np.stack((stoi_noisy,stoi_enhanced))
+        pd.DataFrame(npa, index=['stoi_noisy', 'stoi_enhanced']).to_csv('%s\\STOI_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 
 
@@ -261,6 +270,8 @@ def main():
         #     plt.savefig('%s\\barchart_%ip_ev%i_%s.png' % (exportDir,pauseDur,pauseSpace,reftxt))
 
         # plt.show()
+
+    stop = 1
 
     return None
 

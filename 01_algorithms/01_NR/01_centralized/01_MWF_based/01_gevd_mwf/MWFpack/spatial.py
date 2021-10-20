@@ -79,43 +79,21 @@ def getmicsig(r0,r,x,Fs,rd,alpha,rir_dur):
 @njit
 def mfb(h):
     # Computes Matched Filter Beamformer (MFB).
-    # Following equation 2.72 in Randall Ali's PhD thesis. 
-    w = np.zeros_like(h)
-    for ii in range(h.shape[0]):
-        hcurr = h[ii,:,:]
-        w[ii,:,:] = hcurr @ np.linalg.pinv(hcurr.conj().T @ hcurr)
+    # Following equation 2.72 in Randall Ali's PhD thesis.
+    w = h @ np.linalg.pinv(h.conj().T @ h)
     return w
 
 
 def applymwf(w,x):
     # Applies a multichannel Wiener filter to a multichannel signal
-    # in the STFT-domain.
-
-    y = np.zeros_like(x)
+    # in the frequency-domain.
+    y = np.zeros(x.shape[0], dtype=complex)
     for kp in range(w.shape[0]):
-        for l in range(w.shape[1]):
-            y[kp,l,:] = w[kp,l,:].conj().T @ x[kp,l,:]
-
+    
+        # normfact = x[kp,:].conj().T @ x[kp,:]
+        normfact = 1
+        y[kp] = w[kp,:].conj().T @ (x[kp,:] / normfact)
     return y
-
-
-# @njit
-def energy(x):
-    # Computes total "energy" of (multi-channel) signal(s) in STFT-domain. 
-
-    if len(x.shape) == 3:   # multi-channel case
-        e = np.zeros(x.shape[2])
-        e_pf = np.zeros((x.shape[2],x.shape[0]))
-        for ii in range(x.shape[2]):
-            # Average over frequency bins
-            eav = np.mean(np.abs(x[:,:,ii])**2, axis=0)
-            e[ii] = np.amax(eav)   # get max value across time frames
-            e_pf[ii,:] = np.amax(np.abs(x[:,:,ii])**2, axis=1)  # per frequency
-    else:
-        e = np.amax(np.mean(np.abs(x)**2, axis=0))
-        e_pf = np.amax(np.abs(x)**2, axis=1)      # per frequency
-    return e, e_pf
-
 
 # ----------- PLOTTING FUNCTIONS -----------
 def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=False,exportname='',freqs=[]):
@@ -125,18 +103,23 @@ def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=Fal
 
     # PLOT
     fig = plt.figure(figsize=(5,4), constrained_layout=True)
-    if len(data.shape) == 5:
+    if len(data.shape) == 4:
+        # Set the colorbar limits
+        vmax = np.nanmean(np.nanmax(data, axis=-1))
+        vmin = np.nanmean(np.nanmin(data, axis=-1))/3
         # There is a frequency-dependency
-        for ii in range(data.shape[-1]):
+        for ii in range(data.shape[3]):
+            print('Plotting GIF frame for frequency %.2f Hz (%i/%i)...' % (freqs[ii], ii+1, data.shape[3]))
             ax = fig.add_subplot(111)
             # Plot energy spatial contour map
-            mapp = ax.contourf(xx[:,:,0], yy[:,:,0], np.mean(data[:,:,0,:,ii], axis=2), vmin=-100., vmax=0.)
+            mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], vmin=vmin, vmax=vmax, levels=15)
             # Show target source as dot
-            ax.scatter(targetSource[0],targetSource[1],c='red',edgecolors='black')
+            ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
             # Show microphones as dots
             ax.scatter(micpos[:,0],micpos[:,1],c='cyan',edgecolors='black')
             # 
-            titstr = '$\\mathrm{E}_{l,k}\\left\{\\left| \\mathbf{w}_\\mathrm{MFB})(\\kappa)^H\\mathbf{h}(\\kappa) \\right|^2\\right\}$ - %i Hz' % (freqs[ii])
+            # titstr = '$\\mathrm{E}_{l,k}\\left\{\\left| \\mathbf{w}(\\kappa)^H\\mathbf{h}(\\kappa) \\right|^2\\right\}$ - %i Hz' % (freqs[ii])
+            titstr = '$\\bar{e}(\mathbf{r}_i) - %i Hz$' % (freqs[ii])
             if dBscale:
                 titstr += ' [dB]'
             ax.set(title=titstr, xlabel='$x$ [m]', ylabel='$y$ [m]') # title
@@ -146,21 +129,23 @@ def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=Fal
                 fmt = '%.1f'
             fig.colorbar(
                 ScalarMappable(norm=mapp.norm, cmap=mapp.cmap),
-                ticks=range(-100, 0, 10)
+                ticks=range(int(np.round(vmin)), int(np.round(vmax)), int((vmax - vmin)/10))
                 )
             plt.savefig('%s_f%i.png' % (exportname, ii+1))#, bbox_inches='tight')
 
             fig.clear()
+        print('All GIF frames saved as PNGs, names "%s".' % exportname)
     else:
         ax = fig.add_subplot(111)
         # Plot energy spatial contour map
-        mapp = ax.contourf(xx[:,:,0], yy[:,:,0], np.mean(data[:,:,0,:], axis=2))
+        mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0], levels=15)
         # Show target source as dot
-        ax.scatter(targetSource[0],targetSource[1],c='red',edgecolors='black')
+        ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
         # Show microphones as dots
         ax.scatter(micpos[:,0],micpos[:,1],c='cyan',edgecolors='black')
         # 
-        titstr = '$\\mathrm{E}_{\\kappa,l,k}\\left\{\\left| \\mathbf{w}_\\mathrm{MFB}^H\\mathbf{h} \\right|^2\\right\}$'
+        # titstr = '$\\mathrm{E}_{\\kappa,l,k}\\left\{\\left| \\mathbf{w}^H\\mathbf{h} \\right|^2\\right\}$'
+        titstr = '$\\bar{e}(\mathbf{r}_i)$'
         if dBscale:
             titstr += ' [dB]'
         ax.set(title=titstr, xlabel='$x$ [m]', ylabel='$y$ [m]') # title
@@ -169,13 +154,14 @@ def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=Fal
         if dBscale:
             fmt = '%.1f'
         plt.colorbar(mapp, ax=ax, format=fmt)
-    #
-    # Export or show
-    if exportit:
-        plt.savefig('%s.png' % exportname, bbox_inches='tight')
-        plt.savefig('%s.pdf' % exportname, bbox_inches='tight')
-    else:
-        plt.show()
+    
+        # Export or show
+        if exportit:
+            plt.savefig('%s.png' % exportname, bbox_inches='tight')
+            plt.savefig('%s.pdf' % exportname, bbox_inches='tight')
+        else:
+            plt.show()
+        print('Average energy plot exported, "%s".' % exportname)
 
     stop = 1
 
@@ -186,8 +172,8 @@ def main(refidx):
 
     # User inputs
     rd = np.array([6,6,5])                                  # room dimensions
-    # alpha = 0.99                                            # room absorption coefficient
-    alpha = 1                                               # room absorption coefficient
+    revTime = 0.2                                           # reverberation time in room (0 if anechoic)
+    revTime = 0.0                                           # reverberation time in room (0 if anechoic)
     z_slice = 3                                             # height of 2D-slice (where all nodes and sources are)
     targetSource = np.random.uniform(0,1,size=(3,)) * rd    # target source coordinates
     targetSource[-1] = z_slice              
@@ -195,10 +181,13 @@ def main(refidx):
     # arraytype = 'random'    # If "random" - Generate <Nr> random receiver positions across available volume
     arraytype = 'fixedrandom'    # If "fixedrandom" - Use pre-generated 5 random receiver positions
     # arraytype = 'compact'   # If "compact" - Generate single linear array of <Nr> microphones, randomly placed in room
-    # arraytype = 'fixedcompact'   # If "fixedcompact" - Use pre-generated single linear array of 5 microphones
+    arraytype = 'fixedcompact'   # If "fixedcompact" - Use pre-generated single linear array of 5 microphones
     Fs = 16e3                           # sampling frequency
     gres = 0.1                          # spatial grid resolution
     # gres = 2                          # spatial grid resolution
+    #
+    makeGIF = 1     # If True, export a series of PNGs (per freq. bin) for GIF-making
+    exportit = 1    # If False, do not export any figure
 
     # Generate microphone positions
     if arraytype == 'compact':
@@ -215,45 +204,39 @@ def main(refidx):
                             [3.09656351, 3.98553171, 3.        ],
                             [3.76354577, 0.24801863, 3.        ]])
         targetSource = np.array([1.59439374, 1.30800814, 3.        ])
-    # elif arraytype == 'fixedcompact':
-
+    elif arraytype == 'fixedcompact':
+        micpos = np.array([[4.62104008, 2.56325556, 3],
+                            [4.64143235, 2.61825619, 3],
+                            [4.66182462, 2.67325683, 3.        ],
+                            [4.68221689, 2.72825747, 3.],
+                            [4.70260915, 2.78325811, 3.]])
+        targetSource = np.array([4.41080322, 5.33609293, 3.        ])
 
     # RIR duration
-    # c0 = 343        # speed of sound
-    # maxt = 1/c0 * np.amax(np.linalg.norm(micpos - targetSource, axis=1))   # sound travel time corresponding to greatest source-receiver distance
-    # rir_dur = 2 * maxt                      # RIR duration
     rir_dur = 2**10/Fs                      # RIR duration
-    # print('Greatest mic-source distance: %.2f m' % (maxt*c0))
-
-    # STFT
-    # L_fft = np.amin([2**9, 2**(np.floor(np.log2(rir_dur * Fs)) - 1)])    # Time frame length [samples]
-    L_fft = 2**9    # Time frame length [samples]
-    R_fft = L_fft/2                         # Inter-frame overlap length [samples]
-    win = np.sqrt(np.hanning(L_fft))        # STFT time window
-    print('Corresponding RIR duration: %.2f s (%i samples)' % (rir_dur, rir_dur*Fs))
-    print('Chosen FFT frame size: %i samples (%i frames/RIR)' % (R_fft, np.floor(rir_dur*Fs/R_fft)))
         
     # Room's reflection coefficient
+    alpha = 0.161*np.prod(rd)/(revTime * 2 *(rd[0]*rd[1] + rd[0]*rd[2] + rd[1]*rd[2]))  # room absorption coefficient
+    if alpha > 1:
+        alpha = 1
     refCoeff = -1*np.sqrt(1 - alpha)
 
     # Get beamforming filter for target source
     RIRs = rimPy(micpos, targetSource, rd, refCoeff, rir_dur, Fs)      # Get RIRs to target source
     RTFs = np.fft.fft(RIRs, axis=0)
-    # h_STFT = calcSTFT(h, Fs, win, L_fft, R_fft, 'onesided')[0]      # Go to STFT domain
-    w_target = mfb(h_STFT)                                                 # Get MFB in STFT domain for target source
-
-    # fig, ax = plt.subplots(2,1)
-    # ax[0].plot(np.arange(len(RIRs))/Fs, RIRs)
-    # ax[0].grid()
-    # ax[1].plot(20*np.log10(np.abs(RTFs[:int(len(RTFs)/2)])))
-    # ax[1].grid()
-    # plt.show()
+    # Only consider positive frequencies
+    RTFs = RTFs[:int(np.round(RTFs.shape[0] / 2)), :]
+    # Compute Matched Filter Beamformer h/(h^H*h)
+    w_target = mfb(RTFs)
 
     # Gridify room
     xx,yy,zz = gridify(rd, targetSource, gridres=gres, plotgrid=False)
 
-    en = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],micpos.shape[0]))            # total TF-averaged energy
-    e_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],micpos.shape[0],int(R_fft + 1)))    # t-averaged energy per frequency line
+    # Plot acoustic scenario + grid
+    # plot_AS(rd, micpos, targetSource, ASref=arraytype, xx=xx,yy=yy,zz=zz, exportit=1)
+
+    en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],int(rir_dur*Fs / 2)))     # per-freq. energy
+    en    = np.zeros_like(xx)                        # freq.-averaged energy
     for ix in range(xx.shape[0]):
         for iy in range(xx.shape[1]):
             for iz in range(xx.shape[2]):
@@ -264,26 +247,80 @@ def main(refidx):
                     print('Computing filter output energy for source at (%.2f,%.2f,%.2f) in room [%.2f %%]...' %\
                         (r0[0],r0[1],r0[2],progress_percent))
                 
-                h = rimPy(micpos, r0, rd, refCoeff, rir_dur, Fs)            # Get RIRs
-                h /= np.sum(np.abs(h), axis=0)                                      # Normalize individual RIRs
-                h_STFT, f = calcSTFT(h, Fs, win, L_fft, R_fft, 'onesided')  # Go to STFT domain
-                
-                y = applymwf(w_target, h_STFT)          # Apply target filter to RIRs
-                
-                a, b = energy(y)         # Get output energy
-                en[ix,iy,iz,:], e_pf[ix,iy,iz,:,:] = a, b
+                RIRs = rimPy(micpos, r0, rd, refCoeff, rir_dur, Fs) # Get RIRs
+                # RIRs /= np.amax(RIRs, axis=0)                       # ``Max`` scaling
+                # RIRs /= np.sum(np.abs(RIRs), axis=0)                # 1-norm scaling
+                RIRs /= np.sqrt(np.sum(np.abs(RIRs)**2, axis=0))      # Euclidean norm scaling
+
+                            
+                # fig = plt.figure(figsize=(4,4), constrained_layout=True)
+                # ax = fig.add_subplot(111)
+                # ax.plot(np.arange(len(RIRs))/Fs, RIRs)
+                # ax.grid()
+                # ax.set(xlabel='$t$ [s]')
+                # plt.legend(['Sensor %i' % (s+1) for s in range(RIRs.shape[1])])
+                # fname = '%s\\RIRs.pdf' % ('01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\RIRsnorms')
+                # plt.savefig(fname)
+                # plt.show()
+
+                RTFs = np.fft.fft(RIRs, axis=0)                     # Get RTFs
+                freqs = Fs * np.fft.fftfreq(len(RTFs), d=1.0)       # ...and the corresponding frequency vector
+                # Only consider positive frequencies
+                RTFs = RTFs[:int(np.round(RTFs.shape[0] / 2)), :]
+                freqs = freqs[:int(np.round(len(freqs) / 2))]
+
+                y = applymwf(w_target, RTFs)                        # Apply target filter to RIRs
+
+                # fig, ax = plt.subplots(2,1)
+                # ax[0].plot(freqs, 20*np.log10(np.abs(RTFs)))
+                # ax[0].grid()
+                # ax[1].plot(freqs, 20*np.log10(np.abs(y)))
+                # ax[1].grid()
+                # plt.show()
+
+                en_pf[ix,iy,iz,:] = np.abs(y)**2                    # Get output energy per freq.   
+                en[ix,iy,iz] = np.mean(en_pf[ix,iy,iz,:], axis=0)   # Get avg. normalized output energy     
+
 
     # Plotting
     foldername = 'C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\MFB'
     fname = '%s\\spatialvisu_MFB_%i' % (foldername,refidx)
-    plotspatialresp(xx,yy,zz,en,targetSource,micpos,dBscale=1,exportit=1,exportname=fname)
-    plotspatialresp(xx,yy,zz,e_pf,targetSource,micpos,dBscale=1,exportit=0,exportname=fname,freqs=f)
+    plotspatialresp(xx,yy,zz,en,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname)
+    if makeGIF:
+        plotspatialresp(xx,yy,zz,en_pf,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname,freqs=freqs)
 
     return 0
 
 
+def plot_AS(rd,r,rs,ASref='',xx=[],yy=[],zz=[],exportit=0):
+    fig = plt.figure(figsize=(4,4), constrained_layout=True)
+    ax = fig.add_subplot(111)
+    if xx is not []:
+        # Plot grid
+        phgrid = ax.scatter(xx,yy,zz,c='lightblue',alpha=0.5)
+    # Show target source as dot
+    ph1 = ax.scatter(rs[0],rs[1],c='red',edgecolors='black')
+    # Show microphones as dots
+    ph2 = ax.scatter(r[:,0],r[:,1],c='cyan',edgecolors='black')
+    # 
+    ax.grid()
+    plt.legend([ph1, ph2, phgrid],['Target source', 'Sensors', 'Source grid $\{\mathbf{r}_i\}_{i=1}^N$'],framealpha=1,loc='upper left')
+    ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]') # title
+    ax.axis('equal')
+    ax.set_xlim(0, rd[0])
+    ax.set_ylim(0, rd[1])
+    if exportit:
+        fname = '%s\\AS_%s.png' % ('01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\ASs', ASref)
+        plt.savefig(fname)
+        fname = '%s\\AS_%s.pdf' % ('01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\ASs', ASref)
+        plt.savefig(fname)
+    plt.show()
+
+    return None
+
+
 if __name__ == '__main__':
-    Nfigs = 10
+    Nfigs = 1
     for refidx in range(Nfigs):
         print('\n\nRunning for figure %i/%i...\n' % (refidx+1,Nfigs))
         main(refidx + 1)

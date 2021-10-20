@@ -82,6 +82,8 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     #
     D_hat = np.zeros_like(y_STFT, dtype=complex) 
     updateWeights = np.zeros(nbins)    # flag to know whether or not to update
+    # TEMPORARY
+    sig_export = np.zeros_like(D_hat)
     
     if MWFtype == 'batch':
         if desired is None:
@@ -135,6 +137,7 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
                         q = np.linalg.pinv(Xmat.conj().T)
                         # Sort eigenvalues in descending order
                         Sigma_yy[:,:,kp], Qmat[:,:,kp] = sortgevd(np.diag(sig),q) 
+                        sig_export[kp,l,:] = np.diag(Sigma_yy[:,:,kp])# TMP --------------
                         W_hat[:,:,kp] = update_w_GEVDMWF(Sigma_yy[:,:,kp], Qmat[:,:,kp], GEVDrank)          # LMMSE weights
                     else:
                         W_hat[:,:,kp] = update_w_MWF(np.squeeze(Ryy[:,:,kp]), np.squeeze(Rnn[:,:,kp]))      # LMMSE weights
@@ -149,40 +152,40 @@ def MWF(y,Fs,win,L,R,voiceactivity,beta,min_covUpdates,useGEVD=False,GEVDrank=1,
     print('MW-filtering done.')
 
     # # TEMPORARY
-    # import matplotlib.pyplot as plt
-    # fig, ax = plt.subplots(2,3)
-    # plottype = ''
-    # # plottype = 'norm'
-    # # tmp = np.std(sig_export, axis=-1)
-    # for ii in range(6):
-    #     # Current subplot indexing
-    #     iax = int(np.ceil((ii+1)/3))-1
-    #     jax = ii % 3
-    #     # Plot
-    #     if plottype != 'norm':
-    #         tmp = np.real(sig_export[:,:,ii])
-    #         mapp = ax[iax,jax].imshow(20*np.log10(tmp), vmin=0, vmax=70)
-    #         ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL [dB-scale]' % (ii+1))
-    #     else:
-    #         tmp = np.real(sig_export[:,:,ii]) / np.real(sig_export[:,:,0])
-    #         tmp[tmp == np.nan] = 0
-    #         mapp = ax[iax,jax].imshow(tmp, vmin=0, vmax=1)
-    #         ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL' % (ii+1))
-    #     ax[iax,jax].invert_yaxis()
-    #     ax[iax,jax].set_aspect('auto')
-    #     # ax[iax,jax].grid()
-    #     fig.colorbar(mapp, ax=ax[iax,jax])
-    #     if ii > 2:
-    #         ax[iax,jax].set(xlabel='Frame index $l$')
-    #     if ii == 0 or ii == 3:
-    #         ax[iax,jax].set(ylabel='Freq. bin index $\kappa$')
-    # if plottype != 'norm':
-    #     plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs')
-    # else:
-    #     plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs, normalized to largest GEVL')
-    # #     plt.savefig('GEVD_EVLs_norm.png')
-    # #     plt.savefig('GEVD_EVLs.png')
-    # plt.show()
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(2,3)
+    plottype = ''
+    plottype = 'norm'
+    # tmp = np.std(sig_export, axis=-1)
+    for ii in range(6):
+        # Current subplot indexing
+        iax = int(np.ceil((ii+1)/3))-1
+        jax = ii % 3
+        # Plot
+        if plottype != 'norm':
+            tmp = np.real(sig_export[:,:,ii])
+            mapp = ax[iax,jax].imshow(20*np.log10(tmp), vmin=0, vmax=70)
+            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL [dB-scale]' % (ii+1))
+        else:
+            tmp = np.real(sig_export[:,:,ii]) / np.real(sig_export[:,:,0])
+            tmp[tmp == np.nan] = 0
+            mapp = ax[iax,jax].imshow(tmp, vmin=0, vmax=1)
+            ax[iax,jax].set(title='%i$^\mathrm{th}$ largest EVL' % (ii+1))
+        ax[iax,jax].invert_yaxis()
+        ax[iax,jax].set_aspect('auto')
+        # ax[iax,jax].grid()
+        fig.colorbar(mapp, ax=ax[iax,jax])
+        if ii > 2:
+            ax[iax,jax].set(xlabel='Frame index $l$')
+        if ii == 0 or ii == 3:
+            ax[iax,jax].set(ylabel='Freq. bin index $\kappa$')
+    if plottype != 'norm':
+        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs')
+    else:
+        plt.suptitle('$\{\hat{\mathbf{R}}_\mathbf{yy},\hat{\mathbf{R}}_\mathbf{nn}\}$-GEVLs, normalized to largest GEVL')
+    #     plt.savefig('GEVD_EVLs_norm.png')
+    #     plt.savefig('GEVD_EVLs.png')
+    plt.show()
 
     stop = 1
 
@@ -321,15 +324,6 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,win,L,R,targetSources=None,noiseSourc
         z_ = np.linspace(0,rd[2],num=int(np.round(rd[2]/gridres)))
         print('%.1f x %.1f x %.1f m^3 room gridified every %.1f m,\nresulting in %i possible source locations across the 3D space.' % (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_)))
     xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
-
-    # # # TEMPORARY
-    # x_ = r[:,0]  # Set the z-coordinates of the target sources as slice heights
-    # x_ = x_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
-    # y_ = r[:,1]  # Set the z-coordinates of the target sources as slice heights
-    # y_ = y_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
-    # z_ = r[:,2]  # Set the z-coordinates of the target sources as slice heights
-    # z_ = z_[:,np.newaxis] + 0.05 * np.ones((r.shape[0],1))
-    # xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
 
     # Make raw signal
     raw = np.random.uniform(low=-1.0, high=1.0, size=(int(Tsig*Fs),))
