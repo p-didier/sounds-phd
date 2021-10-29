@@ -40,7 +40,7 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     #    - Tw is the length of the low-pass filter in [seconds] (default is 40
     #    samples, i.e. Tw=40/Fs)
     #    - Fc is the cut-off frequency of the fractional delay filter in [Hz]
-    #    (default is Fc=0.9*(Fs/2))
+    #    (default is Fc=Fs/2 -- CHANGE MADE ON 28/10/2021 by Paul Didier (from 0.9*(Fs/2)))
     #    - c is the speed of sound in m/s (default is c=343)
     #    
     #    If you use this code, please cite De Sena et al. "On the modeling of 
@@ -54,7 +54,8 @@ def rimPy(mic_pos, source_pos, room_dim, beta, rir_length, Fs, rand_dist=0, Tw=N
     if Tw is None:
         Tw = 40/Fs
     if Fc is None:
-        Fc = 0.9*Fs/2
+        # Fc = 0.9*Fs/2
+        Fc = Fs/2    # CHANGE MADE ON 28/10/2021 by Paul Didier
         
     # Ensure that <beta> is an array
     if not(isinstance(beta, list)):

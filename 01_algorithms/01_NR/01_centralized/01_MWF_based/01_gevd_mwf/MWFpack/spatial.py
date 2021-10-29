@@ -1,122 +1,201 @@
+from numba.core.errors import ForbiddenConstruct
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from matplotlib.cm import ScalarMappable
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import sys,os
-import scipy.signal as sig
 from numba import njit
-from scipy.signal.ltisys import dbode
+from numpy.core.numeric import zeros_like
+from numpy.ma import multiply
+import scipy
+import scipy.fft
 #
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
-from plotting.twodim import plot_room2D, plotSTFT
-from plotting.threedim import set_axes_equal, plot_room
-from plotting.general import add_colorbar
+from plotting.threedim import plot_room
 from utilities.terminal import loop_progress
-from mySTFT.calc_STFT import calcSTFT
+from general.frequency import get_closest
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\03_signal_gen\\01_acoustic_scenes')))
 from rimPypack.rimPy import rimPy
 from ASgen import generate_array_pos
 
 
-def gridify(rd, targetSources, gridres=0.5, plotgrid=False):
-    # Gridifies a cuboidal space for MWF output visualization.
+def gridify(rd, z_, gridres=0.5, plotgrid=False):
+    # Gridifies a 2D space for MWF output visualization.
 
-    # Init
-    flag2D = False
+    # Do not compute more slices than necessary
+    z_ = np.unique(z_)
+
     # Gridify room or room-slice
     x_ = np.linspace(0,rd[0],num=int(np.round(rd[0]/gridres)))
     y_ = np.linspace(0,rd[1],num=int(np.round(rd[1]/gridres)))
-    if targetSources is not None:
-        if len(targetSources.shape) == 2:
-            z_ = np.unique(targetSources[:,-1])  # Set the z-coordinates of the target sources as slice heights
-        else:
-            z_ = np.array([targetSources[-1]])
-            flag2D = True
-        z_ = z_[:,np.newaxis]
-        print('%.1f x %.1f x %.1f m^3 room gridified in %i slices every %.1f m,\nresulting in %i possible source locations.' %\
-             (rd[0],rd[1],rd[2],len(z_),gridres,len(x_)*len(y_)*len(z_)))
-    else:
-        z_ = np.linspace(0,rd[2],num=int(np.round(rd[2]/gridres)))
-        print('%.1f x %.1f x %.1f m^3 room gridified every %.1f m,\nresulting in %i possible source locations across the 3D space.' %\
-             (rd[0],rd[1],rd[2],gridres,len(x_)*len(y_)*len(z_)))
+    print('%.1f x %.1f m^2 space gridified in %i slices every %.1f m,\nresulting in %i possible source locations.' %\
+            (rd[0],rd[1],len(z_),gridres,len(x_)*len(y_)*len(z_)))
     xx,yy,zz = np.meshgrid(x_, y_, z_, indexing='ij')
 
     if plotgrid:
         fig = plt.figure()
-        if flag2D:
-            ax = fig.add_subplot(111)
-            ax.scatter(xx,yy,s=5.0,c='blue')
-            ax.set(title='Room grid (2-D, $z$=%.2f m) - $\\delta$=%.2f m' % (z_[0],gridres))
-            plot_room2D(ax,rd)
-            ax.axis('equal')
-        else:
-            ax = fig.add_subplot(111, projection='3d')
-            ax.scatter(xx,yy,zz,s=5.0,c='blue')
-            ax.set(zlabel='$z$ [m]',title='Room grid (3-D) - $\\delta$=%.2f m' % gridres)
-            set_axes_equal(ax)
-            plot_room(ax,rd)
+        ax = fig.add_subplot(111)
+        ax.scatter(xx,yy,zz,s=5.0,c='blue')
+        ax.set(title='Room grid - $\\delta$=%.2f m' % (gridres))
+        plot_room(ax,rd)
+        ax.axis('equal')
         ax.grid()
-        ax.set(xlabel='$x$ [m]',ylabel='$y$ [m]')
+        ax.set(xlabel='$x$ [m]',ylabel='$y$ [m]',zlabel='$z$ [m]')
         plt.show()
 
     return xx,yy,zz
 
 
-def getmicsig(r0,r,x,Fs,rd,alpha,rir_dur):
-
-    # Room's reflection coefficient
-    refCoeff = -1*np.sqrt(1 - alpha)
-    # Get RIRs
-    h = rimPy(r, r0, rd, refCoeff, rir_dur, Fs)
-    # Normalize individual RIRs
-    h /= np.sum(h, axis=0)
-    # Generate sensors signal 
-    y = sig.fftconvolve(x, h, axes=0)
-
-    return y, h
-
 @njit
 def mfb(h):
     # Computes Matched Filter Beamformer (MFB).
     # Following equation 2.72 in Randall Ali's PhD thesis.
-    w = h @ np.linalg.pinv(h.conj().T @ h)
+    w = zeros_like(h)
+    for ii in range(h.shape[0]):
+        # w = h @ np.linalg.pinv(h.conj().T @ h)
+        w[ii,:] = h[ii,:] / (h[ii,:].conj().T @ h[ii,:])
     return w
 
 
+def mvdr(h, hn):
+    # Computes MVDR filter.
+    w = np.zeros_like(h)
+    for ii in range(h.shape[0]):
+        Rnn = np.outer(hn[ii,:], hn[ii,:].conj())
+        # Rnn = np.identity(h.shape[1])    # <-- uncomment to get back to MFB
+        num = np.linalg.inv(Rnn) @ h[ii,:].T
+        den = h[ii,:].conj() @ np.linalg.inv(Rnn) @ h[ii,:].T
+        w[ii,:] = num / den
+    return w
+
+# @njit
 def applymwf(w,x):
     # Applies a multichannel Wiener filter to a multichannel signal
     # in the frequency-domain.
-    y = np.zeros(x.shape[0], dtype=complex)
-    for kp in range(w.shape[0]):
-    
-        # normfact = x[kp,:].conj().T @ x[kp,:]
-        normfact = 1
-        y[kp] = w[kp,:].conj().T @ (x[kp,:] / normfact)
+
+    # Check input dimensions
+    if len(w.shape) == 2:
+        y = np.zeros(x.shape[0], dtype=np.complex128)
+        for kp in range(w.shape[0]):
+            y[kp] = applymwf_jitted(w[kp,:], x[kp,:])
+    elif len(w.shape) == 3:
+        y = np.zeros_like(x, dtype=np.complex128)
+        for kp in range(w.shape[0]):
+            y[kp,:] = applymwf_jitted(w[kp,:,:], x[kp,:])
+        stop = 1
     return y
 
-# ----------- PLOTTING FUNCTIONS -----------
-def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=False,exportname='',freqs=[]):
+@njit
+def applymwf_jitted(a,b):
+    return a.conj().T @ b
 
+
+def getenergy(xx,yy,zz,rir_dur,Fs,micpos,rd,refCoeff,w_target,bins_of_interest=None):
+    # Calculate energy over grid
+
+    # Initialize arrays
+    if len(w_target.shape) == 2:
+        en = np.zeros_like(xx)                        # freq.-averaged energy
+        if bins_of_interest is not None:
+            # Check that optional input arguments are correctly dimensioned
+            if len(bins_of_interest) != w_target.shap3e[0]:
+                raise ValueError('The optional arg <bins_of_interest> must refer to as many bins as the filter provided.')
+            en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],len(bins_of_interest)))     # per-freq. energy
+        else:
+            en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],int(rir_dur*Fs / 2)))     # per-freq. energy
+    elif len(w_target.shape) == 3:
+        en = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],micpos.shape[0]))                        # freq.-averaged energy
+        if bins_of_interest is not None:
+            # Check that optional input arguments are correctly dimensioned
+            if len(bins_of_interest) != w_target.shape[0]:
+                raise ValueError('The optional arg <bins_of_interest> must refer to as many bins as the filter provided.')
+            en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],len(bins_of_interest),micpos.shape[0]))     # per-freq. energy
+        else:
+            en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],int(rir_dur*Fs / 2),micpos.shape[0]))     # per-freq. energy
+
+    for ix in range(xx.shape[0]):
+        for iy in range(xx.shape[1]):
+            for iz in range(xx.shape[2]):
+                r0 = [xx[ix,iy,iz], yy[ix,iy,iz], zz[ix,iy,iz]]     # Source location (grid point)
+                # Monitor loop
+                progress_percent = loop_progress([ix,iy,iz], xx.shape)
+                print('Computing filter output energy for source at (%.2f,%.2f,%.2f) in room [%.2f %%]...' %\
+                    (r0[0],r0[1],r0[2],progress_percent))
+                
+                RIRs = rimPy(micpos, r0, rd, refCoeff, rir_dur, Fs) # Get RIRs
+                RIRs /= np.sqrt(np.sum(np.abs(RIRs)**2, axis=0))    # Euclidean norm scaling
+                RTFs = np.fft.fft(RIRs, axis=0)                     # Get RTFs
+                freqs = np.fft.fftfreq(len(RTFs), d=1/Fs)       # ...and the corresponding frequency vector
+                # Only consider positive frequencies
+                RTFs = RTFs[freqs >= 0, :]
+                freqs = freqs[freqs >= 0]
+                # Interpret inputs
+                if bins_of_interest is not None:
+                    indices_freq_bins = get_closest(freqs,bins_of_interest)
+                    # print('Only taking into account freq.-bins from %i to %i Hz' % (freqs[indices_freq_bins[0]], np.abs(freqs[indices_freq_bins[-1]])))
+                else:
+                    indices_freq_bins = np.arange(len(freqs))  # take all bins into account
+                    # print('Taking into account all frequency bins (up to %i Hz)' % freqs[-1])
+                #
+                y = applymwf(w_target, RTFs[indices_freq_bins, :])                        # Apply target filter to RIRs
+                if len(w_target.shape) == 2:
+                    en_pf[ix,iy,iz,:] = np.abs(y)**2                    # Get output energy per freq.   
+                    en[ix,iy,iz] = np.mean(en_pf[ix,iy,iz,:], axis=0)   # Get avg. normalized output energy 
+                elif len(w_target.shape) == 3:
+                    en_pf[ix,iy,iz,:,:] = np.abs(y)**2                    # Get output energy per freq.   
+                    en[ix,iy,iz,:] = np.mean(en_pf[ix,iy,iz,:,:], axis=0)   # Get avg. normalized output energy 
+                    
+
+    return en, en_pf, freqs[indices_freq_bins]
+
+# ----------- PLOTTING FUNCTIONS -----------
+def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,exportname='',\
+    freqs=[],noiseSource=None,multichannel=False,noise_spatially_white=False):
+
+    # If asked, bring to dB-scale
     if dBscale:
-        data = 20*np.log10(data)
+        data = 20*np.log10(np.abs(data))
+
+    # Multi-channel case
+    if multichannel:
+        maxlen = 5
+        nChannels = data.shape[-1]  
+        n_rows_plots = int(np.floor(nChannels / 3) + 1)
+        n_cols_plots = int(np.ceil(nChannels / n_rows_plots))
+    else:
+        maxlen = 4
 
     # PLOT
-    fig = plt.figure(figsize=(5,4), constrained_layout=True)
-    if len(data.shape) == 4:
+    if multichannel:
+        fig = plt.figure(figsize=(np.amax(xx)*n_cols_plots, np.amax(yy)*n_rows_plots * 0.8))
+    else:
+        fig = plt.figure(figsize=(np.amax(xx), np.amax(yy)), constrained_layout=True)
+    if len(data.shape) == maxlen:
+        if multichannel:
+            raise ValueError('NOT YET IMPLEMENTED')
         # Set the colorbar limits
-        vmax = np.nanmean(np.nanmax(data, axis=-1))
-        vmin = np.nanmean(np.nanmin(data, axis=-1))/3
+        vmax = np.nanmean(np.nanmax(data, axis=3))
+        vmin = np.nanmean(np.nanmin(data, axis=3))/3
         # There is a frequency-dependency
         for ii in range(data.shape[3]):
             print('Plotting GIF frame for frequency %.2f Hz (%i/%i)...' % (freqs[ii], ii+1, data.shape[3]))
             ax = fig.add_subplot(111)
             # Plot energy spatial contour map
             mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], vmin=vmin, vmax=vmax, levels=15)
-            # Show target source as dot
-            ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
             # Show microphones as dots
             ax.scatter(micpos[:,0],micpos[:,1],c='cyan',edgecolors='black')
+            # Show target source as dot
+            if len(targetSource.shape) == 1:
+                ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='blue',edgecolors='black',alpha=0.5)
+            else:
+                for ii in range(targetSource.shape[0]):
+                    ax.scatter(targetSource[ii,0],targetSource[ii,1],s=70,marker='x',c='blue',edgecolors='black',alpha=0.5)
+            # Show noise sources, if given
+            if noiseSource is not None:
+                if len(noiseSource.shape) == 1:
+                    ax.scatter(noiseSource[0],noiseSource[1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
+                else:
+                    for ii in range(noiseSource.shape[0]):
+                        ax.scatter(noiseSource[ii,0],noiseSource[ii,1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
             # 
             # titstr = '$\\mathrm{E}_{l,k}\\left\{\\left| \\mathbf{w}(\\kappa)^H\\mathbf{h}(\\kappa) \\right|^2\\right\}$ - %i Hz' % (freqs[ii])
             titstr = '$\\bar{e}(\mathbf{r}_i) - %i Hz$' % (freqs[ii])
@@ -129,39 +208,128 @@ def plotspatialresp(xx,yy,zz,data,targetSource,micpos,dBscale=False,exportit=Fal
                 fmt = '%.1f'
             fig.colorbar(
                 ScalarMappable(norm=mapp.norm, cmap=mapp.cmap),
-                ticks=range(int(np.round(vmin)), int(np.round(vmax)), int((vmax - vmin)/10))
+                ticks=range(int(np.round(vmin)), int(np.round(vmax)), int((vmax - vmin)/5))
                 )
             plt.savefig('%s_f%i.png' % (exportname, ii+1))#, bbox_inches='tight')
 
             fig.clear()
         print('All GIF frames saved as PNGs, names "%s".' % exportname)
     else:
-        ax = fig.add_subplot(111)
-        # Plot energy spatial contour map
-        mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0], levels=15)
-        # Show target source as dot
-        ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='red',edgecolors='black',alpha=0.5)
-        # Show microphones as dots
-        ax.scatter(micpos[:,0],micpos[:,1],c='cyan',edgecolors='black')
-        # 
-        # titstr = '$\\mathrm{E}_{\\kappa,l,k}\\left\{\\left| \\mathbf{w}^H\\mathbf{h} \\right|^2\\right\}$'
-        titstr = '$\\bar{e}(\mathbf{r}_i)$'
-        if dBscale:
-            titstr += ' [dB]'
-        ax.set(title=titstr, xlabel='$x$ [m]', ylabel='$y$ [m]') # title
-        ax.axis('equal')
-        fmt = '%.1e'
-        if dBscale:
-            fmt = '%.1f'
-        plt.colorbar(mapp, ax=ax, format=fmt)
+        if multichannel:
+            ylim_min = np.nanmin(data[:,:,0,:])
+            ylim_max = np.nanmax(data[:,:,0,:])
+            for ii in range(nChannels):
+                ax = fig.add_subplot(n_rows_plots,n_cols_plots,ii+1)
+
+                # TEMPORARY 28/10/2021 
+                # plotdata = data[:,:,0,ii]
+                # if len(targetSource.shape) == 1:
+                #     idx_x = get_closest(xx[:,0,0], targetSource[0])
+                #     idx_y = get_closest(yy[0,:,0], targetSource[1])
+                # else:
+                #     idx_x = get_closest(xx[:,0,0], targetSource[0,0])
+                #     idx_y = get_closest(yy[0,:,0], targetSource[0,1])
+                # ylim_max = plotdata[idx_x,idx_y]
+                # ylim_min = np.nanmin(plotdata)
+
+                # Plot energy spatial contour map
+                mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], levels=15, vmin=ylim_min, vmax=ylim_max)
+                # Show microphones as dots
+                for jj in range(nChannels):
+                    if jj != ii:
+                        ph_nodes = ax.scatter(micpos[jj,0],micpos[jj,1],c='cyan',edgecolors='black')
+                    else:
+                        ph_nodes = ax.scatter(micpos[jj,0],micpos[jj,1],c='blue',edgecolors='yellow')
+                # Show target source as dot
+                if len(targetSource.shape) == 1:
+                    ph_speech = ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='blue',alpha=0.5)
+                else:
+                    for jj in range(targetSource.shape[0]):
+                        ph_speech = ax.scatter(targetSource[jj,0],targetSource[jj,1],s=70,marker='x',c='blue',alpha=0.5)
+                # Show noise sources, if given
+                if noiseSource is not None and not noise_spatially_white:
+                    if len(noiseSource.shape) == 1:
+                        ph_noise = ax.scatter(noiseSource[0],noiseSource[1],s=70,marker='x',c='red',alpha=0.5)
+                    else:
+                        for jj in range(noiseSource.shape[0]):
+                            ph_noise = ax.scatter(noiseSource[jj,0],noiseSource[jj,1],s=70,marker='x',c='red',alpha=0.5)
+                # 
+                titstr = '$\\bar{e}(\mathbf{r}_i)$ - Sensor %i' % (ii+1)
+                if dBscale:
+                    titstr += ' [dB]'
+                #
+                # Axes formatting (labels, limits, title)
+                ax.set(title=titstr, ylabel='$y$ [m]') # title
+                if ii+1 > (n_rows_plots - 1) * n_cols_plots:
+                    ax.set(xlabel='$x$ [m]') # x-label (only on bottom plots)
+                ax.axis('equal')
+                ax.set_xlim((0, np.amax(xx)))
+                ax.set_ylim((0, np.amax(yy)))
+                #
+                # Legend
+                if ii == 0:
+                    if noise_spatially_white:
+                        ax.legend([ph_nodes,ph_speech], ['Sensor', 'Speech source'], loc='lower left')
+                    else:
+                        ax.legend([ph_nodes,ph_speech,ph_noise], ['Sensor', 'Speech source', 'Noise source'], loc='lower left')
+                #
+                # Colorbar
+                fmt = '%.1e'
+                if dBscale:
+                    fmt = '%i'
+                fig.colorbar(
+                    ScalarMappable(norm=mapp.norm, cmap=mapp.cmap),
+                    ticks=np.linspace(np.round(ylim_min), np.round(ylim_max), 10),
+                    format=fmt
+                    )
+
+            if freqs is not []:
+                if len(freqs) > 1:
+                    plt.suptitle('Range: $f \in [%i,...,%i]$ Hz' % (np.amin(np.abs(freqs)), np.amax(np.abs(freqs))))
+                else:
+                    plt.suptitle('Single freq. bin -- $f = %i$ Hz' % (freqs[0]))
+        else:
+            ax = fig.add_subplot(111)
+            # Plot energy spatial contour map
+            mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0], levels=15)
+            # Show microphones as dots
+            ax.scatter(micpos[:,0],micpos[:,1],c='cyan',edgecolors='black')
+            # Show target source as dot
+            if len(targetSource.shape) == 1:
+                ax.scatter(targetSource[0],targetSource[1],s=70,marker='x',c='blue',alpha=0.5)
+            else:
+                for ii in range(targetSource.shape[0]):
+                    ax.scatter(targetSource[ii,0],targetSource[ii,1],s=70,marker='x',c='blue',alpha=0.5)
+            # Show noise sources, if given
+            if noiseSource is not None:
+                if len(noiseSource.shape) == 1:
+                    ax.scatter(noiseSource[0],noiseSource[1],s=70,marker='x',c='red',alpha=0.5)
+                else:
+                    for ii in range(noiseSource.shape[0]):
+                        ax.scatter(noiseSource[ii,0],noiseSource[ii,1],s=70,marker='x',c='red',alpha=0.5)
+            # 
+            titstr = '$\\bar{e}(\mathbf{r}_i)$'
+            if dBscale:
+                titstr += ' [dB]'
+            ax.set(title=titstr, xlabel='$x$ [m]', ylabel='$y$ [m]') # title
+            ax.axis('equal')
+            ax.set_xlim((0, np.amax(xx)))
+            ax.set_ylim((0, np.amax(yy)))
+            fmt = '%.1e'
+            if dBscale:
+                fmt = '%i'
+            plt.colorbar(mapp, ax=ax, format=fmt)
     
         # Export or show
         if exportit:
+            # Check whether folder already exists
+            if not os.path.isdir(exportname[:exportname.rfind('\\')]):
+                os.mkdir(exportname[:exportname.rfind('\\')])
             plt.savefig('%s.png' % exportname, bbox_inches='tight')
             plt.savefig('%s.pdf' % exportname, bbox_inches='tight')
+            print('Average energy plot exported, "%s".' % exportname)
         else:
             plt.show()
-        print('Average energy plot exported, "%s".' % exportname)
 
     stop = 1
 
@@ -177,17 +345,20 @@ def main(refidx):
     z_slice = 3                                             # height of 2D-slice (where all nodes and sources are)
     targetSource = np.random.uniform(0,1,size=(3,)) * rd    # target source coordinates
     targetSource[-1] = z_slice              
+    noiseSource = np.random.uniform(0,1,size=(3,)) * rd    # noise source coordinates
+    noiseSource[-1] = z_slice              
+    # noiseSource = None      # Uncomment to assume spatially white noise
     Nr = 5                                                 # number of receivers 
     # arraytype = 'random'    # If "random" - Generate <Nr> random receiver positions across available volume
     arraytype = 'fixedrandom'    # If "fixedrandom" - Use pre-generated 5 random receiver positions
     # arraytype = 'compact'   # If "compact" - Generate single linear array of <Nr> microphones, randomly placed in room
-    arraytype = 'fixedcompact'   # If "fixedcompact" - Use pre-generated single linear array of 5 microphones
+    # arraytype = 'fixedcompact'   # If "fixedcompact" - Use pre-generated single linear array of 5 microphones
     Fs = 16e3                           # sampling frequency
     gres = 0.1                          # spatial grid resolution
     # gres = 2                          # spatial grid resolution
     #
-    makeGIF = 1     # If True, export a series of PNGs (per freq. bin) for GIF-making
-    exportit = 1    # If False, do not export any figure
+    makeGIF = 0     # If True, export a series of PNGs (per freq. bin) for GIF-making
+    exportit = 0    # If False, do not export any figure
 
     # Generate microphone positions
     if arraytype == 'compact':
@@ -204,6 +375,9 @@ def main(refidx):
                             [3.09656351, 3.98553171, 3.        ],
                             [3.76354577, 0.24801863, 3.        ]])
         targetSource = np.array([1.59439374, 1.30800814, 3.        ])
+        # targetSource = np.array([1.108861  , 0.91872411, 3.        ])
+        if noiseSource is not None:
+            noiseSource = np.array([1, 2, 3.        ])
     elif arraytype == 'fixedcompact':
         micpos = np.array([[4.62104008, 2.56325556, 3],
                             [4.64143235, 2.61825619, 3],
@@ -211,6 +385,8 @@ def main(refidx):
                             [4.68221689, 2.72825747, 3.],
                             [4.70260915, 2.78325811, 3.]])
         targetSource = np.array([4.41080322, 5.33609293, 3.        ])
+        if noiseSource is not None:
+            noiseSource = np.array([1, 2, 3.        ])
 
     # RIR duration
     rir_dur = 2**10/Fs                      # RIR duration
@@ -223,71 +399,30 @@ def main(refidx):
 
     # Get beamforming filter for target source
     RIRs = rimPy(micpos, targetSource, rd, refCoeff, rir_dur, Fs)      # Get RIRs to target source
+    # RIRs /= np.sqrt(np.sum(np.abs(RIRs)**2, axis=0))    # Euclidean norm scaling
     RTFs = np.fft.fft(RIRs, axis=0)
-    # Only consider positive frequencies
-    RTFs = RTFs[:int(np.round(RTFs.shape[0] / 2)), :]
-    # Compute Matched Filter Beamformer h/(h^H*h)
-    w_target = mfb(RTFs)
+    RTFs = RTFs[:int(np.round(RTFs.shape[0] / 2)), :]   # Only consider positive frequencies
+    #
+    if noiseSource is not None:
+        RIRs_n = rimPy(micpos, noiseSource, rd, refCoeff, rir_dur, Fs)      # Get RIRs to noise source
+        # RIRs_n /= np.sqrt(np.sum(np.abs(RIRs_n)**2, axis=0))    # Euclidean norm scaling
+        RTFs_n = np.fft.fft(RIRs_n, axis=0)
+        RTFs_n = RTFs_n[:int(np.round(RTFs_n.shape[0] / 2)), :]   # Only consider positive frequencies
+        # RTFs_n = np.random.uniform(size=RTFs_n.shape)
+        # w_target = mvdr(RTFs, RTFs_n)   # Compute MVDR-like filter
+        w_target = mvdr(RTFs_n, RTFs)   # Compute MVDR-like filter
+    else:
+        w_target = mfb(RTFs)    # Compute Matched Filter Beamformer h/(h^H*h)
 
-    # Gridify room
-    xx,yy,zz = gridify(rd, targetSource, gridres=gres, plotgrid=False)
+    xx,yy,zz = gridify(rd, targetSource[-1], gridres=gres, plotgrid=False)  # Gridify room
+    en, en_pf, freqs = getenergy(xx,yy,zz,rir_dur,Fs,micpos,rd,refCoeff,w_target)  # Get energy over grid
 
-    # Plot acoustic scenario + grid
-    # plot_AS(rd, micpos, targetSource, ASref=arraytype, xx=xx,yy=yy,zz=zz, exportit=1)
-
-    en_pf = np.zeros((xx.shape[0],xx.shape[1],xx.shape[2],int(rir_dur*Fs / 2)))     # per-freq. energy
-    en    = np.zeros_like(xx)                        # freq.-averaged energy
-    for ix in range(xx.shape[0]):
-        for iy in range(xx.shape[1]):
-            for iz in range(xx.shape[2]):
-                r0 = [xx[ix,iy,iz], yy[ix,iy,iz], zz[ix,iy,iz]]     # Source location (grid point)
-                # Monitor loop
-                progress_percent = loop_progress([ix,iy,iz], xx.shape)
-                if progress_percent % 10 == 0:
-                    print('Computing filter output energy for source at (%.2f,%.2f,%.2f) in room [%.2f %%]...' %\
-                        (r0[0],r0[1],r0[2],progress_percent))
-                
-                RIRs = rimPy(micpos, r0, rd, refCoeff, rir_dur, Fs) # Get RIRs
-                # RIRs /= np.amax(RIRs, axis=0)                       # ``Max`` scaling
-                # RIRs /= np.sum(np.abs(RIRs), axis=0)                # 1-norm scaling
-                RIRs /= np.sqrt(np.sum(np.abs(RIRs)**2, axis=0))      # Euclidean norm scaling
-
-                            
-                # fig = plt.figure(figsize=(4,4), constrained_layout=True)
-                # ax = fig.add_subplot(111)
-                # ax.plot(np.arange(len(RIRs))/Fs, RIRs)
-                # ax.grid()
-                # ax.set(xlabel='$t$ [s]')
-                # plt.legend(['Sensor %i' % (s+1) for s in range(RIRs.shape[1])])
-                # fname = '%s\\RIRs.pdf' % ('01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\RIRsnorms')
-                # plt.savefig(fname)
-                # plt.show()
-
-                RTFs = np.fft.fft(RIRs, axis=0)                     # Get RTFs
-                freqs = Fs * np.fft.fftfreq(len(RTFs), d=1.0)       # ...and the corresponding frequency vector
-                # Only consider positive frequencies
-                RTFs = RTFs[:int(np.round(RTFs.shape[0] / 2)), :]
-                freqs = freqs[:int(np.round(len(freqs) / 2))]
-
-                y = applymwf(w_target, RTFs)                        # Apply target filter to RIRs
-
-                # fig, ax = plt.subplots(2,1)
-                # ax[0].plot(freqs, 20*np.log10(np.abs(RTFs)))
-                # ax[0].grid()
-                # ax[1].plot(freqs, 20*np.log10(np.abs(y)))
-                # ax[1].grid()
-                # plt.show()
-
-                en_pf[ix,iy,iz,:] = np.abs(y)**2                    # Get output energy per freq.   
-                en[ix,iy,iz] = np.mean(en_pf[ix,iy,iz,:], axis=0)   # Get avg. normalized output energy     
-
-
-    # Plotting
-    foldername = 'C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\03_for_20211021meeting\\02_spatial_visu\\MFB'
+    # Plot
+    foldername = 'C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\00_notformeetings\\01_MFB'
     fname = '%s\\spatialvisu_MFB_%i' % (foldername,refidx)
-    plotspatialresp(xx,yy,zz,en,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname)
+    plotspatialresp(xx,yy,en,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname,noiseSource=noiseSource)
     if makeGIF:
-        plotspatialresp(xx,yy,zz,en_pf,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname,freqs=freqs)
+        plotspatialresp(xx,yy,en_pf,targetSource,micpos,dBscale=1,exportit=exportit,exportname=fname,freqs=freqs,noiseSource=noiseSource)
 
     return 0
 

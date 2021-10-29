@@ -1,5 +1,7 @@
+from posixpath import basename
 import random
 import numpy as np
+import numpy.matlib
 import os, sys
 import random
 import pandas as pd
@@ -11,7 +13,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import scipy.signal
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from plotting.threedim import plot_room, set_axes_equal
-from MWFpack.myMWF import spatial_visu_MWF
+from playsounds.playsounds import playthis
 
 def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
     # load_AS -- Loads an Acoustic Scenario (AS) from a CSV file.
@@ -47,7 +49,7 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
         raise ValueError('The path provided does not exist')
 
     # Check format of file name
-    if fname[-5:-1] != '.csv':
+    if fname[-4:] != '.csv':
         fname += '.csv'
 
     # Fetch CSV file
@@ -148,9 +150,18 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
             p2 = ax.scatter(rn[ii,0],rn[ii,1],rn[ii,2],s=scatsize,c='red',marker='P')
         for ii in range(M):
             p3 = ax.scatter(r[ii,0],r[ii,1],r[ii,2],s=scatsize,c='green',marker='o')
+            ax.text(r[ii,0],r[ii,1],r[ii,2],"S%i" % (ii+1))
+        # titl = 'Acoustic scenario geometry ($\\alpha$ = %.2f)' % alpha
+        titl = ''
         ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
-            title='Acoustic scenario geometry ($\\alpha$ = %.2f)' % alpha)
+            title=titl)
         ax.grid()
+        # Check if 2-D
+        if all(x==r[0,-1] for x in np.concatenate((r[:,-1],rs[:,-1],rn[:,-1]))):
+        # if (r[:,-1] == rs[:,-1]).all() and (r[:,-1] == rn[:,-1]).all():
+            ax.view_init(90,0)
+            ax.set_zticks([])
+            ax.set(zlabel='')
         set_axes_equal(ax)
         exportname = 'AS_%s' % (reftxt)
         if plot_AS_dir != '':
@@ -158,17 +169,15 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
         if plot_AS == 'PDF':
             ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Sensor'], loc=1)
             plt.savefig('%s.pdf' % exportname)
-        if plot_AS == 'PNG':
+        elif plot_AS == 'PNG':
             ax.legend([p1,p2,p3],['Speech source', 'Noise source', 'Sensor'], loc=1)
             plt.savefig('%s.png' % exportname)
-        if plot_AS == 'GIF':
+        elif plot_AS == 'GIF':
             ax.set(title='')
             angles = np.linspace(0, 360, 50)
             for idx, angle in enumerate(angles):
                 ax.view_init(20, angle)
                 plt.savefig('%s_%i.png' % (exportname, int(idx)), bbox_inches='tight')
-                # plt.show()
-                stop = 1
         elif plot_AS == 'plot':
             plt.show()
 
@@ -224,7 +233,8 @@ def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU L
 
 
 def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=float('inf'),\
-    ASref='',speech='',noise_in='',plotAS=None, plot_AS_dir='',ms='overlap',SNR_in_uncorr=30):
+    ASref='',speech='',noise_in='',plotAS=None, plot_AS_dir='',ms='overlap',SNR_in_uncorr=30,\
+        prewhiten=False,spatially_white_noise=False):
     # sig_gen -- Generates microphone signals based on a given acoustic scenario
     # and dry speech/noise data.
     #
@@ -250,6 +260,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                 #   -'overlap': the speakers may speak simultaneously.
                 #   -'distinct': the speakers may never speak simultaneously.
     # -SNR_in_uncorr [float, dB] - Input SNR for microphone self-noise.
+    # -prewhiten [bool] - If true, whiten the wet clean speech signal mixtures.
     
     # Load acoustic scenario
     h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS, plot_AS_dir)
@@ -335,8 +346,11 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                     if len(noisecurr) > nmax:
                         noisecurr = noisecurr[:nmax]
                         break
-            noisecurr = preprocessing.scale(noisecurr)   # normalize
-            noise[:,ii] = 10**(-baseSNR/20)*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
+            # noisecurr = preprocessing.scale(noisecurr)   # normalize
+            # Apply base SNR to noise
+            sp_pow = np.amax(np.var(d, axis=0))
+            sf_uncorr = np.sqrt(sp_pow/10**(baseSNR/10))            # Scale factor for desired SNR for uncorr noise, assume initial std. dev of uncorr noise = 1s
+            noise[:,ii] = sf_uncorr*noisecurr    # ensure desired SNR w.r.t. to speech sound sources
             
     # Generate no-noise WET sensor signals ("desired signals" -- convolution w/ RIRs only)
     ds = np.zeros((nmax,M))
@@ -347,17 +361,34 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
             d_k += d_kk[:nmax]
         ds[:,k] = d_k
 
+    # If asked, "whiten" WET sensor signals
+    if prewhiten:
+        Ds = np.fft.fft(ds, axis=0)
+        psd = np.abs(Ds)
+        ds = np.real(np.fft.ifft(Ds / psd, axis=0))
+
     # Generate no-speech WET sensor noise (convolution w/ RIRs only)
     ny = np.zeros((nmax,M))
-    for k in range(M):
-        n_k = np.zeros(nmax)
-        for ii in range(Nn):
-            n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
-            n_k += n_kk[:nmax]
-        ny[:,k] = n_k
+    if spatially_white_noise:
+        for k in range(M):
+            ny[:,k] = np.random.uniform(low=-1,high=1,size=nmax) * noise[:,0]
+    else:
+        for k in range(M):
+            n_k = np.zeros(nmax)
+            for ii in range(Nn):
+                n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
+                n_k += n_kk[:nmax]
+            ny[:,k] = n_k
     
     # Generate microphone signals (speech + noise)
     y = ds + ny
+
+    # fig = plt.figure(figsize=(4,4), constrained_layout=True)
+    # ax = fig.add_subplot(111)
+    # ax.plot(ny[:,0])
+    # ax.plot(ds[:,0])
+    # ax.grid()
+    # plt.show()
 
     # Add self-noise
     y = add_selfnoise(y,SNR_in_uncorr)

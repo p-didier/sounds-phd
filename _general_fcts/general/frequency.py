@@ -1,4 +1,7 @@
 import numpy as np
+import sys,os
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
+from general.arrays import get_closest
 
 def noctfr(n,fll,ful,type='exact'):
     # noctfr -- Computation of 1/n octave band center and cutoff frequencies.
@@ -57,7 +60,34 @@ def noctfr(n,fll,ful,type='exact'):
     return f, fl, fu
 
 
+def divide_in_bands(bandtype, freqs):
+    all_f_flag = False   
+    if bandtype == 'OTOB':
+        fc, fl, fu = noctfr(3, freqs[0], freqs[-1], type='exact')
+    elif bandtype == 'OB':
+        fc, fl, fu = noctfr(1, freqs[0], freqs[-1], type='exact')
+    elif bandtype == None or bandtype == 'all':
+        bands_indices = [np.arange(len(freqs))]
+        all_f_flag = True
+        fc, fl, fu = [0],[0],[0]
+
+    if not all_f_flag:
+        # Divide in bands
+        bands_indices = []
+        for ii, fc_curr in enumerate(fc):
+            idx_start = get_closest(freqs, fl[ii])
+            idx_end = get_closest(freqs, fu[ii])
+            if not isinstance(idx_start, np.int64):
+                idx_start = idx_start[0]
+            if not isinstance(idx_start, np.int64):
+                idx_end = idx_end[0]
+            bands_indices.append(np.arange(idx_start, idx_end))
+
+    return bands_indices, fc, fl, fu
+
 # TESTS
 # freqs = np.arange(0, 8000)
-# fc, fl, fu = noctfr(n=3, fll=freqs[0], ful=freqs[-1], type='exact')
+# bands_indices, fc, fl, fu = divide_in_bands('OTOB', freqs)
+# for ii, band_indices in enumerate(bands_indices):
+#     print(freqs[band_indices])
 # stop = 1
