@@ -3,6 +3,7 @@ import numpy as np
 import os, time, sys
 import matplotlib.pyplot as plt
 import matplotlib
+from scipy.signal.signaltools import decimate
 matplotlib.rcParams['text.usetex'] = False
 import pandas as pd
 # Third party imports
@@ -22,7 +23,7 @@ from general.frequency import divide_in_bands
 
 # Global variables
 SAVEFIGS =       0  # If true, saves figures as PNG and PDF files
-EXPORTDATA =     0  # If true, exports I/O speech enhancement quality measures (SNRs, STOIs) as CSV files
+EXPORTDATA =     1  # If true, exports I/O speech enhancement quality measures (SNRs, STOIs) as CSV files
 LISTEN_TO_MICS = 0  # If true, plays examples of target and raw mic signal
 SHOW_WAVEFORMS = 0  # If true, plots waveforms of target and raw mic signals
 LISTEN_OUTPUT =  0  # If true, plays enhanced and original signals
@@ -46,7 +47,7 @@ def main():
     MWFtype = 'online'            # if 'online', compute the covariance matrices iteratively (possibly using GEVD)
     #
     useGEVD = True                  # if True, use GEVD, do not otherwise
-    GEVDrank = 2
+    GEVDrank = 1
     #
     Tmax = 15                       # maximum signal duration [s]
     baseSNR = 10                    # SNR pre-RIR application [dB]
@@ -63,9 +64,9 @@ def main():
 
     # Exports
     # exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\export_tests' % CWD
-    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\04_for_20211104meeting\\MWFspatial' % (CWD)
+    exportDir = '%s\\01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\\00_figs\\04_for_20211104meeting\\metrics' % (CWD)
     # ----- Acoustic scenario + specific speech/noise signal(s) selection (if empty, random selection) 
-    # ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
+    ASref = 'J3Mk2_Ns2_Nn3\\testAS_anechoic'      
     # ASref = 'J3Mk2_Ns2_Nn3\\testAS'            
     # ASref = 'J3Mk2_Ns1_Nn1\\testAS_anechoic'      
     # ASref = 'J5Mk1_Ns1_Nn2\\testAS_anechoic_2D'      
@@ -77,12 +78,12 @@ def main():
     # ASref = 'J5Mk1_Ns1_Nn1\\AS7_anechoic_2D'       
     # ASref = 'J5Mk1_Ns1_Nn1\\AS6_anechoic_2D'     
     # ASref = 'J5Mk1_Ns2_Nn1\\AS5_anechoic_2D'     
-    ASref = 'J5Mk1_Ns1_Nn2\\AS2_anechoic_2D'     
-    ASref = '2D\\J5Mk1_Ns2_Nn3'   
+    # ASref = 'J5Mk1_Ns1_Nn2\\AS2_anechoic_2D'     
+    # ASref = '2D\\J5Mk1_Ns2_Nn3'   
     # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s2_n123'   
     # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n1'
     plotAS = 'PDF'
-    # plotAS = None
+    plotAS = None
     # Specific speech/noise files 
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'
@@ -139,7 +140,7 @@ def main():
         M = y.shape[-1]                 # total number of sensors
         Mk = M/J                        # number of sensors per node
         beta = 1 - (R_fft/(Fs*Tavg))    # Forgetting factor
-        # beta = 1 - 1/16e3    # Forgetting factor (TMP)  --- for PhDSU_N03/N04
+        beta = 1 - 1/16e3    # Forgetting factor (TMP)  --- for PhDSU_N03/N04
 
         # Check on input parameters
         if not (Tmax*Fs/(L_fft-R_fft)).is_integer():
@@ -202,21 +203,28 @@ def main():
             ps.playthis(d_hat[:,sPbIdx], Fs)
 
         # ~~~~~~~~~~~~~~~~~~ Speech enhancement performance evaluation (metrics - <pysepm> module) ~~~~~~~~~~~~~~~~~~~ 
-        fwSNRseg_noisy,SNRseg_noisy,stoi_noisy = eval_enhancement.eval(ds, y, Fs)
-        fwSNRseg_enhanced,SNRseg_enhanced,stoi_enhanced = eval_enhancement.eval(ds, d_hat, Fs)
-
-        print('fwSNRseg improvement:')
-        print(fwSNRseg_enhanced - fwSNRseg_noisy)
-        print('STOI improvement:')
-        print(stoi_enhanced - stoi_noisy)
+        gamma = np.arange(0.1, 2, 10)
+        fwSNRseg_L = np.arange(0.01, 0.05, 0.005)
+        #
+        fwSNRseg_noisy,stoi_noisy = eval_enhancement.eval(ds, y, Fs, gamma_fwSNRseg=gamma, frameLen=fwSNRseg_L)
+        fwSNRseg_enhanced,stoi_enhanced = eval_enhancement.eval(ds, d_hat, Fs, gamma_fwSNRseg=gamma,  frameLen=fwSNRseg_L)
+        #
+        print('fwSNRseg and STOI improvements calculated.') 
 
         if EXPORTDATA:
-            # Export fwSNRseg values
-            npa = np.stack((fwSNRseg_noisy,fwSNRseg_enhanced))
-            pd.DataFrame(npa, index=['fwSNRseg_noisy', 'fwSNRseg_enhanced']).to_csv('%s\\fwSNRseg_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+            # Export fwSNRseg values for each value of frame length and gamma exponent
+            for ii, g in enumerate(gamma):
+                subdirpath = '%s\\fwSNRseg_gamma%s' % (exportDir, str(np.round(g, decimals=2)).replace('.','p'))
+                os.mkdir(subdirpath)  # Make sub-directory
+                for jj, l in enumerate(fwSNRseg_L):
+                    subdirpath_full = '%s\\frameLen_%s' % (subdirpath, str(np.round(l, decimals=4)).replace('.','p'))
+                    os.mkdir(subdirpath_full)  # Make sub-directory
+                    npa = np.stack((fwSNRseg_noisy[:,ii,jj],fwSNRseg_enhanced[:,ii,jj]))
+                    pd.DataFrame(npa, index=['fwSNRseg_noisy', 'fwSNRseg_enhanced']).to_csv('%s\\fwSNRseg_%ip_ev%i__%s.csv' % (subdirpath_full,pauseDur,pauseSpace,reftxt))
             # Export STOI values
             npa = np.stack((stoi_noisy,stoi_enhanced))
             pd.DataFrame(npa, index=['stoi_noisy', 'stoi_enhanced']).to_csv('%s\\STOI_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+            print('fwSNRseg and STOI improvements exported as CSV files (<%s>).' % exportDir) 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 
         # ----------------------------------------------------------------------------------------
