@@ -9,11 +9,12 @@ import pandas as pd
 # Third party imports
 #
 # Local application imports
-from MWFpack import myMWF, sig_gen, VAD, eval_enhancement
+from MWFpack import myMWF, sig_gen, VAD
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT, calcISTFT
 import playsounds.playsounds as ps
 from general.frequency import divide_in_bands
+from metrics import eval_enhancement
 
 # Multichannel Wiener Filter (MWF) for noise reduction, using Generalized Eigenvalue Decomposition (GEVD)
 # with oracle VAD and full communication (i.e. a fusion center for all nodes data).
@@ -43,11 +44,11 @@ def main():
                                     #   -'distinct': the speakers may never speak simultaneously.
     voicedetection = 'VAD'          # type of voice activity detection mechanism to use (VAD or SPP)
     #
-    # MWFtype = 'batch'               # if 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD)
+    MWFtype = 'batch'               # if 'batch', compute the covariance matrices from the entire signal (AND DO NOT USE GEVD)
     MWFtype = 'online'            # if 'online', compute the covariance matrices iteratively (possibly using GEVD)
     #
     useGEVD = True                  # if True, use GEVD, do not otherwise
-    GEVDrank = 1
+    GEVDrank = 2
     #
     Tmax = 15                       # maximum signal duration [s]
     baseSNR = 10                    # SNR pre-RIR application [dB]
@@ -153,7 +154,7 @@ def main():
         print('Oracle VAD computed')
 
         # Initial SNR estimates
-        SNRy = VAD.SNRest(y,myVAD)
+        SNRy = eval_enhancement.SNRest(y,myVAD)
         # Get Speech Presence Probability
         if voicedetection == 'SPP':
             Y_best_sensor = calcSTFT(y[:,np.argmax(SNRy)], Fs, win, L_fft, R_fft, 'onesided')[0]
@@ -203,13 +204,14 @@ def main():
             ps.playthis(d_hat[:,sPbIdx], Fs)
 
         # ~~~~~~~~~~~~~~~~~~ Speech enhancement performance evaluation (metrics - <pysepm> module) ~~~~~~~~~~~~~~~~~~~ 
-        gamma = np.arange(0.1, 2, 10)
-        fwSNRseg_L = np.arange(0.01, 0.05, 0.005)
+        gamma = np.arange(0.0, 2, 0.5)
+        fwSNRseg_L = np.arange(0.01, 0.04, 0.01)
         #
-        fwSNRseg_noisy,stoi_noisy = eval_enhancement.eval(ds, y, Fs, gamma_fwSNRseg=gamma, frameLen=fwSNRseg_L)
-        fwSNRseg_enhanced,stoi_enhanced = eval_enhancement.eval(ds, d_hat, Fs, gamma_fwSNRseg=gamma,  frameLen=fwSNRseg_L)
+        print('Deriving speech enhancement performance metrics for %i combinations of parameters...' % (len(gamma)*len(fwSNRseg_L))) 
+        fwSNRseg_noisy,stoi_noisy,sisnr_noisy = eval_enhancement.eval(ds, y, Fs, myVAD, gamma_fwSNRseg=gamma, frameLen=fwSNRseg_L)
+        fwSNRseg_enhanced,stoi_enhanced,sisnr_enhanced = eval_enhancement.eval(ds, d_hat, Fs, myVAD, gamma_fwSNRseg=gamma,  frameLen=fwSNRseg_L)
         #
-        print('fwSNRseg and STOI improvements calculated.') 
+        print('Speech enhancement performance metrics calculated.') 
 
         if EXPORTDATA:
             # Export fwSNRseg values for each value of frame length and gamma exponent
@@ -224,7 +226,10 @@ def main():
             # Export STOI values
             npa = np.stack((stoi_noisy,stoi_enhanced))
             pd.DataFrame(npa, index=['stoi_noisy', 'stoi_enhanced']).to_csv('%s\\STOI_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
-            print('fwSNRseg and STOI improvements exported as CSV files (<%s>).' % exportDir) 
+            # Export SI-SNR values
+            npa = np.stack((sisnr_noisy,sisnr_enhanced))
+            pd.DataFrame(npa, index=['sisnr_noisy', 'sisnr_enhanced']).to_csv('%s\\SISNR_%ip_ev%i__%s.csv' % (exportDir,pauseDur,pauseSpace,reftxt))
+            print('fwSNRseg, STOI, and SISNR before/after enhancement exported in CSV files\n(in folder <%s>).' % exportDir) 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
 
         # ----------------------------------------------------------------------------------------
