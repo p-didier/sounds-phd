@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numba import jit
 
-def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
+def oracleVAD(x,tw,thrs,Fs,plotVAD=False,VADtype='SNRbased'):
     # oracleVAD -- Oracle Voice Activity Detection (VAD) function. Returns the
     # oracle VAD for a given speech (+ background noise) signal <x>.
     # Based on the computation of the short-time signal energy.
@@ -13,6 +13,8 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # -thrs [float, [<x>]^2] - Energy threshold.
     # -Fs [int, samples/s] - Sampling frequency.
     # -plotVAD [bool] - If true, plots <oVAD> (function output) on a figure.
+    # -VADtype [string] - 'SNRbased': compute the broadband SNR-based VAD.
+    #                     'subbandSNRbased': compute the sub-band SNR-based VAD (as per P. Vary's definition).
     # >>> Outputs:
     # -oVAD [N*1 binary vector] - Oracle VAD corresponding to <x>.
 
@@ -41,7 +43,15 @@ def oracleVAD(x,tw,thrs,Fs,plotVAD=False):
     # Compute VAD
     oVAD = np.zeros(n)
     for ii in range(n):
-        oVAD[ii] = compute_VAD(x,ii,Nw,thrs)
+        chunk_x = np.zeros(int(Nw))
+        if Nw == 1:
+            chunk_x[0] = x[ii]
+        else:
+            chunk_x = x[np.arange(ii,int(min(ii+Nw, len(x))))]
+        if VADtype == 'SNRbased':
+            oVAD[ii] = compute_VAD(chunk_x,thrs)
+        # elif VADtype == 'subbandSNRbased':              # TODOOOOOo  -- 2021/11/10
+        #     oVAD[ii] = subband_SNR_based_VAD(chunk_x,thrs,sigmaNoise)
 
     # Time vector
     t = np.arange(n)/Fs
@@ -137,21 +147,34 @@ def oracleSPP(X,plotSPP=False):
 
 
 @jit(nopython=True)
-def compute_VAD(x,ii,Nw,thrs):
+def compute_VAD(chunk_x,thrs):
     # JIT-ed time-domain VAD computation
     #
     # (c) Paul Didier - 6-Oct-2021
     # SOUNDS ETN - KU Leuven ESAT STADIUS
     # ------------------------------------
-    VADout = 0
-    chunk_x = np.zeros(int(Nw))
-    if Nw == 1:
-        chunk_x[0] = x[ii]
-    else:
-        chunk_x = x[np.arange(ii,int(min(ii+Nw, len(x))))]
     # Compute short-term signal energy
     E = np.mean(np.abs(chunk_x)**2)
     # Assign VAD value
     if E > thrs:
         VADout = 1
+    return VADout
+
+
+
+# IN PROGRESS ---- 2021/11/10
+def subband_SNR_based_VAD(y, thrs, sigmaNoise):
+    # subband_SNR_based_VAD -- Computes the sub-band SNR-based VAD of a signal frame <y>.
+    # Based on theory described in section 11.8.1.1 in P. Vary's 2006 book "Digital Speech Transmission".
+
+    Y = np.fft.fft(y)
+    M = len(Y)      # number of frequency bins
+
+    gamma = 0
+    for mu in range(int(M/2-1)):
+        gamma += np.abs(Y[mu])**2/sigmaNoise**2 - np.log(np.abs(Y[mu])**2/sigmaNoise) - 1
+    gamma /= M/2 + 1
+
+    VADout = gamma >= thrs
+
     return VADout

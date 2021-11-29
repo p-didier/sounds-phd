@@ -8,7 +8,7 @@ import scipy.signal as sig
 # sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_third_parties')))
 # from octaveband.PyOctaveBand import octavefilter
 
-def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03):
+def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):
 
     # Check dimensionalities
     if clean_speech.shape != enhanced_or_noisy_speech.shape:
@@ -29,19 +29,20 @@ def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, fr
     stoi = np.zeros(nChannels)
     sisnr = np.zeros(nChannels)
     for ii in range(nChannels):
-        # Frequency-weight segmental SNR
-        for jj, gamma in enumerate(gamma_fwSNRseg):
-            for kk, lenf in enumerate(frameLen):
-                print('Estimating fwSNRseg for channel %i, for gamma=%.2f and a frame length of %.2f s.' % (ii+1, gamma, lenf))
-                fwSNRseg[ii,jj,kk] = pysepm.fwSNRseg(clean_speech[:,ii], enhanced_or_noisy_speech[:,ii], Fs, frameLen=lenf, gamma=gamma)
+        if not onlySTOI:
+            # Frequency-weight segmental SNR
+            for jj, gamma in enumerate(gamma_fwSNRseg):
+                for kk, lenf in enumerate(frameLen):
+                    print('Estimating fwSNRseg for channel %i, for gamma=%.2f and a frame length of %.2f s.' % (ii+1, gamma, lenf))
+                    fwSNRseg[ii,jj,kk] = pysepm.fwSNRseg(clean_speech[:,ii], enhanced_or_noisy_speech[:,ii], Fs, frameLen=lenf, gamma=gamma)
+            # Speech-Intelligibility-weighted SNR (SI-SNR)
+            print('Estimating SI-SNR for channel %i.' % (ii+1))
+            sisnr[ii] = get_SISNR(enhanced_or_noisy_speech[:,ii], Fs, VAD)
         # Short-Time Objective Intelligibility (STOI)
         print('Estimating STOI for channel %i.' % (ii+1))
         stoi[ii] = pysepm.stoi(clean_speech[:,ii], enhanced_or_noisy_speech[:,ii], Fs)
-        # Speech-Intelligibility-weighted SNR (SI-SNR)
-        print('Estimating SI-SNR for channel %i.' % (ii+1))
-        sisnr[ii] = get_SISNR(enhanced_or_noisy_speech[:,ii], Fs, VAD)
     
-    return fwSNRseg,stoi,sisnr
+    return fwSNRseg,sisnr,stoi
 
 def get_SISNR(enhanced_or_noisy_speech, Fs, VAD):
 

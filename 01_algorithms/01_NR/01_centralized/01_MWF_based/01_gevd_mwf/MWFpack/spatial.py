@@ -149,7 +149,8 @@ def getenergy(xx,yy,zz,rir_dur,Fs,micpos,rd,refCoeff,w_target,bins_of_interest=N
 
 # ----------- PLOTTING FUNCTIONS -----------
 def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,exportname='',\
-    freqs=[],noiseSource=None,multichannel=False,noise_spatially_white=False):
+    freqs=[],noiseSource=None,multichannel=False,noise_spatially_white=False,\
+        stoi_imp=None, fwSNRseg_imp=None):
 
     # If asked, bring to dB-scale
     if dBscale:
@@ -164,9 +165,12 @@ def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,
     else:
         maxlen = 4
 
+    # Labels and titles font size
+    fts = 8
+
     # PLOT
     if multichannel:
-        fig = plt.figure(figsize=(np.amax(xx)*n_cols_plots, np.amax(yy)*n_rows_plots * 0.8))
+        fig = plt.figure(figsize=(np.amax(xx)*n_cols_plots * 0.5, np.amax(yy)*n_rows_plots * 0.8 * 0.5))
     else:
         fig = plt.figure(figsize=(np.amax(xx), np.amax(yy)), constrained_layout=True)
     if len(data.shape) == maxlen:
@@ -221,17 +225,6 @@ def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,
             for ii in range(nChannels):
                 ax = fig.add_subplot(n_rows_plots,n_cols_plots,ii+1)
 
-                # TEMPORARY 28/10/2021 
-                # plotdata = data[:,:,0,ii]
-                # if len(targetSource.shape) == 1:
-                #     idx_x = get_closest(xx[:,0,0], targetSource[0])
-                #     idx_y = get_closest(yy[0,:,0], targetSource[1])
-                # else:
-                #     idx_x = get_closest(xx[:,0,0], targetSource[0,0])
-                #     idx_y = get_closest(yy[0,:,0], targetSource[0,1])
-                # ylim_max = plotdata[idx_x,idx_y]
-                # ylim_min = np.nanmin(plotdata)
-
                 # Plot energy spatial contour map
                 mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], levels=15, vmin=ylim_min, vmax=ylim_max)
                 # Show microphones as dots
@@ -246,32 +239,28 @@ def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,
                 else:
                     for jj in range(targetSource.shape[0]):
                         ph_speech = ax.scatter(targetSource[jj,0],targetSource[jj,1],s=70,marker='x',c='blue',alpha=0.5)
+                        ax.text(targetSource[jj,0]+0.01,targetSource[jj,1]+0.01,'S%i' % (jj+1)) # add text to mark source position
                 # Show noise sources, if given
-                if noiseSource is not None and not noise_spatially_white:
+                if noiseSource is not None and (noise_spatially_white == False or noise_spatially_white == 'combined'):
                     if len(noiseSource.shape) == 1:
                         ph_noise = ax.scatter(noiseSource[0],noiseSource[1],s=70,marker='x',c='red',alpha=0.5)
                     else:
                         for jj in range(noiseSource.shape[0]):
                             ph_noise = ax.scatter(noiseSource[jj,0],noiseSource[jj,1],s=70,marker='x',c='red',alpha=0.5)
-                # 
+                
+                # Axes formatting (labels, limits, title, font sizes)
                 titstr = '$\\bar{e}(\mathbf{r}_i)$ - Sensor %i' % (ii+1)
                 if dBscale:
                     titstr += ' [dB]'
-                #
-                # Axes formatting (labels, limits, title)
-                ax.set(title=titstr, ylabel='$y$ [m]') # title
+                ax.set_title(titstr, fontsize=fts)
+                ax.set_ylabel('$y$ [m]', fontsize=fts)
                 if ii+1 > (n_rows_plots - 1) * n_cols_plots:
-                    ax.set(xlabel='$x$ [m]') # x-label (only on bottom plots)
+                    ax.set_xlabel('$x$ [m]', fontsize=fts)
                 ax.axis('equal')
                 ax.set_xlim((0, np.amax(xx)))
                 ax.set_ylim((0, np.amax(yy)))
-                #
-                # Legend
-                if ii == 0:
-                    if noise_spatially_white:
-                        ax.legend([ph_nodes,ph_speech], ['Sensor', 'Speech source'], loc='lower left')
-                    else:
-                        ax.legend([ph_nodes,ph_speech,ph_noise], ['Sensor', 'Speech source', 'Noise source'], loc='lower left')
+                ax.tick_params(axis='x', labelsize=fts)
+                ax.tick_params(axis='y', labelsize=fts)
                 #
                 # Colorbar
                 fmt = '%.1e'
@@ -285,9 +274,16 @@ def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,
 
             if freqs is not []:
                 if len(freqs) > 1:
-                    plt.suptitle('Range: $f \in [%i,...,%i]$ Hz' % (np.amin(np.abs(freqs)), np.amax(np.abs(freqs))))
+                    suptit = 'Range: $f \in [%i,...,%i]$ Hz' % (np.amin(np.abs(freqs)), np.amax(np.abs(freqs)))
                 else:
-                    plt.suptitle('Single freq. bin -- $f = %i$ Hz' % (freqs[0]))
+                    suptit = 'Single freq. bin -- $f = %i$ Hz' % (freqs[0])
+
+                if fwSNRseg_imp is not None:
+                    suptit += ';  $\Delta$fwSNRseg = %.1f' % (fwSNRseg_imp)
+                if stoi_imp is not None:
+                    for idx_ns in range(stoi_imp.shape[-1]):
+                        suptit += ';  $\Delta$STOI(S%i) = %.3f' % (idx_ns+1, stoi_imp[idx_ns])
+                plt.suptitle(suptit)
         else:
             ax = fig.add_subplot(111)
             # Plot energy spatial contour map

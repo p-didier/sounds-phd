@@ -146,8 +146,10 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
         plot_room(ax, rd)
         for ii in range(Ns):
             p1 = ax.scatter(rs[ii,0],rs[ii,1],rs[ii,2],s=scatsize,c='blue',marker='d')
+            ax.text(rs[ii,0],rs[ii,1],rs[ii,2],"D%i" % (ii+1))
         for ii in range(Nn):
             p2 = ax.scatter(rn[ii,0],rn[ii,1],rn[ii,2],s=scatsize,c='red',marker='P')
+            ax.text(rn[ii,0],rn[ii,1],rn[ii,2],"N%i" % (ii+1))
         for ii in range(M):
             p3 = ax.scatter(r[ii,0],r[ii,1],r[ii,2],s=scatsize,c='green',marker='o')
             ax.text(r[ii,0],r[ii,1],r[ii,2],"S%i" % (ii+1))
@@ -261,6 +263,10 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                 #   -'distinct': the speakers may never speak simultaneously.
     # -SNR_in_uncorr [float, dB] - Input SNR for microphone self-noise.
     # -prewhiten [bool] - If true, whiten the wet clean speech signal mixtures.
+    # -spatially_white_noise [bool or 'combined'] - Option for use of spatially-white noise:
+                #   -false, do not assume any spatially white noise and use specific noise source positions.
+                #   -true, assume spatially white noise and ignore entirely specific noise source positions.
+                #   -'combined', use specific noise source positions and add some spatially white noise.
     
     # Load acoustic scenario
     h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt = load_AS(ASref, path_to, plotAS, plot_AS_dir)
@@ -268,6 +274,21 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     if alpha == 1:
         print('--> Fully anechoic scenario')
     print('\n')
+
+    # Quick plot
+    # fig = plt.figure(figsize=(4,4), constrained_layout=True)
+    # for ii in range(h_sn.shape[1]):
+    #     ax = fig.add_subplot(h_sn.shape[1],1,ii+1)
+    #     ax.plot(np.arange(h_sn.shape[0])/Fs,h_sn[:,ii,0])
+    #     ax.grid()
+    #     ax.set(yticklabels=[])
+    #     plt.ylabel('S%i'%(ii+1))
+    #     if ii < h_sn.shape[1]-1:
+    #         ax.set(xticklabels=[])
+    # plt.xlabel('$t$ [s]') 
+    # plt.suptitle('Sensor-specific RIRs')
+    # plt.show()
+    # fig.savefig("Python_RIRs.png")
 
     # Extract useful values
     Ns = h_sn.shape[-1]             # number of speech sources
@@ -354,11 +375,15 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
             
     # Generate no-noise WET sensor signals ("desired signals" -- convolution w/ RIRs only)
     ds = np.zeros((nmax,M))
+    ds_single_sources = np.zeros((nmax,M,Ns))
     for k in range(M):
         d_k = np.zeros(nmax)
         for ii in range(Ns):
             d_kk = scipy.signal.fftconvolve(d[:,ii], np.squeeze(h_sn[:,k,ii]))
             d_k += d_kk[:nmax]
+            # Extract single-source wet no-noise mic signal
+            ds_single_sources[:,k,ii] = d_kk[:nmax]
+
         ds[:,k] = d_k
 
     # If asked, "whiten" WET sensor signals
@@ -367,11 +392,22 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
         psd = np.abs(Ds)
         ds = np.real(np.fft.ifft(Ds / psd, axis=0))
 
-    # Generate no-speech WET sensor noise (convolution w/ RIRs only)
+    # Generate no-speech WET sensor noise (convolution w/ RIRs and/or spatially white noise)
     ny = np.zeros((nmax,M))
-    if spatially_white_noise:
+    if spatially_white_noise is True:
         for k in range(M):
             ny[:,k] = np.random.uniform(low=-1,high=1,size=nmax) * noise[:,0]
+            h_nn = np.nan   # Spatially white noise ONLY -- no localized noise source
+            rn = np.nan     # Spatially white noise ONLY -- no localized noise source
+    elif spatially_white_noise == 'combined':
+        for k in range(M):
+            n_k = np.zeros(nmax)
+            for ii in range(Nn):
+                n_kk = scipy.signal.fftconvolve(noise[:,ii], np.squeeze(h_nn[:,k,ii]))
+                n_k += n_kk[:nmax]
+            ny[:,k] = n_k
+            # Add spatially white noise
+            ny[:,k] += np.amax(n_k) * np.random.uniform(low=-1,high=1,size=nmax) * noise[:,0]   
     else:
         for k in range(M):
             n_k = np.zeros(nmax)
@@ -382,13 +418,9 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     
     # Generate microphone signals (speech + noise)
     y = ds + ny
-
-    # fig = plt.figure(figsize=(4,4), constrained_layout=True)
-    # ax = fig.add_subplot(111)
-    # ax.plot(ny[:,0])
-    # ax.plot(ds[:,0])
-    # ax.grid()
-    # plt.show()
+    y_single_sources = np.zeros_like(ds_single_sources)
+    for ii in range(Ns):
+        y_single_sources[:,:,ii] = ds_single_sources[:,:,ii] + ny
 
     # Add self-noise
     y = add_selfnoise(y,SNR_in_uncorr)
@@ -396,7 +428,7 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
     # Time vector
     t = np.arange(nmax)/Fs
 
-    return y,ds,d,ny,t,Fs,nNodes,rd,r,rs,rn,alpha,reftxt
+    return y,ds,d,ny,y_single_sources,t,Fs,nNodes,rd,r,rs,rn,alpha,reftxt
 
 
 def add_selfnoise(y, SNR):

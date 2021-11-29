@@ -22,7 +22,7 @@ class Node:
 
 def main():
 
-    gen_specific_AS = 0 
+    gen_specific_AS = 1 
 
     nAS = 9                    # Number of AS to generate
     Fs = 16e3                   # Sampling frequency [samples/s]
@@ -30,8 +30,8 @@ def main():
     minRd = 3                   # Smallest room dimension possible [m]
     maxRd = 7                   # Largest room dimension possible [m]
     #
-    Ns = 1                      # nr. of speech sources
-    Nn = 2                      # nr. of noise sources
+    Ns = 2                      # nr. of speech sources
+    Nn = 3                      # nr. of noise sources
     #
     nNodes = 5                  # nr. of nodes
     Mk = 1
@@ -41,8 +41,8 @@ def main():
     T60max = 1.5*RIR_l/Fs   # Largest possible T60
     T60min = 0.4*RIR_l/Fs   # Smallest possible T60
     #
-    flattened = True        # If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2
-    plotit = 0           # If true, plots the AS
+    flattened = 0        # If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2
+    plotit = True        # If true, plots the AS
 
     if gen_specific_AS:
         nAS = 1

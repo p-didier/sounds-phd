@@ -6,7 +6,7 @@ import sys, os
 import matplotlib.pyplot as plt
 from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
-from mySTFT.calc_STFT import calcSTFT
+from mySTFT.calc_STFT import calcSTFT, calcISTFT
 from utilities.terminal import loop_progress
 from plotting.threedim import set_axes_equal
 from plotting.exports import makegif
@@ -286,7 +286,7 @@ def sortgevd(S,Q,order='descending'):
 
 
 def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,rir_dur,targetSources=None,noiseSources=None,\
-    exportit=False,exportname='',noise_spatially_white=False):
+    exportit=False,exportname='',noise_spatially_white=False, stoi_imp=None, fwSNRseg_imp=None):
     # Compute the MWF output as function of frequency and spatial location.
 
     print('\nComputing spatial visualization of MWF effect...\n')
@@ -316,7 +316,33 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,rir_dur,targetSources=None,noiseSourc
     # ~~~~~~~~~~ PLOT ~~~~~~~~~~
     spatial.plotspatialresp(xx,yy,en,targetSources,r,\
         dBscale=1,exportit=exportit,exportname=exportname,\
-            freqs=freqs,noiseSource=noiseSources,multichannel=True,noise_spatially_white=noise_spatially_white)
+            freqs=freqs,noiseSource=noiseSources,multichannel=True,noise_spatially_white=noise_spatially_white,\
+                stoi_imp=stoi_imp, fwSNRseg_imp=fwSNRseg_imp)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     return 0
+
+
+def applyMWF_tdomain(y, W_hat, Fs,win,L_fft,R_fft):
+    # Applies a MWF derived in the frequency domain to a signal in the time-domain.
+
+    y_STFT = calcSTFT(y, Fs, win, L_fft, R_fft, 'onesided')[0]
+
+    nbins = y_STFT.shape[0]
+    nframes = y_STFT.shape[1]
+    
+    D_hat = np.zeros_like(y_STFT)
+    # Loop over time frames
+    for l in range(nframes):
+        # Loop over frequency bins
+        for kp in range(nbins):
+            Ytf = np.squeeze(y_STFT[kp,l,:]) # Current TF bin
+            # Desired signal estimates for each node separately (last dimension of <D_hat>)
+            D_hat[kp,l,:] = np.squeeze(W_hat[:,:,kp]).conj().T @ Ytf
+
+    d_hat = calcISTFT(D_hat, win, L_fft, R_fft, sides='onesided')
+    # Zero-pad if needed to get the same output signal length
+    if d_hat.shape[0] < y.shape[0]:
+        d_hat = np.concatenate((d_hat, np.zeros((y.shape[0]-d_hat.shape[0], d_hat.shape[1]))), axis=0)
+
+    return d_hat

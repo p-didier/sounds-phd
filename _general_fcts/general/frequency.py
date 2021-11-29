@@ -36,7 +36,7 @@ def noctfr(n,fll,ful,type='exact'):
     x = np.floor(n * np.log(fll*2**(1/(2*n))/fc)/np.log(2))
     y = np.ceil(n * np.log(ful*2**(-1/(2*n))/fc)/np.log(2))
 
-    f  = 1000*2**(np.arange(x,y)/n)
+    f  = 1000*2**(np.arange(x,y+1)/n)
     fl = f*2**(-1/(2*n))
     fu = f*2**( 1/(2*n))
 
@@ -85,9 +85,57 @@ def divide_in_bands(bandtype, freqs):
 
     return bands_indices, fc, fl, fu
 
+
+def exact_to_norm_OTOBs(fc):
+    # exact_to_norm_OTOBs -- Converts exact OTOB centre frequencies to normalised
+    # OTOB centre frequencies according to the relevant ISO standards.
+    #
+    # >>> Inputs:
+    # -fc [N*1 float vector, Hz] - OTOB centre frequencies to normalise.
+    # >>> Outputs:
+    # -fcn [N*1 float vector, Hz] - Normalised centre frequencies.
+
+    # (c) Paul Didier - 10-Nov-2021
+
+    fn = np.array([12.5, 16, 20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,\
+        1000, 125, 1600, 2000, 3150, 4000, 5000, 6300, 8000, 10e3, 12500, 16e3, 20e3])
+
+    idx = get_closest(fn, fc)
+    fcn = np.empty(len(idx))
+    fcn[~np.isnan(idx)] = fn[idx[~np.isnan(idx)].tolist()]
+
+    if fc.shape[0] == 1:
+        fcn = fcn.T
+
+    return fcn
+
+
+def norm_to_exact_OTOBs(fcn):
+    # norm_to_exact_OTOBs -- Converts normalized OTOB centre frequencies to exact
+    # OTOB centre frequencies according to the relevant ISO standards.
+    #
+    # >>> Inputs:
+    # -fc [N*1 float vector, Hz] - Normalized OTOB centre frequencies.
+    # >>> Outputs:
+    # -fcn [N*1 float vector, Hz] - Exact centre frequencies.
+
+    # (c) Paul Didier - 10-Nov-2021
+
+    fn = noctfr(3, np.amin(fcn)*2**(-1/6), np.amax(fcn)*2**(1/6), 'exact')[0]
+
+    fc = fn[get_closest(fn,fcn)]
+
+    return fc
+
+
 # TESTS
 # freqs = np.arange(0, 8000)
 # bands_indices, fc, fl, fu = divide_in_bands('OTOB', freqs)
-# for ii, band_indices in enumerate(bands_indices):
-#     print(freqs[band_indices])
+
+# fcn = exact_to_norm_OTOBs(fc)
+# fc2 = norm_to_exact_OTOBs(fcn)
+# print(fc)
+# print(fcn)
+# print(fc2)
+
 # stop = 1
