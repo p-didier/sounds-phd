@@ -226,7 +226,8 @@ def plotspatialresp(xx,yy,data,targetSource,micpos,dBscale=False,exportit=False,
                 ax = fig.add_subplot(n_rows_plots,n_cols_plots,ii+1)
 
                 # Plot energy spatial contour map
-                mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], levels=15, vmin=ylim_min, vmax=ylim_max)
+                # mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], levels=15, vmin=ylim_min, vmax=ylim_max)
+                mapp = ax.contourf(xx[:,:,0], yy[:,:,0], data[:,:,0,ii], levels=15)
                 # Show microphones as dots
                 for jj in range(nChannels):
                     if jj != ii:

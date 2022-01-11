@@ -58,7 +58,7 @@ def main():
     GEVDrank = 1
     #
     Tmax = 15                       # maximum signal duration [s]
-    baseSNR = 10                    # SNR pre-RIR application [dB]
+    baseSNR = -10                    # SNR pre-RIR application [dB]
     #
     pauseDur = 1                    # duration of pauses in-between speech segments [s]
     pauseSpace = 3                  # duration of speech segments (btw. pauses) [s]
@@ -92,12 +92,12 @@ def main():
     # ASref = '2D\\J5Mk1_Ns2_Nn3'   
     # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s2_n123'   
     # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n1'
-    # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n3'
-    # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n123'
+    ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n3'
+    # ASref = '2D\\J5Mk1_Ns2_Nn3\\AS0_anechoic_s12_n13'
     # ASref = 'J5Mk1_Ns2_Nn3\\AS0_anechoic'
     # plotAS = 'PDF'
-    plotAS = 'plot'
-    # plotAS = None
+    # plotAS = 'plot'
+    plotAS = None
     # Specific speech/noise files 
     speech1 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\61\\70968\\61-70968-0000.flac'
     speech2 = 'C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals\\01_LibriSpeech_ASR\\test-clean\\3570\\5694\\3570-5694-0007.flac'

@@ -407,7 +407,11 @@ def sig_gen(path_to,speech_lib,Tmax,noise_type,baseSNR,pauseDur=0,pauseSpace=flo
                 n_k += n_kk[:nmax]
             ny[:,k] = n_k
             # Add spatially white noise
-            ny[:,k] += np.amax(n_k) * np.random.uniform(low=-1,high=1,size=nmax) * noise[:,0]   
+            swnAmplitude = 0.5 * np.amax(ny[:,k])
+            # swnAmplitude = 1
+            # swnAmplitude = 0.1
+            noiseSpatiallyWhite = sf_uncorr * np.random.normal(0,1,nmax)
+            ny[:,k] += swnAmplitude * np.random.uniform(low=-1,high=1,size=nmax) * noiseSpatiallyWhite   
     else:
         for k in range(M):
             n_k = np.zeros(nmax)
