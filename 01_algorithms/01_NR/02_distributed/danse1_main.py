@@ -13,8 +13,10 @@ mySettings = ProgramSettings(
     )
 mySettings.save(experimentName) # save settings
 
+mySettings2 = ProgramSettings.load(experimentName) # save settings
+mySettings2.save(f'altered_{experimentName}') # save settings
 # Run experiment
-results = runExperiment(mySettings)
-results.save(f"out_{experimentName}")
+# results = runExperiment(mySettings)
+# results.save(f"out_{experimentName}")
 
 # %%

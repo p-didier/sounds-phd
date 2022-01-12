@@ -1,99 +1,67 @@
-#!/usr/bin/env python
-# coding: utf-8
+# %%
 import numpy as np
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
 import random
-from rimPypack.rimPy import rimPy
-from scipy.spatial.transform import Rotation as rot
 from pathlib import Path
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
+from dataclasses import dataclass
+from scipy.spatial.transform import Rotation as rot
+from rimPypack.rimPy import rimPy
+sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
 from plotting.threedim import plot_room
+from class_methods import dataclass_methods 
+
 
 # Acoustic Scenario (AS) generation script.
 
-class Node:
-    def __init__(self, Mk, arraygeom, mic_sep):
-        self.Mk = Mk
-        self.array = arraygeom
-        self.mic_sep = mic_sep
-
-
 def main():
 
-    gen_specific_AS = 1 
+    # Define settings
+    sets = ProgramSettings(
+        numScenarios = 1,               # Number of AS to generate
+        samplingFrequency = 16e3,       # Sampling frequency [samples/s]
+        rirLength = 2**12,              # RIR length [samples]
+        roomDimBounds = [3,7],          # [Smallest, largest] room dimension possible [m]
+        numSpeechSources = 1,           # nr. of speech sources
+        numNoiseSources = 1,            # nr. of noise sources
+        numNodes = 5,                   # nr. of nodes
+        numSensorPerNode = 1,           # nr. of sensor per node
+        arrayGeometry = 'linear',       # microphone array geometry (only used if numSensorPerNode > 1)
+        sensorSeparation = 0.05,        # separation between sensor in array (only used if numSensorPerNode > 1)
+        revTime = 0.0,                   # reverberation time [s]
+        seed = 12345                    # seed for random generator
+    )
 
-    nAS = 9                    # Number of AS to generate
-    Fs = 16e3                   # Sampling frequency [samples/s]
-    RIR_l = 2**12               # RIR length [samples]
-    minRd = 3                   # Smallest room dimension possible [m]
-    maxRd = 7                   # Largest room dimension possible [m]
-    #
-    Ns = 2                      # nr. of speech sources
-    Nn = 3                      # nr. of noise sources
-    #
-    nNodes = 5                  # nr. of nodes
-    Mk = 1
-    node = Node(Mk, 'linear', 0.05)
-    #
-    T60fixed = 0            # Set to None to draw T60 randomly from uniform dist. between <T60min> and <T60max>
-    T60max = 1.5*RIR_l/Fs   # Largest possible T60
-    T60min = 0.4*RIR_l/Fs   # Smallest possible T60
-    #
-    flattened = 0        # If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2
+    # Local booleans
     plotit = True        # If true, plots the AS
 
-    if gen_specific_AS:
-        nAS = 1
+    # Prepare export
+    expFolder = f"{os.getcwd()}/sounds-phd/02_data/01_acoustic_scenarios/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    if not os.path.isdir(expFolder):   # check if subfolder exists
+        os.mkdir(expFolder)   # if not, make directory
+    nas = len(next(os.walk(expFolder))[2])   # count only files in export dir
+    fname = f"{expFolder}/AS{nas}"  # file name
+    if sets.revTime == 0:
+        fname += '_anechoic'
+    fname += '.csv'
 
-    counter = 0
-    while counter < nAS:
+    # Generate scenarios
+    counter = 0 # counter the number of acoustic scenarios generated
+    while counter < sets.numScenarios:
         
-        if gen_specific_AS:
-            rd = get_fixed_values()[0]
-            # T60 = 0.25
-            # T60 = 0.33
-            T60 = 0
-        else:
-            rd = np.random.uniform(low=minRd, high=maxRd, size=(3,))    # Generate random room dimensions
-            if T60fixed is None:
-                T60 = random.uniform(T60min, T60max)
-            else:
-                T60 = T60fixed
-        # T60 = np.random.uniform(low=T60min, high=T60max, size=(1,)) # Generate random reverberation time
-        V = np.prod(rd)                                   # Room volume
-        S = 2*(rd[0]*rd[1] + rd[0]*rd[2] + rd[1]*rd[2])   # Total room surface area
-        alpha = np.minimum(1, 0.161*V/(T60*S))                # Absorption coefficient of the walls
+        # Generate RIRs
+        h_ns, h_nn, rs, rn, r, rd = genAS(sets, plotit=plotit)
         
-        # Call function
-        if gen_specific_AS:
-            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=False,flat=flattened,plotit=plotit)
-        else:
-            h_ns, h_nn, rs, rn, r = genAS(rd,nNodes,node,Ns,Nn,alpha,RIR_l,Fs,1,random_coords=True,flat=flattened,plotit=plotit)
-
-        # Export
-        expfolder = "C:\\Users\\u0137935\\source\\repos\\PaulESAT\\sounds-phd\\02_data\\01_acoustic_scenarios"
-        if gen_specific_AS:
-            fname = '%s\\J%iMk%i_Ns%i_Nn%i\\testAS' % (expfolder,nNodes,Mk,Ns,Nn)
-        else:
-            expfolder += '\\J%iMk%i_Ns%i_Nn%i' % (nNodes,Mk,Ns,Nn)
-            if not os.path.isdir(expfolder):   # check if subfolder exists
-                os.mkdir(expfolder)   # if not, make directory
-            nas = len(next(os.walk(expfolder))[2])   # count only files in export dir
-            fname =  "%s\\AS%i" % (expfolder,nas)
-        if alpha == 1:
-            fname += '_anechoic'
-        if flattened:
-            fname += '_2D'
-        if nNodes == 1 and Mk > 1:
-            fname += '_array'
-        fname += '.csv'
-        #
-        header = {'rd': pd.Series(np.squeeze(rd)), 'alpha': alpha, 'Fs': Fs,\
-             'nNodes': nNodes, 'd_intersensor': node.mic_sep}
+        # Prepare header for CSV export
+        header = {'rd': pd.Series(np.squeeze(rd)),
+                    'RT': sets.revTime,
+                    'Fs': sets.samplingFrequency,
+                    'nNodes': sets.numNodes, 
+                    'd_intersensor': sets.sensorSeparation}
         #  
         export_data(h_ns, h_nn, header, rs, rn, r, fname)
+        sets.save(f'{expFolder}/simulSettings')      # Save settings for potential re-run
 
         counter += 1
 
@@ -102,95 +70,153 @@ def main():
     return h_ns, h_nn
         
 
-def genAS(rd,J,node,Ns,Nn,alpha,RIR_l,Fs,export=True,random_coords=True,flat=False,plotit=False):
-    # genAS -- Computes the RIRs in a rectangular cavity where sensors, speech
-    # sources, and noise sources are present.
-    # 
-    # >>> Inputs:
-    # -rd [3*1 (or 1*3) float array, m] - Room dimensions [x,y,z].
-    # -J [int, -] - # of nodes.
-    # -node [<Node> class object] - Node object containing # of sensors, array type, and inter-sensor distance.
-    # -Ns [int, -] - # of desired sources.
-    # -Nn [int, -] - # of noise sources.
-    # -alpha [float, -] - Walls absorption coefficient (norm. inc.).
-    # -RIR_l [int, #samples] - Length of RIRs to produce.
-    # -Fs [float, Hz] - Sampling frequency.
-    # -export [bool] - If true, export AS (RIRs + parameters) as .MAT.
-    # -random_coords [bool] - If true, use randomly-generated source/receiver positions.
-    # -flat [bool] - If true, set all sensors and sources on the same xy-plane at z = rd[-1]/2.
-    #
-    # >>> Outputs:
-    # -h_sn [RIR_l*J*Ns (complex) float 3-D array, -] - RIRs between desired sources and sensors.  
-    # -h_nn [RIR_l*J*Nn (complex) float 3-D array, -] - RIRs between noise sources and sensors.  
+class micArrayAttributes:
+    def __init__(self, Mk, arraygeom, mic_sep):
+        self.Mk = Mk
+        self.array = arraygeom
+        self.mic_sep = mic_sep
 
-    # (c) Paul Didier - 08-Sept-2021
-    # SOUNDS ETN - KU Leuven ESAT STADIUS
-    # ------------------------------------
+@dataclass
+class ProgramSettings:
+    """Class for keeping track of global simulation settings"""
+    roomDimBounds: list                 # [Smallest, largest] room dimension possible [m]
+    numScenarios: int = 1               # Number of AS to generate
+    samplingFrequency: int = 16e3       # Sampling frequency [samples/s]
+    rirLength: int = 2**12              # RIR length [samples]
+    numSpeechSources: int = 1           # nr. of speech sources
+    numNoiseSources: int = 1            # nr. of noise sources
+    numNodes: int = 3                   # nr. of nodes
+    numSensorPerNode: int = 1           # nr. of sensor per node
+    revTime: float = 0.0                # reverberation time [s]
+    arrayGeometry: str = 'linear'       # microphone array geometry (only used if numSensorPerNode > 1)
+    sensorSeparation: float = 0.05      # separation between sensor in array (only used if numSensorPerNode > 1)
+    seed: int = 12345                   # seed for random generator
+    
+    @classmethod
+    def load(cls, filename: str):
+        return dataclass_methods.load(cls, filename)
+    def save(self, filename: str):
+        dataclass_methods.save(self, filename)
+
+
+def genAS(sets: ProgramSettings,plotit=False):
+    """Computes the RIRs in a rectangular cavity where sensors, speech
+    sources, and noise sources are present.
+
+    Parameters
+    ----------
+    sets : classes.ProgramSettings object.
+        The settings for the current run.
+    plotit : bool.
+        If true, plots the scenario in a figure.
+
+    Returns
+    -------
+    rirSpeechToNodes : [RIR_l x J x Ns] array of complex floats
+        RIRs between desired sources and sensors.  
+    rirNoiseToNodes : [RIR_l x J x Nn] array of complex floats
+        RIRs between noise sources and sensors.
+    speechSourceCoords : [Ns x 3] array of real floats
+        Speech source(s) coordinates [m].
+    noiseSourceCoords : [Nn x 3] array of real floats
+        Noise source(s) coordinates [m].
+    nodesCoords : [J x 3] array of real floats
+        Node(s) coordinates [m].
+    roomDimensions : [3,] list of real floats
+        Room dimensions [m].
+    """
+
+    # Create random generator
+    rng = np.random.default_rng(sets.seed)
+
+    # Create node array
+    arrayAttrib = micArrayAttributes(Mk=sets.numSensorPerNode, 
+                        arraygeom=sets.arrayGeometry, 
+                        mic_sep=sets.sensorSeparation)
+
+    # Room parameters
+    roomDimensions = rng.uniform(sets.roomDimBounds[0], sets.roomDimBounds[1], size=(3,))    # Generate random room dimensions
+    roomVolume = np.prod(roomDimensions)                                   # Room volume
+    roomSurface = 2*(roomDimensions[0] * roomDimensions[1] +
+                    roomDimensions[0] * roomDimensions[2] +
+                    roomDimensions[1] * roomDimensions[2])   # Total room surface area
+    if sets.revTime == 0:
+        absorbCoeff = 1
+    else:
+        absorbCoeff = np.minimum(1, 0.161 * roomVolume / (sets.revTime * roomSurface))  # Absorption coefficient of the walls (Sabine's equation)
     
     # Random element positioning in 3-D space
-    if random_coords:
-        rs = np.multiply(np.random.rand(Ns,3),rd)   # speech sources positions
-        r  = np.multiply(np.random.rand(J,3),rd)    # nodes positions
-        rn = np.multiply(np.random.rand(Nn,3),rd)   # noise sources positions
-    else:
-        rd, r, rs, rn = get_fixed_values()
-        r = r[:J,:]
-        # rs = rs[:Ns,:]
-        # rn = rn[:Nn,:]
-
-        # TEMPORARY 2021/10/14 - 12h17
-        rs = rs[1:Ns+1,:]
-        rn = rn[4:Nn+4,:]
-
+    speechSourceCoords = np.multiply(rng.uniform(0, 1, (sets.numSpeechSources, 3)), roomDimensions)
+    nodesCoords        = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions)
+    noiseSourceCoords  = np.multiply(rng.uniform(0, 1, (sets.numNoiseSources, 3)), roomDimensions)
     
     # Generate sensor arrays
-    M = J*node.Mk
-    r_sensors = np.zeros((M,3))
-    for ii in range(J):
-        r_sensors[ii*node.Mk:(ii+1)*node.Mk,:] = generate_array_pos(r[ii,:], node.Mk, node.array, node.mic_sep)
+    totalNumNodes = sets.numNodes * arrayAttrib.Mk
+    sensorsCoords = np.zeros((totalNumNodes, 3))
+    for ii in range(sets.numNodes):
+        sensorsCoords[ii * arrayAttrib.Mk : (ii + 1) * arrayAttrib.Mk,:] = \
+            generate_array_pos(nodesCoords[ii, :], arrayAttrib, rng)
 
-    # Option to generate a 2D-scenario
-    if flat:
-        rs[:,-1] = rd[-1]/2
-        r_sensors[:,-1] = rd[-1]/2
-        rn[:,-1] = rd[-1]/2
-
-    # If asked, show AS on plot
+    # If asked, show geometry on plot
     if plotit:
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        plot_room(ax, rd)
-        ax.scatter(r_sensors[:,0],r_sensors[:,1],r_sensors[:,2], c='green')
-        ax.scatter(rs[:,0],rs[:,1],rs[:,2], c='blue')
-        ax.scatter(rn[:,0],rn[:,1],rn[:,2], c='red')
+        plot_room(ax, roomDimensions)
+        ax.scatter(sensorsCoords[:,0],sensorsCoords[:,1],sensorsCoords[:,2], c='green')
+        ax.scatter(speechSourceCoords[:,0], speechSourceCoords[:,1], speechSourceCoords[:,2], c='blue')
+        ax.scatter(noiseSourceCoords[:,0], noiseSourceCoords[:,1], noiseSourceCoords[:,2], c='red')
         ax.grid()
         plt.show()
 
     # Walls reflection coefficient  
-    R = -1*np.sqrt(1 - alpha)   
+    reflectionCoeff = -1*np.sqrt(1 - absorbCoeff)   
     
     # Compute RIRs from speech source to sensors
-    h_sn = np.zeros((RIR_l, M, Ns))
-    for ii in range(Ns):
-        print('Computing RIRs from speech source #%i at %i sensors' % (ii+1, M))
-        h_sn[:,:,ii] = rimPy(r_sensors, rs[ii,:], rd, R, RIR_l/Fs, Fs)
-    
+    rirSpeechToNodes = np.zeros((sets.rirLength, totalNumNodes, sets.numSpeechSources))
+    for ii in range(sets.numSpeechSources):
+        print('Computing RIRs from speech source #%i at %i sensors' % (ii+1, totalNumNodes))
+        rirSpeechToNodes[:,:,ii] = rimPy(sensorsCoords, speechSourceCoords[ii,:], 
+        roomDimensions, reflectionCoeff, 
+        sets.rirLength/sets.samplingFrequency, sets.samplingFrequency)
     # Compute RIRs from noise source to sensors
-    h_nn = np.zeros((RIR_l, M, Nn))
-    for ii in range(Nn):
-        print('Computing RIRs from noise source #%i at %i sensors' % (ii+1, M))
-        h_nn[:,:,ii] = rimPy(r_sensors, rn[ii,:], rd, R, RIR_l/Fs, Fs)
+    rirNoiseToNodes = np.zeros((sets.rirLength, totalNumNodes, sets.numNoiseSources))
+    for ii in range(sets.numNoiseSources):
+        print('Computing RIRs from noise source #%i at %i sensors' % (ii+1, totalNumNodes))
+        rirNoiseToNodes[:,:,ii] = rimPy(sensorsCoords, noiseSourceCoords[ii,:], 
+        roomDimensions, reflectionCoeff, 
+        sets.rirLength/sets.samplingFrequency, sets.samplingFrequency)
     
-    return h_sn, h_nn, rs, rn, r_sensors
+    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, roomDimensions
 
   
 def export_data(h_sn, h_nn, header, rs, rn, r, fname):
+    """Exports the necessary acoustic scenario data as CSV for 
+    later use in other simulations.
+
+    Parameters
+    ----------
+    h_sn : [RIR_l x J x Ns] array of complex floats
+        RIRs between desired sources and sensors.  
+    h_nn : [RIR_l x J x Nn] array of complex floats
+        RIRs between noise sources and sensors.
+    header : dictionary.
+        Other important information to exploit the exported data.
+    rs : [Ns x 3] array of real floats
+        Speech source(s) coordinates [m].
+    rn : [Nn x 3] array of real floats
+        Noise source(s) coordinates [m].
+    r : [J x 3] array of real floats
+        Node(s) coordinates [m].
+    fname : str.
+        Name of file to be exported.
+    """
 
     # Check if export folder exists
-    mydir = os.path.dirname(fname)
+    os.path.realpath(fname)
+    mydir = str(Path(fname).parent)
     if not os.path.isdir(mydir):
         os.mkdir(mydir)   # if not, make directory
-        print('Direction "%s" was created.' % mydir)
+        print(f'Directory "{mydir}" was created.')
 
     # Source-to-node RIRs
     data_df = pd.DataFrame()   # init dataframe
@@ -231,71 +257,51 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     big_df = pd.concat([header_df,rs_df,rn_df,r_df,data_df])
     big_df.to_csv(fname)
 
-    print('Data exported to CSV: "%s"' % os.path.basename(fname))
+    print('Data exported to CSV: "%s"' % Path(fname).name)
     print('Find it in folder: %s' % str(Path(fname).parent))
 
 
-def generate_array_pos(r, Mk, array_type, min_d, force2D=False):
-    # Define node positions based on node position, number of nodes, and array type
+def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerator: np.random._generator.Generator, force2D=False):
+    """Define node positions based on node position, number of nodes, and array type
 
-    if array_type == 'linear':
+    Parameters
+    ----------
+    nodeCoords : [J x 3] array of real floats.
+        Nodes coordinates in 3-D space [m].
+    arrayAttrib : micArrayAttributes object.
+        Characteristics of the sensor array at each node.
+    randGenerator : NumPy random generator.
+        Random generator with pre-specified seed.
+    force2D : bool.
+        If true, projects the sensor coordinates on the z=0 plane.
+
+    Returns
+    -------
+    sensorCoordsRotated : [(J*arrayAttrib.Mk) x 3] array of real floats.
+        Sensor coordinates in 3-D space [m].
+    """
+
+    if arrayAttrib.array == 'linear':
         # 1D local geometry
-        x = np.linspace(start=0, stop=Mk*min_d, num=Mk)
+        x = np.linspace(start=0, stop=arrayAttrib.Mk * arrayAttrib.mic_sep, num=arrayAttrib.Mk)
         # Center
         x -= np.mean(x)
         # Make 3D
-        r_sensors = np.zeros((Mk,3))
-        r_sensors[:,0] = x
+        sensorCoords = np.zeros((arrayAttrib.Mk,3))
+        sensorCoords[:,0] = x
         
         # Rotate in 3D through randomized rotation vector 
-        rotvec = np.random.uniform(low=0, high=1, size=(3,))
+        rotvec = randGenerator.uniform(low=0, high=1, size=(3,))
         if force2D:
             rotvec[1:2] = 0
-        r_sensors_rot = np.zeros_like(r_sensors)
-        for ii in range(Mk):
+        sensorCoordsRotated = np.zeros_like(sensorCoords)
+        for ii in range(arrayAttrib.Mk):
             myrot = rot.from_rotvec(np.pi/2 * rotvec)
-            r_sensors_rot[ii,:] = myrot.apply(r_sensors[ii,:]) + r
+            sensorCoordsRotated[ii,:] = myrot.apply(sensorCoords[ii, :]) + nodeCoords
     else:
-        raise ValueError('No sensor array geometry defined for array type "%s"' % array_type)
+        raise ValueError('No sensor array geometry defined for array type "%s"' % arrayAttrib.array)
 
-    return r_sensors_rot
-
-
-def get_fixed_values():
-
-    rd = np.array([6.74663681, 6.47443158, 5.29141806])
-    rs = np.array([[3.80871696, 3.47644605, 0.13365643],
-       [2.8506613 , 2.24521067, 4.7211736 ],
-       [0.53659517, 2.58889843, 3.93477618],
-       [1.15229464, 2.00410181, 4.44485973],
-       [4.1974679 , 2.43351876, 1.97641962],
-       [1.57881229, 5.03781146, 2.65542962],
-       [6.65379346, 4.44628479, 0.43348834],
-       [4.14120661, 3.94366795, 2.36864132],
-       [1.76631629, 6.15191657, 2.40936931],
-       [0.42973443, 4.18359708, 0.15160593]])
-    r = np.array([[2.48886545, 4.34982861, 2.87315296],
-       [5.24655834, 5.66887148, 4.35400199],
-       [0.12285002, 4.59571634, 3.47397411],
-       [2.78390363, 1.49391502, 0.84512655],
-       [1.1217436 , 6.07061552, 0.86066287],
-       [3.17113765, 5.94627376, 2.11941889],
-       [0.00946956, 1.35901537, 4.40715656],
-       [4.25251161, 4.83032505, 4.59872196],
-       [2.18592129, 2.37155164, 2.28711986],
-       [3.81597077, 4.05754139, 1.48683971]])
-    rn = np.array([[3.17100024, 4.40443333, 2.16296961],
-       [3.60656018, 3.79377093, 1.76541558],
-       [0.25901077, 4.614144  , 2.83299575],
-       [2.73518121, 0.30138353, 0.77814191],
-       [5.74734719, 3.85861567, 2.75872101],
-       [5.18246482, 5.12011156, 3.70950443],
-       [2.67892363, 3.30854761, 3.59350624],
-       [1.23639543, 5.74947558, 2.96543862],
-       [1.68529516, 3.24728082, 4.82935064],
-       [0.04326686, 4.47009184, 3.15532972]])
-
-    return rd, r, rs, rn
+    return sensorCoordsRotated
 
 
 if __name__ == '__main__':
