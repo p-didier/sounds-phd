@@ -1,20 +1,277 @@
+import os, sys
 from . import classes
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from dataclasses import dataclass
+import soundfile as sf
+import scipy.signal as sig
+from mpl_toolkits.mplot3d import Axes3D
+sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
+from plotting.threedim import *
 
-def runExperiment(settings):
-    """Runs an experiment given certain settings.
+@dataclass
+class AcousticScenario(object):
+    """Class for keeping track of acoustic scenario parameters"""
+    rirDesiredToSensors: np.ndarray     # RIRs between desired sources and sensors
+    rirNoiseToSensors: np.ndarray       # RIRs between noise sources and sensors
+    desiredSourceCoords: np.ndarray     # Coordinates of desired sources
+    sensorCoords: np.ndarray            # Coordinates of nodes
+    noiseSourceCoords: np.ndarray       # Coordinates of noise sources
+    roomDimensions: np.ndarray          # Room dimensions   
+    absCoeff: float                     # Absorption coefficient
+    samplingFreq: int                   # Sampling frequency
+    numNodes: int                       # Number of nodes in network
+    distBtwSensors: float               # Distance btw. sensors at one node
+
+    def __post_init__(self):
+        self.numDesiredSources = self.desiredSourceCoords.shape[0]
+        self.numSensors = self.sensorCoords.shape[0]
+        self.numNoiseSources = self.noiseSourceCoords.shape[0]
+        return self
+
+def runExperiment(settings: classes.ProgramSettings):
+    """Wrapper function to run a DANSE-related experiment given certain settings.
     Parameters
     ----------
-    settings : classes.ProgramSettings object.
+    settings : classes.ProgramSettings object
         The settings for the current run.
 
     Returns
     -------
-    results : XXXX
+    results : classes.Results object
         The experiment results.
     """
 
-    results = classes.Results()
+    # Generate base signals
+    signals = generate_signals(settings)
 
+    # Apply SROs
+    ###############TODO
+
+    # DANSE
+    results = danse(signals, settings)
+
+    # # Transform into a class
+    # results = classes.Results(results)    
+
+    return signals
+
+def danse(y, settings: classes.ProgramSettings):
+    """Main wrapper for DANSE computations.
+    Parameters
+    ----------
+    y : [N x Ns] np.ndarray
+        The microphone signals
+    settings : classes.ProgramSettings object
+        The settings for the current run.
+
+    Returns
+    -------
+    #TODO
+    """
+
+    # Convert signals 
+
+    results = 1
     
-
     return results
+
+def whiten(sig):
+    """Renders a signal zero-mean and unit-variance."""
+    return (sig - np.mean(sig))/np.std(sig)
+
+
+def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
+    """Truncates/extends, resamples, centers, and scales a signal to match a target.
+    Parameters
+    ----------
+    rawSignal : [N_in x 1] np.ndarray
+        Raw signal to be processed.
+    desiredDuration : float
+        Desired signal duration [s].
+    originalFs : int
+        Original raw signal sampling frequency [samples/s].
+    targetFs : int
+        Target sampling frequency [samples/s].
+
+    Returns
+    -------
+    sig_out : [N_out x 1] np.ndarray
+        Processed signal.
+    """
+
+    signalLength = desiredDuration * targetFs   # desired signal length [samples]
+    while len(rawSignal) < signalLength:
+        rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
+    if len(rawSignal) > signalLength:
+        rawSignal = rawSignal[:desiredDuration * originalFs]  # truncate too long signals
+    # Resample signal so that its sampling frequency matches the target
+    rawSignal = sig.resample(rawSignal, signalLength)   
+    # Whiten signal 
+    sig_out = whiten(rawSignal) 
+    return sig_out
+
+def generate_signals(settings: classes.ProgramSettings):
+    """Generates signals based on acoustic scenario and raw files.
+    Parameters
+    ----------
+    settings : classes.ProgramSettings object
+        The settings for the current run.
+
+    Returns
+    -------
+    micSignals : [N x Nnodes x NsensorPerNode] np.ndarray
+        Sensor signals. 
+    """
+
+    # Load acoustic scenario
+    asc = load_acoustic_scenario(settings.acousticScenarioPath,
+                                settings.plotAcousticScenario,
+                                settings.acScenarioPlotExportPath)
+
+    # Detect conflicts
+    if asc.numDesiredSources > len(settings.desiredSignalFile):
+        raise ValueError(f'{settings.desiredSignalFile} "desired" signal files provided while {asc.numDesiredSources} are needed.')
+    if asc.numNoiseSources > len(settings.noiseSignalFile):
+        raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
+
+    # Desired signal length [samples]
+    signalLength = settings.signalDuration * asc.samplingFreq   
+
+    # Load + pre-process dry desired signals and build wet desired signals
+    dryDesiredSignals = np.zeros((signalLength, asc.numDesiredSources))
+    wetDesiredSignals = np.zeros((signalLength, asc.numDesiredSources, asc.numSensors))
+    for ii in range(asc.numDesiredSources):
+        
+        rawSignal, fsRawSignal = sf.read(settings.desiredSignalFile[ii])
+        dryDesiredSignals[:, ii] = pre_process_signal(rawSignal, settings.signalDuration, fsRawSignal, asc.samplingFreq)
+
+        # Convolve with RIRs to create wet signals
+        for jj in range(asc.numSensors):
+            tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
+            wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
+
+    # Load + pre-process dry noise signals and build wet noise signals
+    dryNoiseSignals = np.zeros((signalLength, asc.numNoiseSources))
+    wetNoiseSignals = np.zeros((signalLength, asc.numNoiseSources, asc.numSensors))
+    for ii in range(asc.numNoiseSources):
+
+        rawSignal, fsRawSignal = sf.read(settings.noiseSignalFile[ii])
+        tmp = pre_process_signal(rawSignal, settings.signalDuration, fsRawSignal, asc.samplingFreq)
+
+        # Set SNR
+        dryNoiseSignals[:, ii] = 10**(-settings.baseSNR / 20) * tmp
+
+        # Convolve with RIRs to create wet signals
+        for jj in range(asc.numSensors):
+            tmp = sig.fftconvolve(dryNoiseSignals[:, ii], asc.rirNoiseToSensors[:, jj, ii])
+            wetNoiseSignals[:, ii, jj] = tmp[:signalLength]
+
+    # Build sensor signals
+    micSignals = np.sum(wetNoiseSignals, axis=1) + np.sum(wetDesiredSignals, axis=1)
+
+    # Normalize
+    micSignals /= np.amax(micSignals)
+
+    return micSignals
+
+
+def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):
+    """Reads, interprets, and organizes a CSV file
+    containing an acoustic scenario and returns its 
+    contents.
+    Parameters
+    ----------
+    csvFilePath : str
+        Path to CSV file.   
+    plotScenario : bool
+        If true, plot visualization of acoustic scenario.       
+    figExportPath : str
+        Path to directory where to export the figure (only used if plotScenario is True).        
+
+    Returns
+    -------
+    acousticScenario : AcousticScenario object
+        Processed data about acoustic scenario (RIRs, dimensions, etc.).
+    """
+    # Check whether path exists
+    if not os.path.isfile(csvFilePath):
+        raise ValueError(f'The path provided\n\t\t"{csvFilePath}"\ndoes not correspond to an existing file.')
+
+    # Load dataframe
+    acousticScenario_df = pd.read_csv(csvFilePath,index_col=0)
+
+    # Count sources and receivers
+    numSpeechSources = sum('Source' in s for s in acousticScenario_df.index)       # number of speech sources
+    numNoiseSources  = sum('Noise' in s for s in acousticScenario_df.index)         # number of noise sources
+    numSensors       = sum('Sensor' in s for s in acousticScenario_df.index)        # number of sensors
+
+    # Extract single-valued data
+    roomDimensions   = [f for f in acousticScenario_df.rd if not np.isnan(f)]               # room dimensions
+    absCoeff         = [f for f in acousticScenario_df.alpha if not np.isnan(f)]            # absorption coefficient
+    absCoeff         = absCoeff[1]
+    samplingFreq     = [f for f in acousticScenario_df.Fs if not np.isnan(f)]               # sampling frequency
+    samplingFreq     = int(samplingFreq[1])
+    numNodes         = [f for f in acousticScenario_df.nNodes if not np.isnan(f)]           # number of nodes
+    numNodes         = int(numNodes[1])
+    distBtwSensors   = [f for f in acousticScenario_df.d_intersensor if not np.isnan(f)]    # inter-sensor distance
+    distBtwSensors   = int(distBtwSensors[1])
+
+    # Extract coordinates
+    desiredSourceCoords = np.zeros((numSpeechSources,3))
+    for ii in range(numSpeechSources):      # desired sources
+        desiredSourceCoords[ii,0] = acousticScenario_df.x[f'Source {ii + 1}']
+        desiredSourceCoords[ii,1] = acousticScenario_df.y[f'Source {ii + 1}']
+        desiredSourceCoords[ii,2] = acousticScenario_df.z[f'Source {ii + 1}']
+    sensorCoords = np.zeros((numSensors,3))
+    for ii in range(numSensors):            # sensors
+        sensorCoords[ii,0] = acousticScenario_df.x[f'Sensor {ii + 1}']
+        sensorCoords[ii,1] = acousticScenario_df.y[f'Sensor {ii + 1}']
+        sensorCoords[ii,2] = acousticScenario_df.z[f'Sensor {ii + 1}']
+    noiseSourceCoords = np.zeros((numNoiseSources,3))
+    for ii in range(numNoiseSources):       # noise sources
+        noiseSourceCoords[ii,0] = acousticScenario_df.x[f'Noise {ii + 1}']
+        noiseSourceCoords[ii,1] = acousticScenario_df.y[f'Noise {ii + 1}']
+        noiseSourceCoords[ii,2] = acousticScenario_df.z[f'Noise {ii + 1}']
+
+    # Extract RIRs
+    rirLength = int(1/numSpeechSources * sum('h_sn' in s for s in acousticScenario_df.index))    # number of samples in one RIR
+    rirDesiredToSensors = np.zeros((rirLength, numSensors, numSpeechSources))
+    rirNoiseToSensors = np.zeros((rirLength, numSensors, numNoiseSources))
+    for ii in range(numSensors):
+        sensorData = acousticScenario_df[f'Sensor {ii + 1}']
+        for jj in range(numSpeechSources):
+            rirDesiredToSensors[:,ii,jj] = sensorData[f'h_sn {jj + 1}'].to_numpy()    # source-to-node RIRs
+        for jj in range(numNoiseSources):
+            rirNoiseToSensors[:,ii,jj] = sensorData[f'h_nn {jj + 1}'].to_numpy()    # noise-to-node RIRs
+
+    acousticScenario = AcousticScenario(rirDesiredToSensors, rirNoiseToSensors,
+                                        desiredSourceCoords, sensorCoords, noiseSourceCoords,
+                                        roomDimensions, absCoeff,
+                                        samplingFreq, numNodes, distBtwSensors)
+
+    # Plot
+    if plotScenario:
+        
+        scatsize = 20
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection=Axes3D.name)
+        plot_room(ax, roomDimensions)
+        for ii in range(numSpeechSources):
+            ax.scatter(desiredSourceCoords[ii,0],desiredSourceCoords[ii,1],desiredSourceCoords[ii,2],s=scatsize,c='blue',marker='d')
+            ax.text(desiredSourceCoords[ii,0],desiredSourceCoords[ii,1],desiredSourceCoords[ii,2],"D%i" % (ii+1))
+        for ii in range(numNoiseSources):
+            ax.scatter(noiseSourceCoords[ii,0],noiseSourceCoords[ii,1],noiseSourceCoords[ii,2],s=scatsize,c='red',marker='P')
+            ax.text(noiseSourceCoords[ii,0],noiseSourceCoords[ii,1],noiseSourceCoords[ii,2],"N%i" % (ii+1))
+        for ii in range(numSensors):
+            ax.scatter(sensorCoords[ii,0],sensorCoords[ii,1],sensorCoords[ii,2],s=scatsize,c='green',marker='o')
+            ax.text(sensorCoords[ii,0],sensorCoords[ii,1],sensorCoords[ii,2],"S%i" % (ii+1))
+        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
+            title=csvFilePath[csvFilePath.rfind('/', 0, csvFilePath.rfind('/')) + 1:-4])
+        ax.grid()
+        set_axes_equal(ax)
+        plt.show()
+
+    return acousticScenario

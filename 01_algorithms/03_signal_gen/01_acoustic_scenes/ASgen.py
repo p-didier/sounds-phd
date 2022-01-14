@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
-import random
 from pathlib import Path
 from dataclasses import dataclass
 from scipy.spatial.transform import Rotation as rot
@@ -25,7 +24,7 @@ def main():
         roomDimBounds = [3,7],          # [Smallest, largest] room dimension possible [m]
         numSpeechSources = 1,           # nr. of speech sources
         numNoiseSources = 1,            # nr. of noise sources
-        numNodes = 5,                   # nr. of nodes
+        numNodes = 2,                   # nr. of nodes
         numSensorPerNode = 1,           # nr. of sensor per node
         arrayGeometry = 'linear',       # microphone array geometry (only used if numSensorPerNode > 1)
         sensorSeparation = 0.05,        # separation between sensor in array (only used if numSensorPerNode > 1)
@@ -51,11 +50,11 @@ def main():
     while counter < sets.numScenarios:
         
         # Generate RIRs
-        h_ns, h_nn, rs, rn, r, rd = genAS(sets, plotit=plotit)
+        h_ns, h_nn, rs, rn, r, rd, alpha = genAS(sets, plotit=plotit)
         
         # Prepare header for CSV export
         header = {'rd': pd.Series(np.squeeze(rd)),
-                    'RT': sets.revTime,
+                    'alpha': alpha,
                     'Fs': sets.samplingFrequency,
                     'nNodes': sets.numNodes, 
                     'd_intersensor': sets.sensorSeparation}
@@ -186,7 +185,7 @@ def genAS(sets: ProgramSettings,plotit=False):
         roomDimensions, reflectionCoeff, 
         sets.rirLength/sets.samplingFrequency, sets.samplingFrequency)
     
-    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, roomDimensions
+    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, roomDimensions, absorbCoeff
 
   
 def export_data(h_sn, h_nn, header, rs, rn, r, fname):
@@ -261,7 +260,7 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     print('Find it in folder: %s' % str(Path(fname).parent))
 
 
-def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerator: np.random._generator.Generator, force2D=False):
+def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerator, force2D=False):
     """Define node positions based on node position, number of nodes, and array type
 
     Parameters

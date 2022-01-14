@@ -1,7 +1,6 @@
 import csv
 from dataclasses import fields
 
-# @classmethod
 def load(cls, filename: str):
     """Loads program settings object from file"""
     csv_reader = csv.DictReader(open(filename, "r"))
