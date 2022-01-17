@@ -1,3 +1,5 @@
+from argparse import _ActionsContainer
+from copyreg import constructor
 import os, sys
 from . import classes
 import numpy as np
@@ -6,9 +8,8 @@ import pandas as pd
 from dataclasses import dataclass
 import soundfile as sf
 import scipy.signal as sig
-from mpl_toolkits.mplot3d import Axes3D
 sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
-from plotting.threedim import *
+from plotting.twodim import *
 
 @dataclass
 class AcousticScenario(object):
@@ -16,7 +17,8 @@ class AcousticScenario(object):
     rirDesiredToSensors: np.ndarray     # RIRs between desired sources and sensors
     rirNoiseToSensors: np.ndarray       # RIRs between noise sources and sensors
     desiredSourceCoords: np.ndarray     # Coordinates of desired sources
-    sensorCoords: np.ndarray            # Coordinates of nodes
+    sensorCoords: np.ndarray            # Coordinates of sensors
+    sensorToNodeTags: np.ndarray        # Tags relating each sensor to its node
     noiseSourceCoords: np.ndarray       # Coordinates of noise sources
     roomDimensions: np.ndarray          # Room dimensions   
     absCoeff: float                     # Absorption coefficient
@@ -43,26 +45,28 @@ def runExperiment(settings: classes.ProgramSettings):
         The experiment results.
     """
 
-    # Generate base signals
-    signals = generate_signals(settings)
+    # Generate base signals (and extract acoustic scenario)
+    signals, acousticScenario = generate_signals(settings)
 
     # Apply SROs
     ###############TODO
 
     # DANSE
-    results = danse(signals, settings)
+    results = danse(signals, acousticScenario, settings)
 
     # # Transform into a class
     # results = classes.Results(results)    
 
-    return signals
+    return results
 
-def danse(y, settings: classes.ProgramSettings):
+def danse(y, asc: AcousticScenario, settings: classes.ProgramSettings):
     """Main wrapper for DANSE computations.
     Parameters
     ----------
     y : [N x Ns] np.ndarray
         The microphone signals
+    asc : AcousticScenario object
+        Processed data about acoustic scenario (RIRs, dimensions, etc.).
     settings : classes.ProgramSettings object
         The settings for the current run.
 
@@ -121,8 +125,10 @@ def generate_signals(settings: classes.ProgramSettings):
 
     Returns
     -------
-    micSignals : [N x Nnodes x NsensorPerNode] np.ndarray
+    micSignals : [N x Nsensors] np.ndarray
         Sensor signals. 
+    asc : AcousticScenario object
+        Processed data about acoustic scenario (RIRs, dimensions, etc.).
     """
 
     # Load acoustic scenario
@@ -174,7 +180,7 @@ def generate_signals(settings: classes.ProgramSettings):
     # Normalize
     micSignals /= np.amax(micSignals)
 
-    return micSignals
+    return micSignals, asc
 
 
 def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):
@@ -235,19 +241,30 @@ def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):
         noiseSourceCoords[ii,1] = acousticScenario_df.y[f'Noise {ii + 1}']
         noiseSourceCoords[ii,2] = acousticScenario_df.z[f'Noise {ii + 1}']
 
-    # Extract RIRs
-    rirLength = int(1/numSpeechSources * sum('h_sn' in s for s in acousticScenario_df.index))    # number of samples in one RIR
+    # Prepare arrays to extract RIRs
+    rirLength = int(1/numNodes * sum('h_sn' in s for s in acousticScenario_df.index))    # number of samples in one RIR
     rirDesiredToSensors = np.zeros((rirLength, numSensors, numSpeechSources))
     rirNoiseToSensors = np.zeros((rirLength, numSensors, numNoiseSources))
-    for ii in range(numSensors):
-        sensorData = acousticScenario_df[f'Sensor {ii + 1}']
+
+    # Identify dataframe columns containing RIR data
+    idxDataColumns = [ii for ii in range(len(acousticScenario_df.columns)) if acousticScenario_df.columns[ii][:4] == 'Node']
+    tagsSensors = np.zeros(numSensors, dtype=int)  # tags linking sensor to node
+
+    # Start RIRs extraction from dataframe
+    for idxEnum, idxColumn in enumerate(idxDataColumns):
+        ref = acousticScenario_df.columns[idxColumn]
+        nodeNumber = ref[4]
+        sensorData = acousticScenario_df[ref]
         for jj in range(numSpeechSources):
-            rirDesiredToSensors[:,ii,jj] = sensorData[f'h_sn {jj + 1}'].to_numpy()    # source-to-node RIRs
+            tmp = sensorData[f'h_sn{jj + 1}'].to_numpy()
+            rirDesiredToSensors[:,idxEnum,jj] = tmp[~np.isnan(tmp)]    # source-to-node RIRs
         for jj in range(numNoiseSources):
-            rirNoiseToSensors[:,ii,jj] = sensorData[f'h_nn {jj + 1}'].to_numpy()    # noise-to-node RIRs
+            tmp = sensorData[f'h_nn{jj + 1}'].to_numpy()
+            rirNoiseToSensors[:,idxEnum,jj] = tmp[~np.isnan(tmp)]    # noise-to-node RIRs
+        tagsSensors[idxEnum] = nodeNumber
 
     acousticScenario = AcousticScenario(rirDesiredToSensors, rirNoiseToSensors,
-                                        desiredSourceCoords, sensorCoords, noiseSourceCoords,
+                                        desiredSourceCoords, sensorCoords, tagsSensors, noiseSourceCoords,
                                         roomDimensions, absCoeff,
                                         samplingFreq, numNodes, distBtwSensors)
 
@@ -256,22 +273,56 @@ def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):
         
         scatsize = 20
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection=Axes3D.name)
-        plot_room(ax, roomDimensions)
-        for ii in range(numSpeechSources):
-            ax.scatter(desiredSourceCoords[ii,0],desiredSourceCoords[ii,1],desiredSourceCoords[ii,2],s=scatsize,c='blue',marker='d')
-            ax.text(desiredSourceCoords[ii,0],desiredSourceCoords[ii,1],desiredSourceCoords[ii,2],"D%i" % (ii+1))
-        for ii in range(numNoiseSources):
-            ax.scatter(noiseSourceCoords[ii,0],noiseSourceCoords[ii,1],noiseSourceCoords[ii,2],s=scatsize,c='red',marker='P')
-            ax.text(noiseSourceCoords[ii,0],noiseSourceCoords[ii,1],noiseSourceCoords[ii,2],"N%i" % (ii+1))
-        for ii in range(numSensors):
-            ax.scatter(sensorCoords[ii,0],sensorCoords[ii,1],sensorCoords[ii,2],s=scatsize,c='green',marker='o')
-            ax.text(sensorCoords[ii,0],sensorCoords[ii,1],sensorCoords[ii,2],"S%i" % (ii+1))
-        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', zlabel='$z$ [m]',
-            title=csvFilePath[csvFilePath.rfind('/', 0, csvFilePath.rfind('/')) + 1:-4])
-        ax.grid()
-        set_axes_equal(ax)
+        fig = plt.figure(figsize=(6,4))
+        ax = fig.add_subplot(121)
+        plot_side_room(ax, roomDimensions[0:2], 
+                    desiredSourceCoords[:, [0,1]], sensorCoords[:, [0,1]], 
+                    noiseSourceCoords[:, [0,1]], scatsize)
+        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
+        #
+        ax = fig.add_subplot(122)
+        plot_side_room(ax, roomDimensions[1:], 
+                    desiredSourceCoords[:, [1,2]], sensorCoords[:, [1,2]], 
+                    noiseSourceCoords[:, [1,2]], scatsize)
+        ax.set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
+        #
+        fig.suptitle(csvFilePath[csvFilePath.rfind('/', 0, csvFilePath.rfind('/')) + 1:-4])
+        fig.tight_layout()
+        # set_axes_equal(ax)
         plt.show()
 
     return acousticScenario
+
+
+def plot_side_room(ax, rd2D, rs, r, rn, scatsize):
+    """Plots a 2-D room side, showing the positions of
+    sources and nodes inside of it.
+    Parameters
+    ----------
+    ax : Axes handle
+        Axes handle to plot on.
+    rd2D : [2 x 1] list
+        2-D room dimensions [m].
+    rs : [Ns x 2] np.ndarray
+        Desired (speech) source(s) coordinates [m]. 
+    r : [N x 2] np.ndarray
+        Sensor(s) coordinates [m]. 
+    rn : [Nn x 2] np.ndarray
+        Noise source(s) coordinates [m]. 
+    scatsize : float
+        Scatter plot marker size.
+    """
+    
+    plot_room2D(ax, rd2D)
+    for ii in range(rs.shape[0]):
+        ax.scatter(rs[ii,0],rs[ii,1],s=scatsize,c='blue',marker='d')
+        ax.text(rs[ii,0],rs[ii,1],"D%i" % (ii+1))
+    for ii in range(rn.shape[0]):
+        ax.scatter(rn[ii,0],rn[ii,1],s=scatsize,c='red',marker='P')
+        ax.text(rn[ii,0],rn[ii,1],"N%i" % (ii+1))
+    for ii in range(r.shape[0]):
+        ax.scatter(r[ii,0],r[ii,1],s=scatsize,c='green',marker='o')
+        ax.text(r[ii,0],r[ii,1],"S%i" % (ii+1))
+    ax.grid()
+    ax.axis('equal')
+    return None
