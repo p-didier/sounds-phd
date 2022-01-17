@@ -18,18 +18,18 @@ def main():
 
     # Define settings
     sets = ProgramSettings(
-        numScenarios = 1,               # Number of AS to generate
-        samplingFrequency = 16e3,       # Sampling frequency [samples/s]
-        rirLength = 2**12,              # RIR length [samples]
-        roomDimBounds = [3,7],          # [Smallest, largest] room dimension possible [m]
-        numSpeechSources = 1,           # nr. of speech sources
-        numNoiseSources = 1,            # nr. of noise sources
-        numNodes = 2,                   # nr. of nodes
-        numSensorPerNode = 1,           # nr. of sensor per node
-        arrayGeometry = 'linear',       # microphone array geometry (only used if numSensorPerNode > 1)
-        sensorSeparation = 0.05,        # separation between sensor in array (only used if numSensorPerNode > 1)
-        revTime = 0.0,                   # reverberation time [s]
-        seed = 12345                    # seed for random generator
+        numScenarios = 1,           # Number of AS to generate
+        samplingFrequency = 16e3,   # Sampling frequency [samples/s]
+        rirLength = 2**12,          # RIR length [samples]
+        roomDimBounds = [3,7],      # [Smallest, largest] room dimension possible [m]
+        numSpeechSources = 1,       # nr. of speech sources
+        numNoiseSources = 1,        # nr. of noise sources
+        numNodes = 3,               # nr. of nodes
+        numSensorPerNode = 2,       # nr. of sensor per node
+        arrayGeometry = 'linear',   # microphone array geometry (only used if numSensorPerNode > 1)
+        sensorSeparation = 0.05,    # separation between sensor in array (only used if numSensorPerNode > 1)
+        revTime = 0.0,              # reverberation time [s]
+        seed = 12345                # seed for random generator
     )
 
     # Local booleans
@@ -50,7 +50,7 @@ def main():
     while counter < sets.numScenarios:
         
         # Generate RIRs
-        h_ns, h_nn, rs, rn, r, rd, alpha = genAS(sets, plotit=plotit)
+        h_ns, h_nn, rs, rn, r, tags, rd, alpha = genAS(sets, plotit=plotit)
         
         # Prepare header for CSV export
         header = {'rd': pd.Series(np.squeeze(rd)),
@@ -59,8 +59,8 @@ def main():
                     'nNodes': sets.numNodes, 
                     'd_intersensor': sets.sensorSeparation}
         #  
-        export_data(h_ns, h_nn, header, rs, rn, r, fname)
-        sets.save(f'{expFolder}/simulSettings')      # Save settings for potential re-run
+        export_data(h_ns, h_nn, header, rs, rn, r, tags, fname)
+        sets.save(f'{expFolder}/simulSettings_AS{nas}')      # Save settings for potential re-run
 
         counter += 1
 
@@ -78,24 +78,34 @@ class micArrayAttributes:
 @dataclass
 class ProgramSettings:
     """Class for keeping track of global simulation settings"""
-    roomDimBounds: list                 # [Smallest, largest] room dimension possible [m]
-    numScenarios: int = 1               # Number of AS to generate
-    samplingFrequency: int = 16e3       # Sampling frequency [samples/s]
-    rirLength: int = 2**12              # RIR length [samples]
-    numSpeechSources: int = 1           # nr. of speech sources
-    numNoiseSources: int = 1            # nr. of noise sources
-    numNodes: int = 3                   # nr. of nodes
-    numSensorPerNode: int = 1           # nr. of sensor per node
-    revTime: float = 0.0                # reverberation time [s]
-    arrayGeometry: str = 'linear'       # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation: float = 0.05      # separation between sensor in array (only used if numSensorPerNode > 1)
-    seed: int = 12345                   # seed for random generator
+    roomDimBounds: list                             # [smallest, largest] room dimension possible [m]
+    numScenarios: int = 1                           # number of AS to generate
+    samplingFrequency: int = 16e3                   # sampling frequency [samples/s]
+    rirLength: int = 2**12                          # RIR length [samples]
+    numSpeechSources: int = 1                       # nr. of speech sources
+    numNoiseSources: int = 1                        # nr. of noise sources
+    numNodes: int = 3                               # nr. of nodes
+    numSensorPerNode: np.ndarray = np.array([1])    # nr. of sensor per node
+    revTime: float = 0.0                            # reverberation time [s]
+    arrayGeometry: str = 'linear'                   # microphone array geometry (only used if numSensorPerNode > 1)
+    sensorSeparation: float = 0.05                  # separation between sensor in array (only used if numSensorPerNode > 1)
+    seed: int = 12345                               # seed for random generator
     
     @classmethod
     def load(cls, filename: str):
         return dataclass_methods.load(cls, filename)
     def save(self, filename: str):
         dataclass_methods.save(self, filename)
+    
+    def __post_init__(self):
+        """Initial program settings checks"""
+        if isinstance(self.numSensorPerNode, int):  # case where all nodes have the same number of sensors
+            self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode)
+        elif len(self.numSensorPerNode) == 1:       # case where all nodes have the same number of sensors
+            self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode[0])
+        elif len(self.numSensorPerNode) != len(self.numNodes):
+            raise ValueError('Each node should have a number of nodes assigned to it.')
+        return self
 
 
 def genAS(sets: ProgramSettings,plotit=False):
@@ -128,11 +138,6 @@ def genAS(sets: ProgramSettings,plotit=False):
     # Create random generator
     rng = np.random.default_rng(sets.seed)
 
-    # Create node array
-    arrayAttrib = micArrayAttributes(Mk=sets.numSensorPerNode, 
-                        arraygeom=sets.arrayGeometry, 
-                        mic_sep=sets.sensorSeparation)
-
     # Room parameters
     roomDimensions = rng.uniform(sets.roomDimBounds[0], sets.roomDimBounds[1], size=(3,))    # Generate random room dimensions
     roomVolume = np.prod(roomDimensions)                                   # Room volume
@@ -150,11 +155,19 @@ def genAS(sets: ProgramSettings,plotit=False):
     noiseSourceCoords  = np.multiply(rng.uniform(0, 1, (sets.numNoiseSources, 3)), roomDimensions)
     
     # Generate sensor arrays
-    totalNumNodes = sets.numNodes * arrayAttrib.Mk
-    sensorsCoords = np.zeros((totalNumNodes, 3))
+    totalNumSensors = np.sum(sets.numSensorPerNode, dtype=int)
+    sensorsCoords = np.zeros((totalNumSensors, 3))
+    sensorNodeTags = np.zeros(totalNumSensors, dtype=int)     # tags linking each sensor to its node
     for ii in range(sets.numNodes):
+        # Create node array
+        arrayAttrib = micArrayAttributes(Mk=sets.numSensorPerNode[ii], 
+                                        arraygeom=sets.arrayGeometry, 
+                                        mic_sep=sets.sensorSeparation)
+        # Derive coordinates
         sensorsCoords[ii * arrayAttrib.Mk : (ii + 1) * arrayAttrib.Mk,:] = \
             generate_array_pos(nodesCoords[ii, :], arrayAttrib, rng)
+        # Assign node tag
+        sensorNodeTags[ii * arrayAttrib.Mk : (ii + 1) * arrayAttrib.Mk] = ii + 1
 
     # If asked, show geometry on plot
     if plotit:
@@ -168,35 +181,37 @@ def genAS(sets: ProgramSettings,plotit=False):
         plt.show()
 
     # Walls reflection coefficient  
-    reflectionCoeff = -1*np.sqrt(1 - absorbCoeff)   
+    reflectionCoeff = -1 * np.sqrt(1 - absorbCoeff)   
     
     # Compute RIRs from speech source to sensors
-    rirSpeechToNodes = np.zeros((sets.rirLength, totalNumNodes, sets.numSpeechSources))
+    rirSpeechToNodes = np.zeros((sets.rirLength, totalNumSensors, sets.numSpeechSources))
     for ii in range(sets.numSpeechSources):
-        print('Computing RIRs from speech source #%i at %i sensors' % (ii+1, totalNumNodes))
+        print('Computing RIRs from speech source #%i at %i sensors' % (ii+1, totalNumSensors))
         rirSpeechToNodes[:,:,ii] = rimPy(sensorsCoords, speechSourceCoords[ii,:], 
-        roomDimensions, reflectionCoeff, 
-        sets.rirLength/sets.samplingFrequency, sets.samplingFrequency)
+                                        roomDimensions, reflectionCoeff, 
+                                        sets.rirLength/sets.samplingFrequency, 
+                                        sets.samplingFrequency)
     # Compute RIRs from noise source to sensors
-    rirNoiseToNodes = np.zeros((sets.rirLength, totalNumNodes, sets.numNoiseSources))
+    rirNoiseToNodes = np.zeros((sets.rirLength, totalNumSensors, sets.numNoiseSources))
     for ii in range(sets.numNoiseSources):
-        print('Computing RIRs from noise source #%i at %i sensors' % (ii+1, totalNumNodes))
+        print('Computing RIRs from noise source #%i at %i sensors' % (ii+1, totalNumSensors))
         rirNoiseToNodes[:,:,ii] = rimPy(sensorsCoords, noiseSourceCoords[ii,:], 
-        roomDimensions, reflectionCoeff, 
-        sets.rirLength/sets.samplingFrequency, sets.samplingFrequency)
+                                        roomDimensions, reflectionCoeff, 
+                                        sets.rirLength/sets.samplingFrequency, 
+                                        sets.samplingFrequency)
     
-    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, roomDimensions, absorbCoeff
+    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, sensorNodeTags, roomDimensions, absorbCoeff
 
   
-def export_data(h_sn, h_nn, header, rs, rn, r, fname):
+def export_data(h_sn, h_nn, header, rs, rn, r, tags, fname):
     """Exports the necessary acoustic scenario data as CSV for 
     later use in other simulations.
 
     Parameters
     ----------
-    h_sn : [RIR_l x J x Ns] array of complex floats
+    h_sn : [RIR_l x M x Ns] array of complex floats
         RIRs between desired sources and sensors.  
-    h_nn : [RIR_l x J x Nn] array of complex floats
+    h_nn : [RIR_l x M x Nn] array of complex floats
         RIRs between noise sources and sensors.
     header : dictionary.
         Other important information to exploit the exported data.
@@ -204,8 +219,10 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
         Speech source(s) coordinates [m].
     rn : [Nn x 3] array of real floats
         Noise source(s) coordinates [m].
-    r : [J x 3] array of real floats
-        Node(s) coordinates [m].
+    r : [M x 3] array of real floats
+        Sensor(s) coordinates [m].
+    tags : [M x 1] array of integers
+        Tags linking each sensor to a node.
     fname : str.
         Name of file to be exported.
     """
@@ -220,23 +237,23 @@ def export_data(h_sn, h_nn, header, rs, rn, r, fname):
     # Source-to-node RIRs
     data_df = pd.DataFrame()   # init dataframe
     for ii in range(h_sn.shape[-1]):
-        # Build dataframe for current matrix slice
-        data_df_curr = pd.DataFrame(np.squeeze(h_sn[:,:,ii]),\
-            columns=['Sensor %i' % (idx+1) for idx in range(h_sn.shape[1])],\
-            index=['h_sn %i' % (ii+1) for idx in range(h_sn.shape[0])])
-
-        # Concatenate to global dataframe
-        data_df = pd.concat([data_df,data_df_curr])
+        for idxNode in range(np.amax(tags)):
+            # Build dataframe for desired source and current node
+            data_df_curr = pd.DataFrame(np.squeeze(h_sn[:, tags == idxNode + 1, ii]),\
+                columns=[f'Node{idxNode + 1}Sensor{idx + 1}' for idx in range(sum(tags == idxNode + 1))],\
+                index=[f'h_sn{ii + 1}' for idx in range(h_sn.shape[0])])
+            # Concatenate to global dataframe
+            data_df = pd.concat([data_df, data_df_curr])
 
     # Noise-to-node RIRs
     for ii in range(h_nn.shape[-1]):
-        # Build dataframe for current matrix slice
-        data_df_curr = pd.DataFrame(np.squeeze(h_nn[:,:,ii]),\
-            columns=['Sensor %i' % (idx+1) for idx in range(h_nn.shape[1])],\
-            index=['h_nn %i' % (ii+1) for idx in range(h_nn.shape[0])])
-
-        # Concatenate to global dataframe
-        data_df = pd.concat([data_df,data_df_curr])
+        for idxNode in range(np.amax(tags)):
+            # Build dataframe for noise source and current node
+            data_df_curr = pd.DataFrame(np.squeeze(h_nn[:, tags == idxNode + 1, ii]),\
+                columns=[f'Node{idxNode + 1}Sensor{idx + 1}' for idx in range(sum(tags == idxNode + 1))],\
+                index=[f'h_nn{ii + 1}' for idx in range(h_nn.shape[0])])
+            # Concatenate to global dataframe
+            data_df = pd.concat([data_df, data_df_curr])
             
     # Build header dataframe
     header_df = pd.DataFrame(header)
