@@ -5,6 +5,8 @@ from danse_utilities.classes import AcousticScenario, ProgramSettings, Results
 from danse_utilities.setup import run_experiment
 from pathlib import Path
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 
 
 ASBASEPATH = '/users/sista/pdidier/py/sounds-phd/02_data/01_acoustic_scenarios'
@@ -20,7 +22,8 @@ mySettings = ProgramSettings(
     baseSNR=10,
     plotAcousticScenario=True,
     VADwinLength=40e-3,             # VAD window length [s]
-    VADenergyFactor=4000,           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
+    VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
+    expAvgBeta=0.998             
     )
 # mySettings.save(experimentName) # save settings
 print(mySettings)
@@ -40,17 +43,22 @@ results.save(exportPath)
 exportPath = f'{Path(__file__).parent}/res/testrun'
 # Import results
 importedResults = Results().load(exportPath)
-#%%
+
+exportFigs = False
+
 # Plot scenario
 fig = importedResults.acousticScenario.plot()
 myPath = mySettings.acousticScenarioPath
 fig.suptitle(myPath[myPath.rfind('/', 0, myPath.rfind('/')) + 1:-4])
 plt.tight_layout()
-plt.savefig(f'{exportPath}/acousScenario.png')
+if exportFigs:
+    plt.savefig(f'{exportPath}/acousScenario.png')
 
 # Plot performance
 importedResults.plot_enhancement_metrics()
-plt.savefig(f'{exportPath}/enhMetrics.png')
+plt.suptitle(f'Speech enhancement metrics ($\\beta={mySettings.expAvgBeta}$)')
+if exportFigs:
+    plt.savefig(f'{exportPath}/enhMetrics.png')
 
 # Plot best performance node (in terms of STOI)
 maxSTOI = 0
@@ -59,17 +67,19 @@ for idxNode in range(importedResults.acousticScenario.numNodes):
     currSTOIs = importedResults.enhancementEval.stoi[f'Node{idxNode + 1}']
     for idxSensor, stoi in enumerate(currSTOIs):
         if stoi >= maxSTOI:
-            bestNode, bestSensor = idxNode, idxSensor
+            bestNode, bestSensor = idxNode + 1, idxSensor + 1
             maxSTOI = stoi
         if stoi <= minSTOI:
-            worseNode, worseSensor = idxNode, idxSensor
+            worseNode, worseSensor = idxNode + 1, idxSensor + 1
             minSTOI = stoi
-print(f'Best node (STOI = {maxSTOI * 100}%)')
-importedResults.signals.plot_signals(bestNode, bestSensor)
-plt.savefig(f'{exportPath}/bestPerfNode.png')
-print(f'Worst node (STOI = {minSTOI * 100}%)')
-importedResults.signals.plot_signals(worseNode, worseSensor)
-plt.savefig(f'{exportPath}/worstPerfNode.png')
+print(f'Best node (STOI = {round(maxSTOI * 100, 2)}%)')
+importedResults.signals.plot_signals(bestNode, bestSensor, mySettings.expAvgBeta)
+if exportFigs:
+    plt.savefig(f'{exportPath}/bestPerfNode.png')
+print(f'Worst node (STOI = {round(minSTOI * 100, 2)}%)')
+importedResults.signals.plot_signals(worseNode, worseSensor, mySettings.expAvgBeta)
+if exportFigs:
+    plt.savefig(f'{exportPath}/worstPerfNode.png')
 
 
 # %%

@@ -29,6 +29,7 @@ class ProgramSettings(object):
     timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
+    minNumAutocorr: int = 10                # minimum number of autocorrelation matrices update before first filter coefficients update
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
@@ -166,7 +167,7 @@ class Signals(object):
 
         return self
 
-    def plot_signals(self, nodeIdx, sensorIdx):
+    def plot_signals(self, nodeIdx, sensorIdx, beta=None):
         """Creates a visual representation of the signals at a particular sensor.
         Parameters
         ----------
@@ -192,12 +193,15 @@ class Signals(object):
         ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
         ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 4*delta, label='Noisy')
         if desiredSignalsAvailable:        
-            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - 6*delta, label='Enhanced')
+            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx - 1] - 6*delta, label='Enhanced')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
         plt.legend(loc=(0.01, 0.5), fontsize=8)
-        plt.title(f'Node {nodeIdx}, sensor {sensorIdx}')
+        ti = f'Node {nodeIdx}, sensor {sensorIdx}'
+        if beta is not None:
+            ti += f' -- $\\beta = {beta}$'
+        plt.title(ti)
         #
         if self.stftComputed:
 
@@ -230,7 +234,7 @@ class Signals(object):
             if desiredSignalsAvailable:
                 plt.xticks([])
                 ax = fig.add_subplot(nRows,2,8)     # Enhanced signals
-                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx])))
+                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx - 1])))
                 stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Enhanced')
                 ax.set(xlabel='$t$ [s]')
             else:
@@ -362,7 +366,7 @@ def stft_subplot(ax, t, f, data, vlims, label):
     #
     mappable = ax.pcolormesh(t, f / 1e3, data, vmin=vlims[0], vmax=vlims[1])
     ax.set(ylabel='$f$ [kHz]')
-    ax.text(0.01, 0.9, label, fontsize=8, transform=ax.transAxes,
+    ax.text(0.025, 0.9, label, fontsize=8, transform=ax.transAxes,
         verticalalignment='top', bbox=props)
     ax.yaxis.label.set_size(8)
     plt.colorbar(mappable)
