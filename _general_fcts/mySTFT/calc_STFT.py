@@ -1,4 +1,3 @@
-from numba.core.decorators import njit
 import numpy as np
 import scipy.fft
 
@@ -15,7 +14,7 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
     # sides     {'onesided', 'twosided'}, return either onesided or twosided STFT
     # 
     # OUT:
-    # X         STFT tensor - freqbins x frames x channels
+    # x_STFT    STFT tensor - freqbins x frames x channels
     # f         frequency vector
     #
     # Original MATLAB implementation by Thomas Dietzen (calc_STFT.m).
@@ -38,20 +37,20 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
         f = np.concatenate((f, -np.flip(f[1:-1])))
 
     # Init
-    L = int(np.floor((x.shape[0] - N_STFT + R_STFT)/R_STFT))
+    numFrames = int(np.floor((x.shape[0] - N_STFT + R_STFT)/R_STFT))
     if len(x.shape) == 2:
-        M = x.shape[1]
+        numChannels = x.shape[1]
     else: 
-        M = 1
+        numChannels = 1
 
     if sides == 'onesided':
-        X = np.zeros((N_STFT_half, L, M), dtype=complex) 
+        x_STFT = np.zeros((N_STFT_half, numFrames, numChannels), dtype=complex) 
     elif sides == 'twosided':
-        X = np.zeros((N_STFT, L, M), dtype=complex)   
+        x_STFT = np.zeros((N_STFT, numFrames, numChannels), dtype=complex)   
 
     # Compute STFT frame-by-frame
-    for m in range(M):
-        for l in range(L): 
+    for m in range(numChannels):
+        for l in range(numFrames): 
             idxx = range(int(l*R_STFT), int(l*R_STFT + N_STFT))
             if len(x.shape) == 2:
                 x_frame = x[idxx, m]
@@ -60,14 +59,14 @@ def calcSTFT(x, Fs, win, N_STFT, R_STFT, sides='onesided'):
                 
             X_frame = scipy.fft.fft(win * x_frame)
             if sides == 'onesided':
-                X[:,l,m] = X_frame[:N_STFT_half]
+                x_STFT[:,l,m] = X_frame[:N_STFT_half]
             elif sides == 'twosided':              
-                X[:,l,m] = X_frame
+                x_STFT[:,l,m] = X_frame
 
     # Reduce dimension if m == 1
-    X = np.squeeze(X)
+    x_STFT = np.squeeze(x_STFT)
 
-    return X,f
+    return x_STFT, f
 
 def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
     # x = calcISTFT(X, win, N_STFT, R_STFT, sides)
@@ -90,11 +89,13 @@ def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
     M = X.shape[2]
     if sides == 'onesided':
         X = np.concatenate((X, np.flip(X[1:-1,:,:].conj(), axis=0)))
-    x_frames = np.real_if_close(scipy.fft.ifft(X, axis=0))
+    x_frames = np.real(scipy.fft.ifft(X, axis=0))
     
     # Apply synthesis window
     x_frames = x_frames * win[:,np.newaxis,np.newaxis]
     x_frames = x_frames[:N_STFT,:,:]
+
+    np.amax(np.imag(x_frames))
 
     # Init output
     x = np.zeros((int(R_STFT*(L-1)+N_STFT), M))

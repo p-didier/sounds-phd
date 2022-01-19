@@ -1,12 +1,68 @@
 from numba.core.types.scalars import EnumMember
 import numpy as np
-import pysepm
 import sys,os
 import scipy.signal as sig
-# sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
-# from general.frequency import noctfr
-# sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_third_parties')))
-# from octaveband.PyOctaveBand import octavefilter
+sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_third_parties'))
+import pysepm
+
+
+def get_metrics(cleanSignal, enhancedOrNoisySignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03):
+    """Compute evaluation metrics for signal enhancement given a single-channel signal.
+    Parameters
+    ----------
+    cleanSignal : [N x 1] np.ndarray (real)
+        The clean, noise-free signal used as reference.
+    enhancedOrNoisySignal : [N x 1] np.ndarray (real)
+        The signal to evaluate (pre- or post-signal enhancement).
+    fs : int
+        Sampling frequency [samples/s].
+    VAD : [N x 1] np.ndarray (real)
+        Voice Activity Detector (1: voice + noise; 0: noise only).
+    gammafwSNRseg : float
+        Gamma exponent for fwSNRseg computation.
+    frameLen : float
+        Time window duration for fwSNRseg computation [s].
+
+    Returns
+    -------
+    snr : [3 x 1] np.ndarray (real)
+        Unweighted signal-to-noise ratio (SNR).
+    fwSNRseg : float    
+        Frequency-weighted segmental SNR.
+    sisnr : [3 x 1] np.ndarray (real)
+        Speech-Intelligibility-weighted SNR [before, after, difference].
+    stoi : float
+        Short-Time Objective Intelligibility.
+    """
+    # Check input dimensions
+    if len(cleanSignal) != len(enhancedOrNoisySignal):
+        if len(cleanSignal) > len(enhancedOrNoisySignal):
+            print(f'Enhanc. metrics:: The signal durations do not match: shortening clean signal ({len(cleanSignal)} to {len(enhancedOrNoisySignal)} samples).')
+            cleanSignal = cleanSignal[:len(enhancedOrNoisySignal)]
+        elif len(cleanSignal) < len(enhancedOrNoisySignal):
+            print(f'Enhanc. metrics:: The signal durations do not match: shortening enhanced/noisy signal ({len(enhancedOrNoisySignal)} to {len(cleanSignal)} samples).')
+            enhancedOrNoisySignal = enhancedOrNoisySignal[:len(cleanSignal)]
+
+    # Init output arrays
+    snr = np.zeros(3)
+    sisnr = np.zeros(3)
+
+    # Unweighted SNR
+    snr[0] = SNRest(cleanSignal, VAD)
+    snr[1] = SNRest(enhancedOrNoisySignal, VAD)
+    snr[2] = snr[1] - snr[0]
+    # Frequency-weight segmental SNR
+    fwSNRseg = pysepm.fwSNRseg(cleanSignal, enhancedOrNoisySignal,
+                                    fs, frameLen=frameLen, gamma=gammafwSNRseg)
+    # Speech-Intelligibility-weighted SNR (SI-SNR)
+    sisnr[0] = get_SISNR(cleanSignal, fs, VAD)
+    sisnr[1] = get_SISNR(enhancedOrNoisySignal, fs, VAD)
+    sisnr[2] = sisnr[1] - sisnr[0]
+    # Short-Time Objective Intelligibility (STOI)
+    stoi = pysepm.stoi(cleanSignal, enhancedOrNoisySignal, fs)
+    
+    return snr, fwSNRseg, sisnr, stoi
+
 
 def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):
 
@@ -44,6 +100,7 @@ def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, fr
     
     return fwSNRseg,sisnr,stoi
 
+
 def get_SISNR(enhanced_or_noisy_speech, Fs, VAD):
 
     # Speech intelligibility indices (ANSI-S3.5-1997)
@@ -62,18 +119,6 @@ def get_SISNR(enhanced_or_noisy_speech, Fs, VAD):
 
         # Build the SI-SNR sum
         SISNR_enhanced += Indices[ii] * SNRest(enhanced_filtered,VAD)
-
-        # # Verify filter effect
-        # w, h = sig.sosfreqz(sos, worN=len(clean_speech), whole=True)
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure(figsize=(4,4), constrained_layout=True)
-        # ax = fig.add_subplot(111)
-        # ax.semilogx(w[:int(len(clean_speech)/2)]*(Fs/(2*np.pi)), 20*np.log10(np.abs(np.fft.fft(clean_speech)[:int(len(clean_speech)/2)])))
-        # ax.semilogx(w[:int(len(clean_speech)/2)]*(Fs/(2*np.pi)), 20*np.log10(np.abs(np.fft.fft(clean_filtered)[:int(len(clean_speech)/2)])))
-        # ax.semilogx(w[:int(len(clean_speech)/2)]*(Fs/(2*np.pi)), 20*np.log10(np.abs(h[:int(len(clean_speech)/2)])))
-        # ax.grid()
-        # ax.set_xlim([20, 8000])
-        # plt.show()
 
     return SISNR_enhanced
 
@@ -149,11 +194,3 @@ def SNRest(Y,VAD):
         SNRy[ii] = getSNR(Y[:,ii], VAD)
 
     return SNRy
-
-
-# # TESTS
-# def main():
-    
-#     return None
-# if __name__ == '__main__':
-#     sys.exit(main())

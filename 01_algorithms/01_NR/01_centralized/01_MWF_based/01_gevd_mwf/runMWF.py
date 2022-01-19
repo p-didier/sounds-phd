@@ -11,9 +11,10 @@ import scipy.io.wavfile
 # Third party imports
 #
 # Local application imports
-from MWFpack import myMWF, sig_gen, VAD, spatial
+from MWFpack import myMWF, sig_gen, spatial
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT, calcISTFT
+import VAD
 import playsounds.playsounds as ps
 from general.frequency import divide_in_bands
 from metrics import eval_enhancement
