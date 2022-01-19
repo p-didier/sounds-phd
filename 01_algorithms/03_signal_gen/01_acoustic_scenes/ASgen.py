@@ -18,18 +18,18 @@ def main():
 
     # Define settings
     sets = ProgramSettings(
-        numScenarios = 1,           # Number of AS to generate
-        samplingFrequency = 16e3,   # Sampling frequency [samples/s]
-        rirLength = 2**12,          # RIR length [samples]
-        roomDimBounds = [3,7],      # [Smallest, largest] room dimension possible [m]
-        numSpeechSources = 1,       # nr. of speech sources
-        numNoiseSources = 1,        # nr. of noise sources
-        numNodes = 3,               # nr. of nodes
-        numSensorPerNode = 2,       # nr. of sensor per node
-        arrayGeometry = 'linear',   # microphone array geometry (only used if numSensorPerNode > 1)
-        sensorSeparation = 0.05,    # separation between sensor in array (only used if numSensorPerNode > 1)
-        revTime = 0.0,              # reverberation time [s]
-        seed = 12345                # seed for random generator
+        numScenarios = 1,                   # Number of AS to generate
+        samplingFrequency = 16e3,           # Sampling frequency [samples/s]
+        rirLength = 2**12,                  # RIR length [samples]
+        roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
+        numSpeechSources = 1,               # nr. of speech sources
+        numNoiseSources = 1,                # nr. of noise sources
+        numNodes = 3,                       # nr. of nodes
+        numSensorPerNode = [1,2,3],         # nr. of sensor per node,
+        arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
+        sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
+        revTime = 0.0,                      # reverberation time [s]
+        seed = 12345                        # seed for random generator
     )
 
     # Local booleans
@@ -103,7 +103,7 @@ class ProgramSettings:
             self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode)
         elif len(self.numSensorPerNode) == 1:       # case where all nodes have the same number of sensors
             self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode[0])
-        elif len(self.numSensorPerNode) != len(self.numNodes):
+        elif len(self.numSensorPerNode) != self.numNodes:
             raise ValueError('Each node should have a number of nodes assigned to it.')
         return self
 
@@ -159,15 +159,19 @@ def genAS(sets: ProgramSettings,plotit=False):
     sensorsCoords = np.zeros((totalNumSensors, 3))
     sensorNodeTags = np.zeros(totalNumSensors, dtype=int)     # tags linking each sensor to its node
     for ii in range(sets.numNodes):
+
+        # Current node's sensors indices
+        idxStart = np.sum(sets.numSensorPerNode[:ii], dtype=int)
+        idxEnd = idxStart + sets.numSensorPerNode[ii]
+
         # Create node array
         arrayAttrib = micArrayAttributes(Mk=sets.numSensorPerNode[ii], 
                                         arraygeom=sets.arrayGeometry, 
                                         mic_sep=sets.sensorSeparation)
         # Derive coordinates
-        sensorsCoords[ii * arrayAttrib.Mk : (ii + 1) * arrayAttrib.Mk,:] = \
-            generate_array_pos(nodesCoords[ii, :], arrayAttrib, rng)
+        sensorsCoords[idxStart : idxEnd,:] = generate_array_pos(nodesCoords[ii, :], arrayAttrib, rng)
         # Assign node tag
-        sensorNodeTags[ii * arrayAttrib.Mk : (ii + 1) * arrayAttrib.Mk] = ii + 1
+        sensorNodeTags[idxStart : idxEnd] = ii + 1
 
     # If asked, show geometry on plot
     if plotit:
