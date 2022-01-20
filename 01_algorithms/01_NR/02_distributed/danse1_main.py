@@ -32,7 +32,7 @@ mySettings = ProgramSettings(
     signalDuration=10,
     baseSNR=0,
     plotAcousticScenario=False,
-    timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE updates
+    timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE filter updates
     VADwinLength=40e-3,             # VAD window length [s]
     VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
     expAvgBeta=0.98,
@@ -63,7 +63,7 @@ exportFigs = True
 fig = importedResults.acousticScenario.plot()
 myPath = mySettings.acousticScenarioPath
 fig.suptitle(myPath[myPath.rfind('/', 0, myPath.rfind('/')) + 1:-4])
-plt.tight_layout()
+fig.tight_layout()
 if exportFigs:
     plt.savefig(f'{exportPath}/acousScenario.png')
 plt.show()
