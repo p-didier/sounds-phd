@@ -113,8 +113,6 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
         gkmkAllFrames = np.tile(gkmkSingleFrame, (numTimeFrames, 1, 1))
         gkmkAllFrames = np.transpose(gkmkAllFrames, [1,0,2])
         gkmk.append(gkmkAllFrames)
-        # wkk.append(np.ones((numFreqLines, asc.numSensorPerNode[k]), dtype=complex))  # ones only
-        # gkmk.append(np.ones((numFreqLines, len(neighbourNodes[k])), dtype=complex))  # ones only
         wk_tilde.append(np.concatenate((wkk[-1], gkmk[-1]), axis=-1))
 
     z = np.zeros((numFreqLines, numTimeFrames, asc.numNodes), dtype=complex)   # compressed local signals
@@ -200,7 +198,6 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
                 wkk[k][kappa, l, :]  = wk_tilde[k][kappa, l, :y[k].shape[-1]]  #...to the local signals
                 gkmk[k][kappa, l, :] = wk_tilde[k][kappa, l, y[k].shape[-1]:]  #...to the received signals
 
-            # if l > nFramesPerOLA:
             # Compute desired signal estimate
             d[:, l, k] = np.einsum('ij,ij->i', wk_tilde[k][:, l, :].conj(), ytilde[k][:, l, :])  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
 

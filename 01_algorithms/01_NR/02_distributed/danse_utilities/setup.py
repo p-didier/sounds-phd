@@ -44,7 +44,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     mySignals.desiredSigEst_STFT = danse(mySignals.sensorSignals_STFT, asc, settings, mySignals.VAD)
-
+    
     # --------------- Post-process ---------------
     # Back to time-domain
     mySignals.desiredSigEst, mySignals.timeVector = get_istft(mySignals.desiredSigEst_STFT,
@@ -115,12 +115,12 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     return measures
 
 
-def get_istft(mySignal_STFT, fs, settings: classes.ProgramSettings):
+def get_istft(X, fs, settings: classes.ProgramSettings):
     """Derives STFT-domain signals' time-domain representation
     given certain settings.
     Parameters
     ----------
-    mySignal_STFT : [Nf x Nt x C] np.ndarray (complex)
+    X : [Nf x Nt x C] np.ndarray (complex)
         STFT-domain signal(s).
     fs : int
         Sampling frequency [samples/s].
@@ -128,25 +128,39 @@ def get_istft(mySignal_STFT, fs, settings: classes.ProgramSettings):
 
     Returns
     -------
-    mySignal : [N x C] np.ndarray (real)
+    x : [N x C] np.ndarray (real)
         Time-domain signal(s).
     t : [N x 1] np.ndarray (real)
         Time vector.
     """
     
-    mySignal = calcISTFT(mySignal_STFT,
-                        win=np.hanning(settings.stftWinLength), 
-                        N_STFT=settings.stftWinLength, 
-                        R_STFT=settings.stftEffectiveFrameLen, 
-                        sides='onesided')
+    # mySignal = calcISTFT(mySignal_STFT,
+    #                     win=np.hanning(settings.stftWinLength), 
+    #                     N_STFT=settings.stftWinLength, 
+    #                     R_STFT=settings.stftEffectiveFrameLen, 
+    #                     sides='onesided')
+    # t = np.arange(mySignal.shape[0]) / fs
+
+    for channel in range(X.shape[-1]):
+        _, tmp = sig.istft(X[:, :, channel], 
+                                    fs=fs,
+                                    window=np.hanning(settings.stftWinLength), 
+                                    nperseg=settings.stftWinLength, 
+                                    noverlap=settings.stftEffectiveFrameLen,
+                                    input_onesided=True)
+        if channel == 0:
+            x = np.zeros((len(tmp), X.shape[-1]))
+        x[:, channel] = tmp
 
     targetLength = np.round(settings.signalDuration * fs)
-    if mySignal.shape[0] < targetLength:
-        mySignal = np.concatenate((mySignal, np.full((targetLength - mySignal.shape[0], mySignal.shape[1]), np.finfo(float).eps)))
+    if x.shape[0] < targetLength:
+        x = np.concatenate((x, np.full((targetLength - x.shape[0], x.shape[1]), np.finfo(float).eps)))
+    elif x.shape[0] > targetLength:
+        x = x[:targetLength, :]
 
-    t = np.arange(mySignal.shape[0]) / fs
+    t = np.arange(x.shape[0]) / fs
 
-    return mySignal, t
+    return x, t
 
 
 def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):

@@ -4,10 +4,12 @@ from operator import contains
 import sys, os
 from pathlib import PurePath, Path
 from threading import local
+from typing import overload
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle, gzip
 from scipy.io import wavfile
+import scipy.signal as sig
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -391,39 +393,48 @@ class Results:
         return fig
 
         
-def get_stft(mySignal, fs, stftWinLength, stftEffectiveFrameLen):
+def get_stft(x, fs, L, R):
     """Derives time-domain signals' STFT representation
     given certain settings.
     Parameters
     ----------
-    mySignal : [N x C] np.ndarray (float)
+    x : [N x C] np.ndarray (float)
         Time-domain signal(s).
     fs : int
         Sampling frequency [samples/s].
-    stftWinLength : int
+    L : int
         STFT window length [samples].
-    stftEffectiveFrameLen : int
+    R : int
         STFT _effective_ window length (inc. overlap) [samples].
 
     Returns
     -------
-    mySignal_STFT : [Nf x Nt x C] np.ndarray (complex)
+    out : [Nf x Nt x C] np.ndarray (complex)
         STFT-domain signal(s).
-    freqBins : [Nf x 1] np.ndarray (real)
+    f : [Nf x 1] np.ndarray (real)
         STFT frequency bins.
-    timeFrames : [Nt x 1] np.ndarray (real)
+    t : [Nt x 1] np.ndarray (real)
         STFT time frames.
     """
     
-    mySignal_STFT, freqBins = calcSTFT(mySignal, Fs=fs, 
-                                    win=np.hanning(stftWinLength), 
-                                    N_STFT=stftWinLength, 
-                                    R_STFT=stftEffectiveFrameLen, 
-                                    sides='onesided')
+    # mySignal_STFT, freqBins = calcSTFT(mySignal, Fs=fs, 
+    #                                 win=np.hanning(stftWinLength), 
+    #                                 N_STFT=stftWinLength, 
+    #                                 R_STFT=stftEffectiveFrameLen, 
+    #                                 sides='onesided')
+    # timeFrames = np.linspace(0, 1, num=mySignal_STFT.shape[1]) * mySignal.shape[0] / fs
 
-    timeFrames = np.linspace(0, 1, num=mySignal_STFT.shape[1]) * mySignal.shape[0] / fs
-
-    return mySignal_STFT, freqBins, timeFrames
+    for channel in range(x.shape[-1]):
+        f, t, tmp = sig.stft(x[:, channel],
+                            fs=fs,
+                            window=np.hanning(L),
+                            nperseg=L,
+                            noverlap=R,
+                            return_onesided=True)
+        if channel == 0:
+            out = np.zeros((tmp.shape[0], tmp.shape[1], x.shape[-1]), dtype=complex)
+        out[:, :, channel] = tmp
+    return out, f, t
 
 
 def metrics_subplot(numNodes, ax, barWidth, data):

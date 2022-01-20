@@ -1,3 +1,4 @@
+from multiprocessing.managers import ValueProxy
 import numpy as np
 import scipy.fft
 
@@ -85,6 +86,8 @@ def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
     # Original MATLAB implementation by Thomas Dietzen (calc_STFT.m).
     # Translated to Python by Paul Didier (First: Sept. 2021).
 
+    raise ValueError('calcISTFT: THIS FUNCTION IS WRONGLY IMPLEMENTED. DO NOT USE. (paul: 20/01/2022')
+
     L = X.shape[1]
     M = X.shape[2]
     if sides == 'onesided':
@@ -95,13 +98,11 @@ def calcISTFT(X, win, N_STFT, R_STFT, sides='onesided'):
     x_frames = x_frames * win[:,np.newaxis,np.newaxis]
     x_frames = x_frames[:N_STFT,:,:]
 
-    np.amax(np.imag(x_frames))
-
     # Init output
     x = np.zeros((int(R_STFT*(L-1)+N_STFT), M))
     # OLA processing
     for l in range(L):
         sampIdx = range(int(l*R_STFT), int(l*R_STFT+N_STFT))
-        x[sampIdx,:] += np.squeeze(x_frames[:,l,:])
+        x[sampIdx,:] += x_frames[:,l,:]
 
     return x
