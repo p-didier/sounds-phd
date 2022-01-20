@@ -1,3 +1,4 @@
+from ctypes.wintypes import tagSIZE
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -25,7 +26,7 @@ def plotSTFT(data):
     return None
     
 
-def plot_side_room(ax, rd2D, rs, r, rn, scatsize):
+def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20):
     """Plots a 2-D room side, showing the positions of
     sources and nodes inside of it.
     Parameters
@@ -34,26 +35,43 @@ def plot_side_room(ax, rd2D, rs, r, rn, scatsize):
         Axes handle to plot on.
     rd2D : [2 x 1] list
         2-D room dimensions [m].
-    rs : [Ns x 2] np.ndarray
+    rs : [Ns x 2] np.ndarray (real)
         Desired (speech) source(s) coordinates [m]. 
-    r : [N x 2] np.ndarray
-        Sensor(s) coordinates [m]. 
-    rn : [Nn x 2] np.ndarray
+    rn : [Nn x 2] np.ndarray (real)
         Noise source(s) coordinates [m]. 
+    r : [N x 2] np.ndarray (real)
+        Sensor(s) coordinates [m]. 
+    sensorToNodeTags : [N x 1] np.ndarray (int)
+        Tags relating each sensor to a node number (>=1).
     scatsize : float
         Scatter plot marker size.
     """
+
+    numNodes = len(np.unique(sensorToNodeTags))
+    numSensors = len(sensorToNodeTags)
     
     plot_room2D(ax, rd2D)
-    for ii in range(rs.shape[0]):
-        ax.scatter(rs[ii,0],rs[ii,1],s=scatsize,c='blue',marker='d')
-        ax.text(rs[ii,0],rs[ii,1],"D%i" % (ii+1))
-    for ii in range(rn.shape[0]):
-        ax.scatter(rn[ii,0],rn[ii,1],s=scatsize,c='red',marker='P')
-        ax.text(rn[ii,0],rn[ii,1],"N%i" % (ii+1))
-    for ii in range(r.shape[0]):
-        ax.scatter(r[ii,0],r[ii,1],s=scatsize,c='green',marker='o')
-        ax.text(r[ii,0],r[ii,1],"S%i" % (ii+1))
+    # Desired sources
+    for idxSensor in range(rs.shape[0]):
+        ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=scatsize,c='blue',marker='d')
+        ax.text(rs[idxSensor,0], rs[idxSensor,1], "D%i" % (idxSensor+1))
+    # Noise sources
+    for idxSensor in range(rn.shape[0]):
+        ax.scatter(rn[idxSensor,0], rn[idxSensor,1], s=scatsize,c='red',marker='P')
+        ax.text(rn[idxSensor,0], rn[idxSensor,1], "N%i" % (idxSensor+1))
+    # Nodes and sensors
+    for idxNode in range(numNodes):
+        allIndices = np.arange(numSensors)
+        sensorIndices = allIndices[sensorToNodeTags == idxNode + 1]
+        for idxSensor in sensorIndices:
+            ax.scatter(r[idxSensor,0], r[idxSensor,1], s=scatsize,c='green',marker='o')
+        # Draw circle around node
+        radius = np.amax(r[sensorIndices, :] - np.mean(r[sensorIndices, :], axis=0))
+        circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
+                            radius * 2, color='k', fill=False)
+        ax.add_patch(circ)
+        # Add label
+        ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
     ax.grid()
     ax.axis('equal')
     return None

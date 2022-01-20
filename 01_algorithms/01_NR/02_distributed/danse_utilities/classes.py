@@ -37,9 +37,9 @@ class ProgramSettings(object):
     timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
-    minNumAutocorr: int = 10                # minimum number of autocorrelation matrices update before first filter coefficients update
-    useOLA: bool = True                     # if True, use overlap-add process with self.OLAoverlap as frame overlap
-    OLAoverlap: float = 0.5                 # OLA frame overlap (only used if self.useOLA is True)
+    minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
+    # useOLA: bool = True                     # if True, use overlap-add process with self.OLAoverlap as frame overlap
+    # OLAoverlap: float = 0.5                 # OLA frame overlap (only used if self.useOLA is True)
     # WOLAwindow: str = 'sqrthann'            # WOLA window type (values allowed: "sqrthann")
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
@@ -55,8 +55,6 @@ class ProgramSettings(object):
             self.acousticScenarioPath += '.csv'
             print('Automatically appended ".csv" to string setting "acousticScenarioPath".')
         self.stftEffectiveFrameLen = int(self.stftWinLength * self.stftFrameOvlp)
-        if self.useOLA is False:
-            self.OLAoverlap = 0
         return self
 
     def __repr__(self):
@@ -68,7 +66,6 @@ class ProgramSettings(object):
         \t{[PurePath(f).name for f in self.noiseSignalFile]}
         with a base SNR btw. dry signals of {self.baseSNR} dB.
         ------ DANSE settings ------
-        Updates in {self.timeBtwConsecUpdates} seconds blocks with {self.OLAoverlap*100}% OLA block overlap.
         Exponential averaging constant: beta = {self.expAvgBeta}.
         """
         return string
@@ -104,35 +101,32 @@ class AcousticScenario(object):
         return self
 
     def plot(self):
-        
-        scatsize = 20
 
         fig = plt.figure(figsize=(8,4))
         ax = fig.add_subplot(121)
         plot_side_room(ax, self.roomDimensions[0:2], 
-                    self.desiredSourceCoords[:, [0,1]], self.sensorCoords[:, [0,1]], 
-                    self.noiseSourceCoords[:, [0,1]], scatsize)
+                    self.desiredSourceCoords[:, [0,1]], 
+                    self.noiseSourceCoords[:, [0,1]], 
+                    self.sensorCoords[:, [0,1]], self.sensorToNodeTags)
         ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
         #
         ax = fig.add_subplot(122)
         plot_side_room(ax, self.roomDimensions[1:], 
-                    self.desiredSourceCoords[:, [1,2]], self.sensorCoords[:, [1,2]], 
-                    self.noiseSourceCoords[:, [1,2]], scatsize)
+                    self.desiredSourceCoords[:, [1,2]], 
+                    self.noiseSourceCoords[:, [1,2]],
+                    self.sensorCoords[:, [1,2]],
+                    self.sensorToNodeTags)
         ax.set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
         # Add info
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
         boxText = ''
-        for ii in range(self.sensorCoords.shape[0]):
-            newNode = False
-            if ii > 0:
-                if self.sensorToNodeTags[ii] != self.sensorToNodeTags[ii - 1]:
-                    boxText += '\n'     # separate the sensors by node via lineskips
+        for ii in range(self.numNodes):
             for jj in range(self.desiredSourceCoords.shape[0]):
-                d = np.linalg.norm(self.sensorCoords[ii,:] - self.desiredSourceCoords[jj,:])
-                boxText += f'S{ii + 1}$\\to$D{jj + 1} = {np.round(d, 2)}m\n'
+                d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.desiredSourceCoords[jj,:]))
+                boxText += f'Node {ii + 1}$\\to$D{jj + 1}={np.round(d, 2)}m\n'
             for jj in range(self.noiseSourceCoords.shape[0]):
-                d = np.linalg.norm(self.sensorCoords[ii,:] - self.noiseSourceCoords[jj,:])
-                boxText += f'S{ii + 1}$\\to$N{jj + 1} = {np.round(d, 2)}m\n'
+                d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.noiseSourceCoords[jj,:]))
+                boxText += f'Node {ii + 1}$\\to$N{jj + 1}={np.round(d, 2)}m\n'
         boxText = boxText[:-1]
         ax.text(1.1, 0.9, boxText, transform=ax.transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
@@ -394,6 +388,7 @@ class Results:
         ax.set(ylabel='STOI')
         ax.set_ylim(0,1)
         plt.show()
+        return fig
 
         
 def get_stft(mySignal, fs, stftWinLength, stftEffectiveFrameLen):

@@ -1,0 +1,2 @@
+roomDimBounds,numScenarios,samplingFrequency,rirLength,numSpeechSources,numNoiseSources,numNodes,numSensorPerNode,revTime,arrayGeometry,sensorSeparation,seed
+"[3, 7]",1,16000.0,4096,1,1,4,[10 10 10 10],0.0,radius,0.1,12345

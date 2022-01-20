@@ -39,9 +39,6 @@ def run_experiment(settings: classes.ProgramSettings):
     # Convert all DANSE input signals to the STFT domain
     mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
 
-    # Check-up plot
-    mySignals.plot_signals(1, 1)
-
     # Apply SROs
     ###############TODO
 
@@ -179,7 +176,24 @@ def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettin
         oVADframes[ii] = nZeros <= settings.stftEffectiveFrameLen / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
 
     # DANSE it up
-    desiredSigEst_STFT = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
+    desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
+    # desiredSigEst_STFT, wkk, gkmk = danse_scripts.danse_sequential_old(y_STFT, asc, settings, oVADframes)
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # for ii in range(z.shape[-1]):
+    #     ax = fig.add_subplot(2,z.shape[-1]+1,ii+1)
+    #     ax.plot(np.abs(z[:,:,ii]).T)
+    #     plt.title(f'z_-k({ii+1})')
+    # ax = fig.add_subplot(2,z.shape[-1]+1,z.shape[-1]+1)
+    # ax.plot(np.abs(y_STFT[:,:,0]).T)
+    # plt.title('y')
+    # #
+    # ax = fig.add_subplot(2,z.shape[-1]+1,z.shape[-1]+1  + 1)
+    # ax.plot(np.abs(wkk[0][:,:,0]))
+    # plt.show()
+
+    stop = 1
     
     return desiredSigEst_STFT
 

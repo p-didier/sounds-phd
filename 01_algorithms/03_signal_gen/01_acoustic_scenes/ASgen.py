@@ -3,11 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
-from pathlib import Path
+from pathlib import Path, PurePath
 from dataclasses import dataclass
 from scipy.spatial.transform import Rotation as rot
 from rimPypack.rimPy import rimPy
-sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+sys.path.append(f'{pathToRoot}/_general_fcts')
 from plotting.threedim import plot_room
 from class_methods import dataclass_methods 
 
@@ -24,9 +29,10 @@ def main():
         roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
         numSpeechSources = 1,               # nr. of speech sources
         numNoiseSources = 1,                # nr. of noise sources
-        numNodes = 3,                       # nr. of nodes
-        numSensorPerNode = [1,2,3],         # nr. of sensor per node,
-        arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
+        numNodes = 4,                       # nr. of nodes
+        numSensorPerNode = 10,         # nr. of sensor per node,
+        # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
+        arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
         sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
         revTime = 0.0,                      # reverberation time [s]
         seed = 12345                        # seed for random generator
@@ -36,7 +42,7 @@ def main():
     plotit = True        # If true, plots the AS
 
     # Prepare export
-    expFolder = f"{os.getcwd()}/sounds-phd/02_data/01_acoustic_scenarios/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    expFolder = f"{pathToRoot}/02_data/01_acoustic_scenarios/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
     nas = len(next(os.walk(expFolder))[2])   # count only files in export dir
@@ -297,7 +303,7 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
 
     Returns
     -------
-    sensorCoordsRotated : [(J*arrayAttrib.Mk) x 3] array of real floats.
+    sensorCoords : [(J*arrayAttrib.Mk) x 3] array of real floats.
         Sensor coordinates in 3-D space [m].
     """
 
@@ -307,21 +313,32 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
         # Center
         x -= np.mean(x)
         # Make 3D
-        sensorCoords = np.zeros((arrayAttrib.Mk,3))
-        sensorCoords[:,0] = x
+        sensorCoordsBeforeRot = np.zeros((arrayAttrib.Mk,3))
+        sensorCoordsBeforeRot[:,0] = x
         
         # Rotate in 3D through randomized rotation vector 
         rotvec = randGenerator.uniform(low=0, high=1, size=(3,))
         if force2D:
             rotvec[1:2] = 0
-        sensorCoordsRotated = np.zeros_like(sensorCoords)
+        sensorCoords = np.zeros_like(sensorCoordsBeforeRot)
         for ii in range(arrayAttrib.Mk):
             myrot = rot.from_rotvec(np.pi/2 * rotvec)
-            sensorCoordsRotated[ii,:] = myrot.apply(sensorCoords[ii, :]) + nodeCoords
+            sensorCoords[ii,:] = myrot.apply(sensorCoordsBeforeRot[ii, :]) + nodeCoords
+    elif arrayAttrib.array == 'radius':
+        radius = arrayAttrib.mic_sep 
+        sensorCoords = np.zeros((arrayAttrib.Mk,3))
+        for ii in range(arrayAttrib.Mk):
+            flag = False
+            while not flag:
+                r = randGenerator.uniform(low=0, high=radius, size=(3,))
+                if np.sqrt(r[0]**2 + r[1]**2 + r[2]**2) <= radius:
+                    sensorCoords[ii, :] = r + nodeCoords - radius/2
+                    flag = True
+
     else:
         raise ValueError('No sensor array geometry defined for array type "%s"' % arrayAttrib.array)
 
-    return sensorCoordsRotated
+    return sensorCoords
 
 
 if __name__ == '__main__':

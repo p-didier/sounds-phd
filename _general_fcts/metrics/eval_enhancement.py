@@ -130,7 +130,7 @@ def get_sisnr(enhanced_or_noisy_speech, Fs, VAD):
     return SISNR_enhanced
 
 
-def getSNR(Y,VAD,silent=False):
+def getSNR(timeDomainSignal, VAD, silent=False):
     # getSNR -- Sub-function for SNRest().
     #
     # (c) Paul Didier - 14-Sept-2021
@@ -138,7 +138,7 @@ def getSNR(Y,VAD,silent=False):
     # ------------------------------------
 
     # Only start computing VAD from the first frame where there has been VAD =
-    # 0 and VAD = 1 at least once (condition added on 2021/08/25).
+    # 0 and VAD = 1 at least once (condition added on 25/08/2021).
     idx_start = 0
     for ii in range(1,len(VAD)):
         if VAD[ii] != VAD[0]:
@@ -146,27 +146,27 @@ def getSNR(Y,VAD,silent=False):
             break
 
     # Check input lengths
-    if len(Y) < len(VAD):
+    if len(timeDomainSignal) < len(VAD):
         if not silent:
             print('WARNING: VAD is longer than provided signal (possibly due to non-integer Tmax*Fs/(L-R)) --> truncating VAD')
-        VAD = VAD[:len(Y)]
+        VAD = VAD[:len(timeDomainSignal)]
     
     # Truncate signals and VAD accordingly
     VAD = VAD[idx_start:]
-    Y = Y[idx_start:]
+    timeDomainSignal = timeDomainSignal[idx_start:]
 
     # Number of time frames where VAD is active/inactive
     Ls = np.count_nonzero(VAD)
     Ln = len(VAD) - Ls
 
     if Ls > 0 and Ln > 0:
-        sigma_n_hat = 1/Ln * np.sum(np.abs(Y)**2 * (1 - VAD))
-        sigma_x = 1/Ls * np.sum(np.abs(Y)**2 * VAD)
+        sigma_n_hat = np.mean(timeDomainSignal**2 * (1 - VAD))  # log-form to avoid overflow
+        sigma_x = np.mean(timeDomainSignal**2)                  # log-form to avoid overflow
         sigma_s_hat = sigma_x - sigma_n_hat
         if sigma_s_hat < 0:
             SNR = -1 * float('inf')
         else:
-            SNR = 20*np.log10(sigma_s_hat/sigma_n_hat)
+            SNR = 20 * np.log10(sigma_s_hat/sigma_n_hat)
     elif Ls == 0:
         SNR = -1 * float('inf')
     elif Ln == 0:
