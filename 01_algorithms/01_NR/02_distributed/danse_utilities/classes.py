@@ -1,12 +1,20 @@
 from dataclasses import dataclass, field
 from multiprocessing.managers import ValueProxy
+from operator import contains
 import sys, os
 from pathlib import PurePath, Path
+from threading import local
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle, gzip
-sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
-from class_methods.dataclass_methods import save, load
+from scipy.io import wavfile
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+sys.path.append(f'{pathToRoot}/_general_fcts')
+from class_methods import dataclass_methods
 from plotting.twodim import plot_side_room
 from mySTFT.calc_STFT import calcSTFT
 
@@ -19,17 +27,20 @@ class ProgramSettings(object):
     desiredSignalFile: list                 # list of paths to desired signal file(s)
     noiseSignalFile: list                   # list of paths to noise signal file(s)
     baseSNR: int                            # SNR between dry desired signals and dry noise
+    referenceSensor: int = 0                # Index of the reference sensor at each node
+    stftWinLength: int = 1024               # STFT frame length [samples]
+    stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
     # VAD parametesr
     VADwinLength: float = 40e-3             # VAD window length [s]
     VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
-    weightsInitialization: str = 'zeros'    # type of DANSE filter weights initialization ("random", "zeros", "ones", ...)
-    stftWinLength: int = 1024               # STFT frame length [samples]
-    stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
     timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
     minNumAutocorr: int = 10                # minimum number of autocorrelation matrices update before first filter coefficients update
+    useOLA: bool = True                     # if True, use overlap-add process with self.OLAoverlap as frame overlap
+    OLAoverlap: float = 0.5                 # OLA frame overlap (only used if self.useOLA is True)
+    # WOLAwindow: str = 'sqrthann'            # WOLA window type (values allowed: "sqrthann")
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
@@ -44,6 +55,8 @@ class ProgramSettings(object):
             self.acousticScenarioPath += '.csv'
             print('Automatically appended ".csv" to string setting "acousticScenarioPath".')
         self.stftEffectiveFrameLen = int(self.stftWinLength * self.stftFrameOvlp)
+        if self.useOLA is False:
+            self.OLAoverlap = 0
         return self
 
     def __repr__(self):
@@ -54,6 +67,9 @@ class ProgramSettings(object):
         and noise signal file(s):
         \t{[PurePath(f).name for f in self.noiseSignalFile]}
         with a base SNR btw. dry signals of {self.baseSNR} dB.
+        ------ DANSE settings ------
+        Updates in {self.timeBtwConsecUpdates} seconds blocks with {self.OLAoverlap*100}% OLA block overlap.
+        Exponential averaging constant: beta = {self.expAvgBeta}.
         """
         return string
 
@@ -142,6 +158,25 @@ class Signals(object):
     desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: int = 16e3                                      # Sampling frequency [samples/s]
+    referenceSensor: int = 0                            # Index of the reference sensor at each node
+
+    def __post_init__(self):
+        """Defines useful fields for Signals object"""
+        localSensorNumbering = np.zeros(len(self.sensorToNodeTags))
+        currTag = self.sensorToNodeTags[0]
+        count = 0
+        for ii in range(len(self.sensorToNodeTags)):
+            if self.sensorToNodeTags[ii] != currTag:
+                count = 0
+                currTag = self.sensorToNodeTags[ii]
+            else:
+                count += 1
+            localSensorNumbering[ii] = count
+        self.localSensorNumbering = localSensorNumbering
+        #
+        self.numNodes = len(np.unique(self.sensorToNodeTags))
+        self.numSensors = len(self.sensorToNodeTags)
+        _, self.nSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)
 
     def get_all_stfts(self, fs, L, eL):
         """Derives time-domain signals' STFT representations
@@ -171,14 +206,14 @@ class Signals(object):
         """Creates a visual representation of the signals at a particular sensor.
         Parameters
         ----------
-        nodeNum : int (>=1)
+        nodeNum : int
             Index of the node to inspect.
-        sensorNum : int (>=1)
+        sensorNum : int
             Index of the sensor of nodeNum to inspect.
         """
         # Useful variables
-        indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx)
-        effectiveSensorIdx = indicesSensors[sensorIdx - 1]
+        indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx + 1)
+        effectiveSensorIdx = indicesSensors[sensorIdx]
         # Useful booleans
         desiredSignalsAvailable = len(self.desiredSigEst) > 0
 
@@ -190,21 +225,21 @@ class Signals(object):
             print('STFTs were not yet computed. Plotting only waveforms.')
         delta = np.amax(self.sensorSignals)
         ax.plot(self.timeVector, self.wetSpeech[:, effectiveSensorIdx], label='Desired')
+        ax.plot(self.timeVector, self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
         ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
         ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 4*delta, label='Noisy')
         if desiredSignalsAvailable:        
-            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx - 1] - 6*delta, label='Enhanced')
+            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - 6*delta, label='Enhanced')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
         plt.legend(loc=(0.01, 0.5), fontsize=8)
-        ti = f'Node {nodeIdx}, sensor {sensorIdx}'
+        ti = f'Node {nodeIdx + 1}, sensor {sensorIdx + 1}'
         if beta is not None:
             ti += f' -- $\\beta = {beta}$'
         plt.title(ti)
         #
         if self.stftComputed:
-
             # Get color plot limits
             limLow = 20 * np.log10(np.amin([np.amin(np.abs(self.wetSpeech_STFT[:, :, effectiveSensorIdx])), 
                                     np.amin(np.abs(self.wetNoise_STFT[:, :, effectiveSensorIdx])), 
@@ -213,12 +248,10 @@ class Signals(object):
             limHigh = 20 * np.log10(np.amax([np.amax(np.abs(self.wetSpeech_STFT[:, :, effectiveSensorIdx])), 
                                     np.amax(np.abs(self.wetNoise_STFT[:, :, effectiveSensorIdx])), 
                                     np.amax(np.abs(self.sensorSignals_STFT[:, :, effectiveSensorIdx]))]))
-
             # Number of subplot rows
             nRows = 3
             if desiredSignalsAvailable:
                 nRows += 1
-
             # Plot
             ax = fig.add_subplot(nRows,2,2)     # Wet desired signal
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
@@ -234,13 +267,71 @@ class Signals(object):
             if desiredSignalsAvailable:
                 plt.xticks([])
                 ax = fig.add_subplot(nRows,2,8)     # Enhanced signals
-                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx - 1])))
+                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx])))
                 stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Enhanced')
                 ax.set(xlabel='$t$ [s]')
             else:
                 ax.set(xlabel='$t$ [s]')
-
         plt.tight_layout()
+
+    def export_wav(self, folder):
+        """Exports the enhanced, noisy, and desired signals as WAV files.
+        Parameters
+        ----------
+        folder : str
+            Folder where to create the "wav" folder where the files are to be exported.
+
+        Returns
+        ----------
+        fnames : dict
+            Full paths of exported files, sorted by type.
+        """
+        # Check path validity
+        if not Path(f'{folder}/wav').is_dir():
+            Path(f'{folder}/wav').mkdir()
+            print(f'Created .wav export folder "{folder}/wav".')
+        fname_noisy    = []
+        fname_desired  = []
+        fname_enhanced = []
+        for idxNode in range(self.numNodes):
+            if idxNode == 1:
+                idxSensor = self.referenceSensor
+            else:
+                idxSensor = self.referenceSensor + np.sum(self.nSensorPerNode[:idxNode])
+            #
+            fname_noisy.append(f'{folder}/wav/noisy_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
+            data = normalize_toint16(self.sensorSignals[:, idxSensor])
+            wavfile.write(fname_noisy[-1], self.fs, data)
+            #
+            fname_desired.append(f'{folder}/wav/desired_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
+            data = normalize_toint16(self.wetSpeech[:, idxSensor])
+            wavfile.write(fname_desired[-1], self.fs, data)
+            #
+            if len(self.desiredSigEst) > 0:  # if enhancement has been performed
+                fname_enhanced.append(f'{folder}/wav/enhanced_N{idxNode + 1}.wav')
+                data = normalize_toint16(self.desiredSigEst[:, idxNode])
+                wavfile.write(fname_enhanced[-1], self.fs, data)
+        print(f'Signals exported in folder "{folder}/wav/".')
+        # WAV files names dictionary
+        fnames = dict([('Noisy', fname_noisy), ('Desired', fname_desired), ('Enhanced', fname_enhanced)])
+        return fnames
+
+
+def normalize_toint16(nparray):
+    """Normalizes a NumPy array to integer 16.
+    Parameters
+    ----------
+    nparray : np.ndarray
+        Input array to be normalized.
+
+    Returns
+    ----------
+    nparrayNormalized : np.ndarray
+        Normalized array.
+    """
+    amplitude = np.iinfo(np.int16).max
+    nparrayNormalized = (amplitude*nparray/np.amax(nparray)).astype(np.int16)
+    return nparrayNormalized
 
 
 @dataclass

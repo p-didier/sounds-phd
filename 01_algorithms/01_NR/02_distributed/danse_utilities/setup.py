@@ -6,9 +6,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import soundfile as sf
 import scipy.signal as sig
+from pathlib import Path, PurePath
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
-sys.path.append(os.path.join(os.path.expanduser('~'), 'py/sounds-phd/_general_fcts'))
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+sys.path.append(f'{pathToRoot}/_general_fcts')
 from plotting.twodim import *
 from mySTFT.calc_STFT import calcISTFT
 import VAD
@@ -139,7 +145,7 @@ def get_istft(mySignal_STFT, fs, settings: classes.ProgramSettings):
 
     targetLength = np.round(settings.signalDuration * fs)
     if mySignal.shape[0] < targetLength:
-        mySignal = np.concatenate((mySignal, np.zeros((targetLength - mySignal.shape[0], mySignal.shape[1]))))
+        mySignal = np.concatenate((mySignal, np.full((targetLength - mySignal.shape[0], mySignal.shape[1]), np.finfo(float).eps)))
 
     t = np.arange(mySignal.shape[0]) / fs
 
@@ -310,7 +316,13 @@ def generate_signals(settings: classes.ProgramSettings):
                                 VAD=oVAD,
                                 timeVector=timeVector,
                                 sensorToNodeTags=asc.sensorToNodeTags,
-                                fs=asc.samplingFreq)
+                                fs=asc.samplingFreq,
+                                referenceSensor=settings.referenceSensor)
+                                
+    # Check validity of chosen reference sensor
+    if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
+        conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
+        raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
 
     return signals, SNRs, asc
 

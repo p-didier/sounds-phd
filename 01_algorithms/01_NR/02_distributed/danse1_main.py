@@ -3,27 +3,39 @@
 # %%
 from danse_utilities.classes import AcousticScenario, ProgramSettings, Results
 from danse_utilities.setup import run_experiment
-from pathlib import Path
+from pathlib import Path, PurePath
+import sys, os
+import simpleaudio as sa
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
+#
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+sys.path.append(f'{pathToRoot}/_general_fcts')
+from playsounds.playsounds import playwavfile
+# ------------------------
 
-
-ASBASEPATH = '/users/sista/pdidier/py/sounds-phd/02_data/01_acoustic_scenarios'
-SIGNALSPATH = '/users/sista/pdidier/py/sounds-phd/02_data/00_raw_signals'
+ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
+signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 
 experimentName = 'firsttry.csv' # set experiment name
 # Set experiment settings
 mySettings = ProgramSettings(
-    acousticScenarioPath=f'{ASBASEPATH}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
-    desiredSignalFile=[f'{SIGNALSPATH}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
-    noiseSignalFile=[f'{SIGNALSPATH}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=5,
+    acousticScenarioPath=f'{ascBasePath}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
+    desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
+    noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
+    signalDuration=10,
     baseSNR=10,
     plotAcousticScenario=True,
+    timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE updates
     VADwinLength=40e-3,             # VAD window length [s]
     VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
-    expAvgBeta=0.998             
+    expAvgBeta=0.98,
+    useOLA=False
     )
 # mySettings.save(experimentName) # save settings
 print(mySettings)
@@ -39,12 +51,15 @@ results.save(exportPath)
 
 # %%
 
-
 exportPath = f'{Path(__file__).parent}/res/testrun'
 # Import results
 importedResults = Results().load(exportPath)
 
-exportFigs = False
+# Export as WAV
+wavFilenames = importedResults.signals.export_wav(exportPath)
+
+#%%
+exportFigs = True
 
 # Plot scenario
 fig = importedResults.acousticScenario.plot()
@@ -67,10 +82,10 @@ for idxNode in range(importedResults.acousticScenario.numNodes):
     currSTOIs = importedResults.enhancementEval.stoi[f'Node{idxNode + 1}']
     for idxSensor, stoi in enumerate(currSTOIs):
         if stoi >= maxSTOI:
-            bestNode, bestSensor = idxNode + 1, idxSensor + 1
+            bestNode, bestSensor = idxNode, idxSensor
             maxSTOI = stoi
         if stoi <= minSTOI:
-            worseNode, worseSensor = idxNode + 1, idxSensor + 1
+            worseNode, worseSensor = idxNode, idxSensor
             minSTOI = stoi
 print(f'Best node (STOI = {round(maxSTOI * 100, 2)}%)')
 importedResults.signals.plot_signals(bestNode, bestSensor, mySettings.expAvgBeta)
@@ -81,5 +96,10 @@ importedResults.signals.plot_signals(worseNode, worseSensor, mySettings.expAvgBe
 if exportFigs:
     plt.savefig(f'{exportPath}/worstPerfNode.png')
 
+# %% LISTEN
+
+playwavfile(wavFilenames['Noisy'][bestNode])
+playwavfile(wavFilenames['Desired'][bestNode])
+playwavfile(wavFilenames['Enhanced'][bestNode])
 
 # %%

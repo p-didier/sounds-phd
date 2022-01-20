@@ -1,7 +1,6 @@
 import numpy as np
 import time
-from . import classes           # <-- classes for DANSE
-
+from . import classes
 
 """
 References:
@@ -15,6 +14,34 @@ References:
         Speech, and Language Processing (2022).
 """
 
+def check_autocorr_est(Ryy, Rnn, nUpRyy, nUpRnn, min_nUp):
+    """Performs checks on autocorrelation matrices to ensure their
+    usability within a MWF/DANSE algorithm
+    Parameters
+    ----------
+    Ryy : [N x N] np.ndarray
+        Autocorrelation matrix 1.
+    Rnn : [N x N] np.ndarray
+        Autocorrelation matrix 2.
+    nUpRyy : int
+        Number of updates already performed on Ryy.
+    nUpRnn : int
+        Number of updates already performed on Rnn.
+    min_nUp : int
+        Minimum number of updates to be performed on an autocorrelation matrix before usage.
+
+    Returns
+    -------
+    flag : bool
+        If true, autocorrelation matrices can be used. Else, not.  
+    """
+    flag = False
+    # Full rank matrices
+    if np.linalg.matrix_rank(Ryy) == Ryy.shape[0] and np.linalg.matrix_rank(Rnn) == Rnn.shape[0]:
+        # Sufficient number of updates to get reasonable result
+        if nUpRyy >= min_nUp and nUpRnn >= min_nUp:
+            flag = True
+    return flag
 
 def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):
     """Wrapper for Sequential-Node-Updating DANSE.
@@ -34,22 +61,26 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
     d : [Nf x Nt x Nn] np.ndarry (complex)
         STFT representation of the desired signal at each of the Nn nodes. 
     """
+    # Interpret settings
+    olaOverlap = settings.OLAoverlap
+    if not settings.useOLA:
+        olaOverlap = 0
 
     # Define random generator
     rng = np.random.default_rng(settings.randSeed)
 
     # Extract useful variables
     numFreqLines, numTimeFrames = y_STFT.shape[0], y_STFT.shape[1]
+    danseBlockSize = settings.timeBtwConsecUpdates * asc.samplingFreq   # DANSE iteration block size [samples]
+    danseB = int(danseBlockSize / settings.stftWinLength)               # num. of frames within 1 DANSE iteration block
+    # # WOLA window
+    # if settings.WOLAwindow == 'sqrthann':
+    #     wolaWin = np.sqrt(np.hanning(danseB))
 
     # Divide sensor data per nodes
     y = []
     for k in range(1, asc.numNodes + 1):
         y.append(y_STFT[:, :, asc.sensorToNodeTags == k])
-
-    # DANSE iteration length
-    danseBlockSize = settings.timeBtwConsecUpdates * asc.samplingFreq   # [samples]
-    danseB = int(danseBlockSize / settings.stftWinLength)               # num. of frames within 1 DANSE iteration block
-
     # Identify neighbours of each node
     neighbourNodes = []
     allNodeIdx = np.arange(asc.numNodes)
@@ -91,15 +122,15 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
     tStartGlobal = time.perf_counter()    # time computation
     while not stopCriterion:
         tStart = time.perf_counter()    # time computation
+        # Loop over nodes in network 
         for k in range(asc.numNodes):
-
             # Identify indices of new sensor observations -- corresponding to (approximatively) <settings.timeBtwConsecUpdates> s of signal
-            framesCurrIter = np.arange(i * danseB, (i + 1) * danseB)
-
+            framesCurrIter = np.arange(i * danseB * (1 - olaOverlap), i * danseB * (1 - olaOverlap) + danseB, dtype=int)
+            
+            # Init available vectors at node k
+            y_tilde = np.zeros((numFreqLines, len(framesCurrIter), dimYTilde[k]), dtype=complex) 
             # Loop over frequency bins
-            y_tilde = np.zeros((numFreqLines, len(framesCurrIter), dimYTilde[k]), dtype=complex) # Init available vectors at node k
             for kappa in range(numFreqLines):
-
                 # Loop over time frames in current DANSE iteration block
                 for idx in range(len(framesCurrIter)):
 
@@ -127,20 +158,15 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
                             (1 - settings.expAvgBeta) * np.outer(y_tilde[kappa, idx, :], y_tilde[kappa, idx, :].conj())   # update noise-only matrix
                         numUpdatesRnn += 1
 
-                #Check quality of covariance estimates
+                #Check quality of autocorrelations estimates
                 if not updateWeights[kappa]:
-                    # Full rank matrices
-                    if np.linalg.matrix_rank(np.squeeze(Ryy[k][kappa, :, :])) == dimYTilde[k] and\
-                        np.linalg.matrix_rank(np.squeeze(Rnn[k][kappa, :, :])) == dimYTilde[k]:
-                        # Sufficient number of updates to get reasonable result
-                        if numUpdatesRyy > settings.minNumAutocorr and\
-                             numUpdatesRnn > settings.minNumAutocorr:
-                            updateWeights[kappa] = True
+                    updateWeights[kappa] = check_autocorr_est(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                                                            numUpdatesRyy, numUpdatesRnn, settings.minNumAutocorr)
 
                 if updateWeights[kappa]:
                     # Cross-correlation matrix update 
                     Evect = np.zeros((dimYTilde[k],))
-                    Evect[0] = 1    # reference sensor
+                    Evect[settings.referenceSensor] = 1    # reference sensor
                     ryd = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
 
                     # Update node-specific parameters of node k
@@ -148,15 +174,23 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
                     wkk[k][kappa, :] = wk_tilde_kappa[:y[k].shape[-1]]
                     gkmk[k][kappa, :] = wk_tilde_kappa[y[k].shape[-1]:]
 
-                # Compute desired signal estimate
-                d[kappa, framesCurrIter, k] = \
-                        wkk[k][kappa, :].conj().T @ y[k][kappa, framesCurrIter, :].T\
-                        + gkmk[k][kappa, :].conj().T @ z[kappa, framesCurrIter, :][:, [n-1 for n in neighbourNodes[k]]].T
+                    # Compute desired signal estimate
+                    d[kappa, framesCurrIter, k] += wk_tilde_kappa.conj().T @ y_tilde[kappa, :, :].T
+
+                    # # Compute desired signal estimate
+                    # d[kappa, framesCurrIter, k] = \
+                    #         wkk[k][kappa, :].conj().T @ y[k][kappa, framesCurrIter, :].T\
+                    #         + gkmk[k][kappa, :].conj().T @ z[kappa, framesCurrIter, :][:, [n-1 for n in neighbourNodes[k]]].T
+                    #         # + gkmk[k][kappa, :].conj().T @ y_tilde[kappa, :, y[k].shape[-1]:].T
+                else:
+                    d[kappa, framesCurrIter, k] += y[k][kappa, framesCurrIter, settings.referenceSensor]
 
         print(f'DANSE iteration {i + 1} done in {np.round(time.perf_counter() - tStart, 2)} s...')
         i += 1
-        stopCriterion = (i + 1) * danseB - 1 >= numTimeFrames
+        stopCriterion = i * danseB * (1 - olaOverlap) + danseB >= numTimeFrames
 
     print(f'DANSE computations completed after {i} iterations and {np.round(time.perf_counter() - tStartGlobal, 2)} s.')
 
     return d
+
+

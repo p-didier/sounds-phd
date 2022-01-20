@@ -24,14 +24,14 @@ wave_audio = np.sin(np.linspace(0, 3000, 20000))
 # p = pyaudio.PyAudio()
 # stream = p.open(format = p.get_format_from_width(1), channels = 1, rate = sr, output = True)
 # stream.write(wdata)
-# stream.stop_stream()
+# stream.stop_stream()s
 # stream.close()
 # p.terminate()
 
 # playsound(f'{Path(__file__).parent}/test_sound.wav')
 
 
-filename = '/users/sista/pdidier/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/test_sound.wav'
+# filename = 'C:/Users/u0137935/source/repos/PaulESAT/sounds-phd/01_algorithms/01_NR/02_distributed/dev/test_sound.wav'
 wave_obj = sa.WaveObject.from_wave_file(filename)
 play_obj = wave_obj.play()
 play_obj.wait_done()  # Wait until sound has finished playing
