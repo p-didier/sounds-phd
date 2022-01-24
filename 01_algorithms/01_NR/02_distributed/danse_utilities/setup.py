@@ -1,5 +1,8 @@
+from email.mime import base
 from multiprocessing.sharedctypes import Value
 import os, sys, time
+from threading import local
+from tracemalloc import start
 from xml.dom import ValidationErr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,6 +12,7 @@ import scipy.signal as sig
 from pathlib import Path, PurePath
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
+import warnings
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -35,16 +39,14 @@ def run_experiment(settings: classes.ProgramSettings):
     """
 
     # Generate base signals (and extract acoustic scenario)
-    mySignals, preEnhancSNRs, asc = generate_signals(settings)
+    mySignals, asc = generate_signals(settings)
+
     # Convert all DANSE input signals to the STFT domain
     mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
 
-    # Apply SROs
-    ###############TODO
-
     # DANSE
     mySignals.desiredSigEst_STFT = danse(mySignals.sensorSignals_STFT, asc, settings, mySignals.VAD)
-    
+
     # --------------- Post-process ---------------
     # Back to time-domain
     mySignals.desiredSigEst, mySignals.timeVector = get_istft(mySignals.desiredSigEst_STFT,
@@ -60,7 +62,107 @@ def run_experiment(settings: classes.ProgramSettings):
     return results
 
 
-def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings):
+def resample_for_sro(x, baseFs, SROppm):
+    """Resamples a vector given an SRO and a base sampling frequency
+    Parameters
+    ----------
+    x : [N x 1] np.ndarray
+        Signal to be resampled.
+    baseFs : float or int
+        Base sampling frequency [samples/s].
+    SROppm : float [TODO: AS OF 21/01/2022, IMPLEMENTED ONLY FOR SROppm >= 0]
+        SRO [ppm].
+
+    Returns
+    -------
+    xResamp : [N x 1] np.ndarray
+        Resampled signal
+    t : [N x 1] np.ndarray
+        Corresponding resampled time stamp vector.
+    """
+    tOriginal = np.arange(len(x)) / baseFs
+    fsSRO = baseFs * (1 + SROppm / 1e6)
+    numSamplesPostResamp = int(fsSRO / baseFs * len(x))
+    xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
+    if len(xResamp) >= len(x):
+        xResamp = xResamp[:len(x)]
+        t = t[:len(x)]
+    else:
+        raise ValueError('SRO < 0 NOT YET IMPLEMENTED.')
+    return xResamp, t
+
+
+def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
+    """Applies sampling rate offsets (SROs) to signals.
+
+    Parameters
+    ----------
+    sigs : [N x Ns] np.ndarray
+        Signals onto which to apply SROs (<Ns> sensors with <N> samples each).
+    baseFs : float
+        Base sampling frequency [samples/s]
+    sensorToNodeTags : [Ns x 1] np.ndarray
+        Tags linking each sensor (channel) to a node (i.e. an SRO).
+    SROsppm : [Nn x 1] np.ndarray or list
+        SROs per node [ppm].
+    showSRO : bool
+        If True, plots a visualization of the applied SROs.
+
+    Returns
+    -------
+    sigsOut : [N x Ns] np.ndarray
+        Signals after SROs application.
+    timeVectorOut : [N x Nn] np.ndarray
+        Corresponding sensor-specific time stamps vectors.
+    """
+    # Extract useful variables
+    numSamples = sigs.shape[0]
+    numSensors = sigs.shape[-1]
+    numNodes = len(np.unique(sensorToNodeTags))
+    if numNodes != len(SROsppm):
+        raise ValueError('Number of sensors does not match number of given SRO values.')
+
+    # Base time stamps
+    timeVector = np.arange(sigs.shape[0]) / baseFs
+
+    sigsOut       = np.zeros((numSamples, numSensors))
+    timeVectorOut = np.zeros((numSamples, numNodes))
+    for idxSensor in range(numSensors):
+        idxNode = sensorToNodeTags[idxSensor] - 1
+        if SROsppm[idxNode] != 0:
+            sigsOut[:, idxSensor], timeVectorOut[:, idxNode] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
+        else:
+            sigsOut[:, idxSensor] = sigs[:, idxSensor]
+            timeVectorOut[:, idxNode] = timeVector
+
+    # Plot
+    if showSRO:
+        minimumObservableDrift = 1   # plot enough samples to observe drifts of at least that many samples on all signals
+        smallestDriftFrequency = np.amin(SROsppm[SROsppm != 0]) / 1e6 * baseFs  # [samples/s]
+        samplesToPlot = int(minimumObservableDrift / smallestDriftFrequency * baseFs)
+        markerFormats = ['o','v','^','<','>','s','*','D']
+        fig = plt.figure(figsize=(8,4))
+        ax = fig.add_subplot(111)
+        for idxNode in range(numNodes):
+            allSensors = np.arange(numSensors)
+            idxSensor = allSensors[sensorToNodeTags == (idxNode + 1)]
+            if isinstance(idxSensor, np.ndarray):
+                idxSensor = idxSensor[0]
+            markerline, _, _ = ax.stem(timeVectorOut[:samplesToPlot, idxNode], sigsOut[:samplesToPlot, idxSensor],
+                    linefmt=f'C{idxNode}', markerfmt=f'C{idxNode}{markerFormats[idxNode % len(markerFormats)]}',
+                    label=f'Node {idxNode + 1} - $\\varepsilon={SROsppm[idxNode]}$ ppm')
+            markerline.set_markerfacecolor('none')
+        ax.set(xlabel='$t$ [s]', title='SROs visualization')
+        ax.grid()
+        plt.legend(loc='upper right')
+        plt.tight_layout()
+        plt.show()
+
+
+    return sigsOut, timeVectorOut
+
+
+def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, minNumDANSEupdates=10):
     """Wrapper for computing and storing evaluation metrics after signal enhancement.
     Parameters
     ----------
@@ -68,6 +170,10 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
         The signals before and after enhancement.
     settings : ProgramSettings object
         The settings for the current run.
+    minNumDANSEupdates : int
+        Number of DANSE updates before which to discard the signal before
+        computing any metric, to avoid bias due to non-stationary noise power
+        in the enhanced signals.
 
     Returns
     -------
@@ -82,6 +188,12 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     _, numSensorsPerNode = np.unique(sigs.sensorToNodeTags, return_counts=True)
     # Derive total number of nodes
     numNodes = np.amax(sigs.sensorToNodeTags)
+    # Derive starting sample for metrics computations
+    startIdx = int(np.ceil(minNumDANSEupdates * settings.timeBtwConsecUpdates * sigs.fs))
+    print(f"""
+    Computing speech enhancement metrics from the {startIdx + 1}'th sample on
+    \n(avoid SNR bias due to highly non-stationary noise power in first DANSE iterations)...
+    """)
 
     snr      = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Unweighted SNR
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
@@ -93,10 +205,11 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
             trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + idxSensor
             print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {idxSensor + 1}/{numSensorsPerNode[idxNode]})...')
             out0, out1, out2, out3 = eval_enhancement.get_metrics(
-                                    sigs.wetSpeech[:, trueIdxSensor],
-                                    sigs.desiredSigEst[:, idxNode], 
+                                    sigs.wetSpeech[startIdx:, trueIdxSensor],
+                                    sigs.sensorSignals[startIdx:, trueIdxSensor],
+                                    sigs.desiredSigEst[startIdx:, idxNode], 
                                     sigs.fs,
-                                    sigs.VAD,
+                                    sigs.VAD[startIdx:],
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg
                                     )
@@ -163,7 +276,7 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     return x, t
 
 
-def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):
+def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, algtype='DANSE'):
     """Main wrapper for DANSE computations.
     Parameters
     ----------
@@ -175,6 +288,8 @@ def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettin
         The settings for the current run.
     oVAD : [N x 1] np.ndarray (bool /or/ int)
         Voice Activity Detector output.
+    algtype : str
+        Type of DANSE algorithm to use ("DANSE", "GEVD-DANSE", ...)
 
     Returns
     -------
@@ -190,24 +305,10 @@ def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettin
         oVADframes[ii] = nZeros <= settings.stftEffectiveFrameLen / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
 
     # DANSE it up
-    desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
-    # desiredSigEst_STFT, wkk, gkmk = danse_scripts.danse_sequential_old(y_STFT, asc, settings, oVADframes)
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # for ii in range(z.shape[-1]):
-    #     ax = fig.add_subplot(2,z.shape[-1]+1,ii+1)
-    #     ax.plot(np.abs(z[:,:,ii]).T)
-    #     plt.title(f'z_-k({ii+1})')
-    # ax = fig.add_subplot(2,z.shape[-1]+1,z.shape[-1]+1)
-    # ax.plot(np.abs(y_STFT[:,:,0]).T)
-    # plt.title('y')
-    # #
-    # ax = fig.add_subplot(2,z.shape[-1]+1,z.shape[-1]+1  + 1)
-    # ax.plot(np.abs(wkk[0][:,:,0]))
-    # plt.show()
-
-    stop = 1
+    if algtype == 'DANSE': 
+        desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
+    elif algtype == 'GEVD-DANSE': 
+        desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
     
     return desiredSigEst_STFT
 
@@ -318,20 +419,21 @@ def generate_signals(settings: classes.ProgramSettings):
             tmp = sig.fftconvolve(dryNoiseSignals[:, ii], asc.rirNoiseToSensors[:, jj, ii])
             wetNoiseSignals[:, ii, jj] = tmp[:signalLength]
 
-    # Build sensor signals
+    # Build speech-only and noise-only signals
     wetNoise = np.sum(wetNoiseSignals, axis=1)
     wetSpeech = np.sum(wetDesiredSignals, axis=1)
     wetNoise_norm = wetNoise / np.amax(wetNoise + wetSpeech)    # Normalize
     wetSpeech_norm = wetSpeech / np.amax(wetNoise + wetSpeech)  # Normalize
+
+    # --- Apply SROs ---
+    wetNoise_norm, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    wetSpeech_norm, timeStampsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+
+    # Build sensor signals
     sensorSignals = wetSpeech_norm + wetNoise_norm
 
     # Time vector
     timeVector = np.arange(signalLength) / asc.samplingFreq
-
-    # Calculate SNRs
-    SNRs = np.zeros(asc.numSensors)
-    for sensorIdx in range(asc.numSensors):
-        SNRs[sensorIdx] = eval_enhancement.getSNR(sensorSignals[:, sensorIdx], oVAD)
 
     # Build output class object
     signals = classes.Signals(dryNoiseSources=dryNoiseSignals,
@@ -345,14 +447,16 @@ def generate_signals(settings: classes.ProgramSettings):
                                 timeVector=timeVector,
                                 sensorToNodeTags=asc.sensorToNodeTags,
                                 fs=asc.samplingFreq,
-                                referenceSensor=settings.referenceSensor)
+                                referenceSensor=settings.referenceSensor,
+                                timeStampsSROs=timeStampsSROs,
+                                )
                                 
     # Check validity of chosen reference sensor
     if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
         conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
         raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
 
-    return signals, SNRs, asc
+    return signals, asc
 
 
 def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):

@@ -1,5 +1,9 @@
+from multiprocessing.managers import ValueProxy
+from sys import path_importer_cache
 import simpleaudio as sa
 import numpy as np
+from pathlib import Path
+import time
 
 def playthis(nparray, Fs):
     """Plays audio from numpy array"""
@@ -14,9 +18,24 @@ def playthis(nparray, Fs):
     return None
 
 
-def playwavfile(filename):
-    """Plays audio contained in wav file"""
-    wave_obj = sa.WaveObject.from_wave_file(filename)
+def playwavfile(pathToFile, listeningMaxDuration):
+    """Plays audio contained in wav file
+    Parameters
+    ----------
+    pathToFile : str
+        Path to the file to be read.
+    listeningMaxDuration : float
+        Maximal playback duration [s].
+    """
+    # Check path correctness
+    if not Path(pathToFile).is_file():
+        raise ValueError(f'The file\n"{pathToFile}"\ndoes not exist.')
+    # Import sound
+    wave_obj = sa.WaveObject.from_wave_file(pathToFile)
+    # Listen
+    tStartPB = time.perf_counter()
     play_obj = wave_obj.play()
-    play_obj.wait_done()  # Wait until sound has finished playing
+    while play_obj.is_playing(): 
+        if (time.perf_counter() - tStartPB) >= listeningMaxDuration:
+            play_obj.stop()
     return None

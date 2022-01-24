@@ -1,28 +1,22 @@
 import csv
-from dataclasses import fields
+from dataclasses import field, fields
+import pickle, gzip
+from pathlib import Path
 
-def load(cls, filename: str):
+
+def save(self, foldername: str):
+    """Saves program settings so they can be loaded again later"""
+    if not Path(foldername).is_dir():
+        Path(foldername).mkdir(parents=True)
+        print(f'Created output directory "{foldername}".')
+    pickle.dump(self, gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'wb'))
+    print(f'Data exported to directory\n"{foldername}".')
+
+
+def load(self, foldername: str):
     """Loads program settings object from file"""
-    csv_reader = csv.DictReader(open(filename, "r"))
-    csv_reader_list = list(csv_reader)
-    p = cls()
-    for field in csv_reader.fieldnames:
-        val = csv_reader_list[0][field]
-        try:
-            val = float(val)
-        except ValueError:
-            val = val
-        setattr(p, field, val)
-    print(f'Program settings loaded from file: "{filename}".')
+    if not Path(foldername).is_dir():
+        raise ValueError(f'The folder "{foldername}" cannot be found.')
+    p = pickle.load(gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'r'))
+    print(f'Data loaded from directory\n"{foldername}".')
     return p
-
-def save(self, filename: str):
-    """Saves program settings as CSV so they can be loaded again later"""
-    with open(filename, "w") as f:
-        fieldnames = [field.name for field in fields(self)]
-        csv_writer = csv.DictWriter(f, fieldnames=fieldnames)
-        rows = [{fn: getattr(self, fn) for fn in fieldnames}]
-        csv_writer.writeheader()
-        csv_writer.writerows(rows)
-    f.close()
-    print(f'Program settings saved to file: "{filename}".')

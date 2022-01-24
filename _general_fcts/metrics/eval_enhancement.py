@@ -1,6 +1,9 @@
+from cmath import isnan
+from datetime import timedelta
+import time
 from numba.core.types.scalars import EnumMember
 import numpy as np
-import sys,os
+import sys
 import scipy.signal as sig
 from scipy.signal import stft
 from pathlib import Path, PurePath
@@ -13,14 +16,16 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}/_third_parties')
 
 
-def get_metrics(cleanSignal, enhancedOrNoisySignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03):
+def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
     cleanSignal : [N x 1] np.ndarray (real)
         The clean, noise-free signal used as reference.
-    enhancedOrNoisySignal : [N x 1] np.ndarray (real)
-        The signal to evaluate (pre- or post-signal enhancement).
+    noisySignal : [N x 1] np.ndarray (real)
+        The noisy signal (pre-signal enhancement).
+    enhancedSignal : [N x 1] np.ndarray (real)
+        The enhanced signal (post-signal enhancement).
     fs : int
         Sampling frequency [samples/s].
     VAD : [N x 1] np.ndarray (real)
@@ -41,33 +46,21 @@ def get_metrics(cleanSignal, enhancedOrNoisySignal, fs, VAD, gammafwSNRseg=0.2, 
     stoi : float
         Short-Time Objective Intelligibility.
     """
-    # Check input dimensions
-    if len(cleanSignal) != len(enhancedOrNoisySignal):
-        if len(cleanSignal) > len(enhancedOrNoisySignal):
-            print(f'Enhanc. metrics:: The signal durations do not match: shortening clean signal ({len(cleanSignal)} to {len(enhancedOrNoisySignal)} samples).')
-            cleanSignal = cleanSignal[:len(enhancedOrNoisySignal)]
-        elif len(cleanSignal) < len(enhancedOrNoisySignal):
-            print(f'Enhanc. metrics:: The signal durations do not match: shortening enhanced/noisy signal ({len(enhancedOrNoisySignal)} to {len(cleanSignal)} samples).')
-            enhancedOrNoisySignal = enhancedOrNoisySignal[:len(cleanSignal)]
-
     # Init output arrays
     snr = np.zeros(3)
     sisnr = np.zeros(3)
-
     # Unweighted SNR
-    snr[0] = get_snr(cleanSignal, VAD)
-    snr[1] = get_snr(enhancedOrNoisySignal, VAD)
+    snr[0] = get_snr(noisySignal, VAD)
+    snr[1] = get_snr(enhancedSignal, VAD)
     snr[2] = snr[1] - snr[0]
     # Frequency-weight segmental SNR
-    fwSNRseg = get_fwsnrseg(cleanSignal, enhancedOrNoisySignal,
-                                    fs, frameLen=frameLen, gamma=gammafwSNRseg)
+    fwSNRseg = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
     # Speech-Intelligibility-weighted SNR (SI-SNR)
-    sisnr[0] = get_sisnr(cleanSignal, fs, VAD)
-    sisnr[1] = get_sisnr(enhancedOrNoisySignal, fs, VAD)
+    sisnr[0] = get_sisnr(noisySignal, fs, VAD)
+    sisnr[1] = get_sisnr(enhancedSignal, fs, VAD)
     sisnr[2] = sisnr[1] - sisnr[0]
     # Short-Time Objective Intelligibility (STOI)
-    stoi = stoi_fcn(cleanSignal, enhancedOrNoisySignal, fs)
-    
+    stoi = stoi_fcn(cleanSignal, enhancedSignal, fs)
     return snr, fwSNRseg, sisnr, stoi
 
 
@@ -108,7 +101,7 @@ def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, fr
     return fwSNRseg,sisnr,stoi
 
 
-def get_sisnr(enhanced_or_noisy_speech, Fs, VAD):
+def get_sisnr(x, Fs, VAD):
 
     # Speech intelligibility indices (ANSI-S3.5-1997)
     Indices = 1e-4 * np.array([83.0, 95.0, 150.0, 289.0, 440.0, 578.0, 653.0, 711.0,\
@@ -116,18 +109,18 @@ def get_sisnr(enhanced_or_noisy_speech, Fs, VAD):
     fc = np.array([160.0, 200.0, 250.0, 315.0, 400.0, 500.0, 630.0, 800.0,\
          1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0])  # corresp. 1/3-octave centre freqs
 
-    SISNR_enhanced = 0
+    sisnr = 0
     for ii, fc_curr in enumerate(fc):
 
         # Filter in 1/3-octave bands
         Wn = 1/Fs * np.array([fc_curr*2**(-1/6), fc_curr*2**(1/6)])
         sos = sig.butter(10, Wn, btype='bandpass', analog=False, output='sos', fs=2*np.pi)
-        enhanced_filtered = sig.sosfilt(sos, enhanced_or_noisy_speech)
+        x_filtered = sig.sosfilt(sos, x)
 
         # Build the SI-SNR sum
-        SISNR_enhanced += Indices[ii] * get_snr(enhanced_filtered,VAD)
+        sisnr += Indices[ii] * get_snr(x_filtered,VAD)
 
-    return SISNR_enhanced
+    return sisnr
 
 
 def getSNR(timeDomainSignal, VAD, silent=False):
@@ -136,6 +129,9 @@ def getSNR(timeDomainSignal, VAD, silent=False):
     # (c) Paul Didier - 14-Sept-2021
     # SOUNDS ETN - KU Leuven ESAT STADIUS
     # ------------------------------------
+
+    # Ensure correct input formats
+    VAD = np.array(VAD)
 
     # Only start computing VAD from the first frame where there has been VAD =
     # 0 and VAD = 1 at least once (condition added on 25/08/2021).
@@ -160,19 +156,20 @@ def getSNR(timeDomainSignal, VAD, silent=False):
     Ln = len(VAD) - Ls
 
     if Ls > 0 and Ln > 0:
-        sigma_n_hat = np.mean(timeDomainSignal**2 * (1 - VAD))  # log-form to avoid overflow
-        sigma_x = np.mean(timeDomainSignal**2)                  # log-form to avoid overflow
-        sigma_s_hat = sigma_x - sigma_n_hat
-        if sigma_s_hat < 0:
-            SNR = -1 * float('inf')
-        else:
-            SNR = 20 * np.log10(sigma_s_hat/sigma_n_hat)
-    elif Ls == 0:
-        SNR = -1 * float('inf')
-    elif Ln == 0:
-        SNR = float('inf')
 
-    return SNR
+        noisePower = np.mean(np.power(np.abs(timeDomainSignal[VAD == 0]), 2))
+        signalPower = np.mean(np.power(np.abs(timeDomainSignal[VAD == 1]), 2))
+        speechPower = signalPower - noisePower
+        if speechPower < 0:
+            SNRout = -1 * float('inf')
+        else:
+            SNRout = 20 * np.log10(speechPower / noisePower)
+    elif Ls == 0:
+        SNRout = -1 * float('inf')
+    elif Ln == 0:
+        SNRout = float('inf')
+
+    return SNRout
 
 
 def get_snr(Y,VAD):
@@ -198,7 +195,7 @@ def get_snr(Y,VAD):
     nChannels = Y.shape[1]
     SNRy = np.zeros(nChannels)
     for ii in range(nChannels):
-        SNRy[ii] = getSNR(Y[:,ii], VAD)
+        SNRy[ii] = getSNR(Y[:, ii], VAD)
 
     return SNRy
 

@@ -7,10 +7,18 @@ from IPython.display import Audio
 # import pyaudio  # <-- won't install via pip...
 from scipy.io import wavfile
 # from playsound import playsound  <-- unknown dependencies "gi" + others
-from pathlib import Path
+from pathlib import Path, PurePath
 import simpleaudio as sa
+import sys
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+sys.path.append(f'{pathToRoot}/_general_fcts')
+from playsounds.playsounds import playwavfile
 
-wave_audio = np.sin(np.linspace(0, 3000, 20000))
+# wave_audio = np.sin(np.linspace(0, 3000, 20000))
 
 # Audio(wave_audio, rate=20000)   # Option 1 (doesn't seem to work -- 
 #             # shows widget in Jupyter Interactive window but won't play)
@@ -31,10 +39,9 @@ wave_audio = np.sin(np.linspace(0, 3000, 20000))
 # playsound(f'{Path(__file__).parent}/test_sound.wav')
 
 
-# filename = 'C:/Users/u0137935/source/repos/PaulESAT/sounds-phd/01_algorithms/01_NR/02_distributed/dev/test_sound.wav'
-wave_obj = sa.WaveObject.from_wave_file(filename)
-play_obj = wave_obj.play()
-play_obj.wait_done()  # Wait until sound has finished playing
+listeningMaxDuration = 3
+filename = 'C:/Users/u0137935/source/repos/PaulESAT/sounds-phd/01_algorithms/01_NR/02_distributed/dev/test_sound.wav'
+playwavfile(filename, listeningMaxDuration)
 
 
 # %%

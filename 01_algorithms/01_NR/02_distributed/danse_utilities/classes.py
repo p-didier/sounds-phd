@@ -1,13 +1,12 @@
+from cmath import isinf
 from dataclasses import dataclass, field
+import enum
 from multiprocessing.managers import ValueProxy
 from operator import contains
-import sys, os
+import sys, warnings
 from pathlib import PurePath, Path
-from threading import local
-from typing import overload
 import numpy as np
 import matplotlib.pyplot as plt
-import pickle, gzip
 from scipy.io import wavfile
 import scipy.signal as sig
 # Find path to root folder
@@ -18,17 +17,33 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}/_general_fcts')
 from class_methods import dataclass_methods
 from plotting.twodim import plot_side_room
-from mySTFT.calc_STFT import calcSTFT
+
+
+@dataclass
+class SamplingRateOffsets:
+    """Sampling rate/time offsets class, containing all necessary info for
+    applying, estimating, and compensation SROs/STOs"""
+    SROsppm: list[float] = field(default_factory=list)     # SROs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
+    STOsppm: list[float] = field(default_factory=list)     # STOs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
+
+    def __post_init__(self):
+        if len(self.SROsppm) < self.nNodes:
+            warnings.warn(f'There are more nodes ({self.nNodes}) than SROs ({len(self.SROsppm)}). Settings last nodes to SRO = 0.')
+            self.SROsppm += [0. for _ in range(self.nNodes - len(self.SROsppm))]
+        if len(self.SROsppm) > self.nNodes:
+            warnings.warn(f'There are less nodes ({self.nNodes}) than SROs ({len(self.SROsppm)}). Discarding last ({len(self.SROsppm) - self.nNodes}) SRO(s).')
+            self.SROsppm = self.SROsppm[:self.nNodes]
+
 
 @dataclass
 class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
     # Signal generation parameters
-    acousticScenarioPath: str               # path to acoustic scenario CSV file to be used
-    signalDuration: float                   # total signal duration [s]
-    desiredSignalFile: list                 # list of paths to desired signal file(s)
-    noiseSignalFile: list                   # list of paths to noise signal file(s)
-    baseSNR: int                            # SNR between dry desired signals and dry noise
+    acousticScenarioPath: str = ''          # path to acoustic scenario CSV file to be used
+    signalDuration: float = 1               # total signal duration [s]
+    desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
+    noiseSignalFile: list[str] = field(default_factory=list)              # list of paths to noise signal file(s)
+    baseSNR: int = 0                        # SNR between dry desired signals and dry noise
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # STFT frame length [samples]
     stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
@@ -40,12 +55,13 @@ class ProgramSettings(object):
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
     minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
-    # useOLA: bool = True                     # if True, use overlap-add process with self.OLAoverlap as frame overlap
-    # OLAoverlap: float = 0.5                 # OLA frame overlap (only used if self.useOLA is True)
-    # WOLAwindow: str = 'sqrthann'            # WOLA window type (values allowed: "sqrthann")
+    performGEVD: bool = False               # if True, perform GEVD in DANSE
+    GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
+    # SROs parameters
+    SROsppm: list[float] = field(default_factory=list)   # sampling rate offsets [ppm]
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
@@ -57,27 +73,39 @@ class ProgramSettings(object):
             self.acousticScenarioPath += '.csv'
             print('Automatically appended ".csv" to string setting "acousticScenarioPath".')
         self.stftEffectiveFrameLen = int(self.stftWinLength * self.stftFrameOvlp)
+        if 0. not in self.SROsppm:
+            raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
         return self
 
     def __repr__(self):
-        string = f"""--------- Program settings ---------
-        Acoustic scenario: '{self.acousticScenarioPath[self.acousticScenarioPath.rfind('/', 0, self.acousticScenarioPath.rfind('/')) + 1:-4]}'
-        {self.signalDuration} seconds signals using desired file(s):
-        \t{[PurePath(f).name for f in self.desiredSignalFile]}
-        and noise signal file(s):
-        \t{[PurePath(f).name for f in self.noiseSignalFile]}
-        with a base SNR btw. dry signals of {self.baseSNR} dB.
-        ------ DANSE settings ------
-        Exponential averaging constant: beta = {self.expAvgBeta}.
-        """
+        string = f"""
+--------- Program settings ---------
+Acoustic scenario: '{self.acousticScenarioPath[self.acousticScenarioPath.rfind('/', 0, self.acousticScenarioPath.rfind('/')) + 1:-4]}'
+{self.signalDuration} seconds signals using desired file(s):
+\t{[PurePath(f).name for f in self.desiredSignalFile]}
+and noise signal file(s):
+\t{[PurePath(f).name for f in self.noiseSignalFile]}
+with a base SNR btw. dry signals of {self.baseSNR} dB.
+------ DANSE settings ------
+Exponential averaging constant: beta = {self.expAvgBeta}.
+"""
+        if self.performGEVD:
+            string += 'GEVD with R = {self.GEVDrank}.' 
+        if (np.array(self.SROsppm) != 0).any():
+            string += f'\n------ SRO settings ------'
+            for idxNode in range(len(self.SROsppm)):
+                string += f'\nSRO Node {idxNode + 1} = {self.SROsppm[idxNode]} ppm'
+                if self.SROsppm[idxNode] == 0:
+                    string += ' (base sampling freq.)'
+        string += '\n\n'
         return string
 
-    @classmethod
-    def load(cls, filename: str):
-        return dataclass_methods.load(cls, filename)
+    def load(self, filename: str):
+        return dataclass_methods.load(self, filename)
 
     def save(self, filename: str):
         dataclass_methods.save(self, filename)
+
 
 
 @dataclass
@@ -138,6 +166,15 @@ class AcousticScenario(object):
 
 
 @dataclass
+class EnhancementMeasures:
+    """Class for storing speech enhancement metrics values"""
+    snr: dict         # Unweighted SNR
+    fwSNRseg: dict    # Frequency-weighted segmental SNR
+    sisnr: dict       # Speech-Intelligibility-weighted SNR
+    stoi: dict        # Short-Time Objective Intelligibility
+
+
+@dataclass
 class Signals(object):
     """Class to store data output by the signal generation routine"""
     dryNoiseSources: np.ndarray                         # Dry noise source signals
@@ -155,6 +192,7 @@ class Signals(object):
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: int = 16e3                                      # Sampling frequency [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
+    timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings)
 
     def __post_init__(self):
         """Defines useful fields for Signals object"""
@@ -177,6 +215,7 @@ class Signals(object):
     def get_all_stfts(self, fs, L, eL):
         """Derives time-domain signals' STFT representations
         given certain settings.
+
         Parameters
         ----------
         fs : int
@@ -198,7 +237,7 @@ class Signals(object):
 
         return self
 
-    def plot_signals(self, nodeIdx, sensorIdx, beta=None):
+    def plot_signals(self, nodeIdx, sensorIdx, settings: ProgramSettings):
         """Creates a visual representation of the signals at a particular sensor.
         Parameters
         ----------
@@ -206,6 +245,8 @@ class Signals(object):
             Index of the node to inspect.
         sensorNum : int
             Index of the sensor of nodeNum to inspect.
+        settings : ProgramSettings object
+            Program settings, containing info that can be included on the plots.
         """
         # Useful variables
         indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx + 1)
@@ -230,10 +271,7 @@ class Signals(object):
         ax.set(xlabel='$t$ [s]')
         ax.grid()
         plt.legend(loc=(0.01, 0.5), fontsize=8)
-        ti = f'Node {nodeIdx + 1}, sensor {sensorIdx + 1}'
-        if beta is not None:
-            ti += f' -- $\\beta = {beta}$'
-        plt.title(ti)
+        plt.title(f'Node {nodeIdx + 1}, sensor {sensorIdx + 1} -- $\\beta = {settings.expAvgBeta}$')
         #
         if self.stftComputed:
             # Get color plot limits
@@ -264,14 +302,51 @@ class Signals(object):
                 plt.xticks([])
                 ax = fig.add_subplot(nRows,2,8)     # Enhanced signals
                 data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx])))
-                stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Enhanced')
+                lab = 'Enhanced'
+                if settings.performGEVD:
+                    lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
+                stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
                 ax.set(xlabel='$t$ [s]')
             else:
                 ax.set(xlabel='$t$ [s]')
         plt.tight_layout()
 
+    def plot_enhanced_stft(self, bestNodeIdx, worstNodeIdx, perf: EnhancementMeasures):
+        """Plots the STFT of the enhanced signal (best and worse nodes) side by side.
+
+        Parameters
+        ----------
+        bestNodeIdx : int
+            Index of the best performing node.
+        worstNodeIdx : int
+            Index of the worst performing node. 
+        perf : EnhancementMeasures object
+            Signal enhancement evaluation metrics.
+        """
+        # Get data
+        dataBest  = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx])))
+        dataWorst = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx])))
+        # Define plot limits
+        limLow  = np.amin(np.concatenate((dataBest, dataWorst), axis=-1))
+        limHigh = np.amax(np.concatenate((dataBest, dataWorst), axis=-1))
+
+        fig = plt.figure(figsize=(10,4))
+        # Best node
+        ax = fig.add_subplot(121)
+        stft_subplot(ax, self.timeFrames, self.freqBins, dataBest, [limLow, limHigh])
+        plt.title(f'Best: N{bestNodeIdx + 1} ({np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][0] * 100, 2)}% STOI)')
+        plt.xlabel('$t$ [s]')
+        # Worst node
+        ax = fig.add_subplot(122)
+        colorb = stft_subplot(ax, self.timeFrames, self.freqBins, dataWorst, [limLow, limHigh])
+        plt.title(f'Worst: N{worstNodeIdx + 1} ({np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][0] * 100, 2)}% STOI)')
+        plt.xlabel('$t$ [s]')
+        colorb.set_label('[dB]')
+        return fig
+
     def export_wav(self, folder):
         """Exports the enhanced, noisy, and desired signals as WAV files.
+
         Parameters
         ----------
         folder : str
@@ -331,65 +406,36 @@ def normalize_toint16(nparray):
 
 
 @dataclass
-class EnhancementMeasures:
-    """Class for storing speech enhancement metrics values"""
-    snr: dict         # Unweighted SNR
-    fwSNRseg: dict    # Frequency-weighted segmental SNR
-    sisnr: dict       # Speech-Intelligibility-weighted SNR
-    stoi: dict        # Short-Time Objective Intelligibility
-
-
-@dataclass
 class Results:
     """Class for storing simulation results"""
     signals: Signals = field(init=False)                       # all signals involved in run
     enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
     acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
 
-    def save(self, foldername: str):
-        """Exports DANSE performance results to directory."""
-        if not Path(foldername).is_dir():
-            Path(foldername).mkdir(parents=True)
-            print(f'Created output directory "{foldername}".')
-        pickle.dump(self.signals, gzip.open(f'{foldername}/signals.pkl.gz', 'wb'))
-        pickle.dump(self.enhancementEval, gzip.open(f'{foldername}/enhanc_metrics.pkl.gz', 'wb'))
-        pickle.dump(self.acousticScenario, gzip.open(f'{foldername}/asc.pkl.gz', 'wb'))
-        print(f'DANSE performance results exported to directory\n"{foldername}".')
+    def load(self, filename: str):
+        return dataclass_methods.load(self, filename)
 
-    @classmethod
-    def load(cls, foldername: str):
-        """Imports DANSE performance results from directory."""
-        if not Path(foldername).is_dir():
-            raise ValueError(f'The folder "{foldername}" cannot be found.')
-        p = cls()
-        p.signals = pickle.load(gzip.open(f'{foldername}/signals.pkl.gz', 'r'))
-        p.enhancementEval = pickle.load(gzip.open(f'{foldername}/enhanc_metrics.pkl.gz', 'r'))
-        p.acousticScenario = pickle.load(gzip.open(f'{foldername}/asc.pkl.gz', 'r'))
-        print(f'DANSE performance results loaded from directory\n"{foldername}".')
-        return p
+    def save(self, filename: str):
+        dataclass_methods.save(self, filename)
 
     def plot_enhancement_metrics(self):
         """Creates a visual representation of DANSE performance results."""
         # Useful variables
         _, sensorCounts = np.unique(self.signals.sensorToNodeTags, return_counts=True)
         barWidth = 1 / np.amax(sensorCounts)
-        
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(2, 2, 1)   # Unweighted SNR
         numNodes = self.signals.desiredSigEst.shape[1]
+        
+        fig = plt.figure(figsize=(10,3))
+        ax = fig.add_subplot(1, 3, 1)   # Unweighted SNR
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
-        ax.set(ylabel='$\Delta$SNR [dB]')
-        ax = fig.add_subplot(2, 2, 2)   # SI-SNR
-        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.sisnr)
-        ax.set(ylabel='$\Delta$SI-SNR [dB]')
-        ax = fig.add_subplot(2, 2, 3)   # fwSNRseg
+        ax.set(title='$\Delta$SNR (before/after filtering)', ylabel='[dB]')
+        ax = fig.add_subplot(1, 3, 2)   # fwSNRseg
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
-        ax.set(ylabel='fwSNRseg')
-        ax = fig.add_subplot(2, 2, 4)   # STOI
+        ax.set(title='fwSNRseg', ylabel='[dB]')
+        ax = fig.add_subplot(1, 3, 3)   # STOI
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
-        ax.set(ylabel='STOI')
+        ax.set(title='STOI')
         ax.set_ylim(0,1)
-        plt.show()
         return fig
 
         
@@ -448,22 +494,25 @@ def metrics_subplot(numNodes, ax, barWidth, data):
         else:
             toPlot = data[f'Node{idxNode + 1}']
         xTicksCurr = idxNode + 1 - (numSensors / 2 + 0.5) * barWidth + np.arange(numSensors) * barWidth
-        ax.bar(xTicksCurr, toPlot, width=barWidth, color='tab:gray', edgecolor='k')
+        ax.bar(xTicksCurr, toPlot, width=barWidth, color=f'C{idxNode}', edgecolor='k')
         xTicks += list(xTicksCurr)
         xTickLabels += [f'N{idxNode + 1}S{ii + 1}' for ii in range(numSensors)]
     plt.xticks(xTicks, xTickLabels, fontsize=8)
+    ax.tick_params(axis='x', labelrotation=90)
     ax.grid()
 
     
 
-def stft_subplot(ax, t, f, data, vlims, label):
+def stft_subplot(ax, t, f, data, vlims, label=''):
     """Helper function for <Signals.plot_signals()>."""
     # Text boxes properties
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     #
     mappable = ax.pcolormesh(t, f / 1e3, data, vmin=vlims[0], vmax=vlims[1])
     ax.set(ylabel='$f$ [kHz]')
-    ax.text(0.025, 0.9, label, fontsize=8, transform=ax.transAxes,
-        verticalalignment='top', bbox=props)
+    if label != '':
+        ax.text(0.025, 0.9, label, fontsize=8, transform=ax.transAxes,
+            verticalalignment='top', bbox=props)
     ax.yaxis.label.set_size(8)
-    plt.colorbar(mappable)
+    cb = plt.colorbar(mappable)
+    return cb
