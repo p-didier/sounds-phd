@@ -36,6 +36,8 @@ def run_experiment(settings: classes.ProgramSettings):
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
 
+    # mySignals.plot_signals(0,0,settings)
+
     # Convert all DANSE input signals to the STFT domain
     mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
 
