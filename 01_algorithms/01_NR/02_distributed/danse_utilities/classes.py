@@ -62,6 +62,7 @@ class ProgramSettings(object):
     frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
     # SROs parameters
     SROsppm: list[float] = field(default_factory=list)   # sampling rate offsets [ppm]
+    compensateSROs: bool = False            # if True, estimate + compensate SROs dynamically
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
@@ -90,7 +91,7 @@ with a base SNR btw. dry signals of {self.baseSNR} dB.
 Exponential averaging constant: beta = {self.expAvgBeta}.
 """
         if self.performGEVD:
-            string += 'GEVD with R = {self.GEVDrank}.' 
+            string += f'GEVD with R = {self.GEVDrank}.' 
         if (np.array(self.SROsppm) != 0).any():
             string += f'\n------ SRO settings ------'
             for idxNode in range(len(self.SROsppm)):

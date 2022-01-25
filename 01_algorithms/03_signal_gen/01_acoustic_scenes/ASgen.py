@@ -29,8 +29,8 @@ def main():
         roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
         numSpeechSources = 1,               # nr. of speech sources
         numNoiseSources = 1,                # nr. of noise sources
-        numNodes = 4,                       # nr. of nodes
-        numSensorPerNode = 10,         # nr. of sensor per node,
+        numNodes = 2,                       # nr. of nodes
+        numSensorPerNode = 1,               # nr. of sensor per node,
         # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
         arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
         sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
