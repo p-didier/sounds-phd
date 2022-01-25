@@ -39,7 +39,7 @@ def main():
         minNumAutocorrUpdates=10,
         initialWeightsAmplitude=1,
         performGEVD=True,               # set to True for GEVD-DANSE
-        SROsppm=[0, 10, 100],           # SRO
+        SROsppm=[0, 0, 0],           # SRO
         )
     print(mySettings)
 

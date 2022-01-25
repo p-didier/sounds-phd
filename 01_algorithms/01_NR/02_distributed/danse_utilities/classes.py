@@ -90,7 +90,7 @@ with a base SNR btw. dry signals of {self.baseSNR} dB.
 Exponential averaging constant: beta = {self.expAvgBeta}.
 """
         if self.performGEVD:
-            string += 'GEVD with R = {self.GEVDrank}.' 
+            string += f'GEVD with R = {self.GEVDrank}.' 
         if (np.array(self.SROsppm) != 0).any():
             string += f'\n------ SRO settings ------'
             for idxNode in range(len(self.SROsppm)):
