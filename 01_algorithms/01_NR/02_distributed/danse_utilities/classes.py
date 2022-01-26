@@ -171,8 +171,8 @@ class EnhancementMeasures:
     """Class for storing speech enhancement metrics values"""
     snr: dict         # Unweighted SNR
     fwSNRseg: dict    # Frequency-weighted segmental SNR
-    sisnr: dict       # Speech-Intelligibility-weighted SNR
     stoi: dict        # Short-Time Objective Intelligibility
+    # sisnr: dict       # Speech-Intelligibility-weighted SNR
 
 
 @dataclass

@@ -1,6 +1,5 @@
 # Using the "danse_env" virtual environment
 # %%
-from turtle import Turtle
 from danse_utilities.classes import ProgramSettings, Results
 from danse_utilities.setup import run_experiment
 from pathlib import Path, PurePath
@@ -27,11 +26,11 @@ def main():
     # Set experiment settings
     mySettings = ProgramSettings(
         # acousticScenarioPath=f'{ascBasePath}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
-        acousticScenarioPath=f'{ascBasePath}/J2Mk[1 1]_Ns1_Nn1/AS0_anechoic',
+        acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
         desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
         noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
         signalDuration=10,
-        baseSNR=-10,
+        baseSNR=0,
         plotAcousticScenario=False,
         timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE filter updates
         VADwinLength=40e-3,             # VAD window length [s]
@@ -40,7 +39,7 @@ def main():
         minNumAutocorrUpdates=10,
         initialWeightsAmplitude=1,
         performGEVD=True,               # set to True for GEVD-DANSE
-        SROsppm=[0, 100],               # SRO
+        SROsppm=[0, 0],                 # SRO
         compensateSROs=True,            # if True, estimate + compensate SRO dynamically
         )
     print(mySettings)

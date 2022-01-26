@@ -189,19 +189,18 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     startIdx = int(np.ceil(minNumDANSEupdates * settings.timeBtwConsecUpdates * sigs.fs))
     print(f"""
     Computing speech enhancement metrics from the {startIdx + 1}'th sample on
-    \n(avoid SNR bias due to highly non-stationary noise power in first DANSE iterations)...
+    (avoid SNR bias due to highly non-stationary noise power in first DANSE iterations)...
     """)
 
     snr      = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Unweighted SNR
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
-    sisnr    = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Speech-Intelligibility-weighted SNR
     stoi     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Short-Time Objective Intelligibility
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
         for idxSensor in range(numSensorsPerNode[idxNode]):
             trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + idxSensor
             print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {idxSensor + 1}/{numSensorsPerNode[idxNode]})...')
-            out0, out1, out2, out3 = eval_enhancement.get_metrics(
+            out0, out1, out2 = eval_enhancement.get_metrics(
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
@@ -212,13 +211,11 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     )
             snr[f'Node{idxNode + 1}'].append(out0)
             fwSNRseg[f'Node{idxNode + 1}'].append(out1)
-            sisnr[f'Node{idxNode + 1}'].append(out2)
-            stoi[f'Node{idxNode + 1}'].append(out3)
+            stoi[f'Node{idxNode + 1}'].append(out2)
     print(f'All signal enhancement evaluation metrics computed in {np.round(time.perf_counter() - tStart, 3)} s.')
 
     # Group measures into EnhancementMeasures object
     measures = classes.EnhancementMeasures(fwSNRseg=fwSNRseg,
-                                            sisnr=sisnr,
                                             stoi=stoi,
                                             snr=snr)
 

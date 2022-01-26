@@ -41,8 +41,6 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
         Unweighted signal-to-noise ratio (SNR).
     fwSNRseg : float    
         Frequency-weighted segmental SNR.
-    sisnr : [3 x 1] np.ndarray (real)
-        Speech-Intelligibility-weighted SNR [before, after, difference].
     stoi : float
         Short-Time Objective Intelligibility.
     """
@@ -55,13 +53,9 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     snr[2] = snr[1] - snr[0]
     # Frequency-weight segmental SNR
     fwSNRseg = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
-    # Speech-Intelligibility-weighted SNR (SI-SNR)
-    sisnr[0] = get_sisnr(noisySignal, fs, VAD)
-    sisnr[1] = get_sisnr(enhancedSignal, fs, VAD)
-    sisnr[2] = sisnr[1] - sisnr[0]
     # Short-Time Objective Intelligibility (STOI)
     stoi = stoi_fcn(cleanSignal, enhancedSignal, fs)
-    return snr, fwSNRseg, sisnr, stoi
+    return snr, fwSNRseg, stoi
 
 
 def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):

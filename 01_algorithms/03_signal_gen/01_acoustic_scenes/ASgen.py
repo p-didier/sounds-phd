@@ -30,11 +30,11 @@ def main():
         numSpeechSources = 1,               # nr. of speech sources
         numNoiseSources = 1,                # nr. of noise sources
         numNodes = 2,                       # nr. of nodes
-        numSensorPerNode = 1,               # nr. of sensor per node,
+        numSensorPerNode = 5,               # nr. of sensor per node,
         # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
         arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
         sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-        revTime = 0.0,                      # reverberation time [s]
+        revTime = 0.2,                      # reverberation time [s]
         seed = 12345                        # seed for random generator
     )
 

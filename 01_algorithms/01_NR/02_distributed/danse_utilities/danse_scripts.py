@@ -41,6 +41,17 @@ def check_autocorr_est(Ryy, Rnn, nUpRyy=0, nUpRnn=0, min_nUp=0):
     if np.linalg.matrix_rank(Ryy) == Ryy.shape[0] and np.linalg.matrix_rank(Rnn) == Rnn.shape[0]:
         # Sufficient number of updates to get reasonable result
         if nUpRyy >= min_nUp and nUpRnn >= min_nUp:
+            # # Positive definiteness
+            # try:
+            #     np.linalg.cholesky(Ryy)
+            # except np.linalg.LinAlgError:
+            #     flag = False
+            # else:
+            #     try:
+            #         np.linalg.cholesky(Rnn)
+            #     except np.linalg.LinAlgError:
+            #         flag = False
+            #     else:
             flag = True
     return flag
 
@@ -63,8 +74,8 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0):
     -------
     w : [N x 1] np.ndarray (complex)
         GEVD-DANSE filter coefficients.
-    Xmat : [N x N] np.ndarray (complex)
-        Generalized eigenvectors of matrix pencil {Ryy, Rnn}.
+    Qmat : [N x N] np.ndarray (complex)
+        Hermitian conjugate inverse of the generalized eigenvectors matrix of the pencil {Ryy, Rnn}.
     """
     # Reference sensor selection vector 
     Evect = np.zeros((Ryy.shape[0],))
@@ -82,11 +93,12 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0):
     diagveig = np.append(diagveig, np.zeros(Sigma_yy.shape[0] - rank))
     # LMMSE weights
     w = np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect 
-    return w, Xmat
+    return w, Qmat
 
 
 def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):
     """Wrapper for Sequential-Node-Updating DANSE.
+
     Parameters
     ----------
     y_STFT : [Nf x Nt x Ns] np.ndarray
@@ -130,6 +142,8 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
         neighbourNodes.append(np.delete(allNodeIdx, k))   # Option 1) - FULLY-CONNECTED WASN
 
     # Initialize loop
+    z = np.zeros((numFreqLines, numTimeFrames, asc.numNodes), dtype=complex)   # compressed local signals
+    d = np.zeros((numFreqLines, numTimeFrames, asc.numNodes), dtype=complex)   # init desired signal estimate
     wkk      = []   # filter coefficients applied to local signals
     gkmk     = []   # filter coefficients applied to incoming signals
     wk_tilde = []   # all filter coefficients
@@ -151,33 +165,32 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
         gkmk.append(gkmkAllFrames)
         wk_tilde.append(np.concatenate((wkk[-1], gkmk[-1]), axis=-1))
 
-    z = np.zeros((numFreqLines, numTimeFrames, asc.numNodes), dtype=complex)   # compressed local signals
-    d = np.zeros((numFreqLines, numTimeFrames, asc.numNodes), dtype=complex)   # init desired signal estimate
-    # Init autocorrelation matrices ([TODO] FOR NOW: storing them all, for each node (pbly unnecessary))
-    Ryy = []
-    Rnn = []
-    ryd = []
-    ytilde = []     # list of full observable vectors at each node
-    a = []          # list of phase-relevant components of X := Q^-H
-    deltaSRO = []   # list of residual SROs at each node
-    deltaVarPhiRes = []     # list of residual phase shifts at each node
-    deltaVarPhiResCumulated = []     # list of cumulated residual phase shifts at each node
-    varphi = []     # list of phase shift estimates at each node
-    estimatedSRO = []   # estimate SRO
-    dimYTilde = np.zeros(asc.numNodes, dtype=int)
+    # Init lists ([TODO] FOR NOW: storing them all, for each node (pbly unnecessary))
+    a = []              # per-node list of phase-relevant components of X := Q^-H
+    deltaSRO = []       # per-node list of residual SROs
+    dPhiRes = []        # per-node list of residual phase shifts
+    dPhiResC = []       # per-node list of cumulated residual phase shifts
+    estimatedSRO = []   # per-node list of estimated SROs
+    Rnn = []            # per-node list of noise-only autocorrelation matrices
+    ryd = []            # per-node list of cross-correlation vectors
+    Ryy = []            # per-node list of signal+noise autocorrelation matrices
+    varphi = []         # per-node list of phase shift estimates
+    ytilde = []         # per-node list of full observable vectors
+    # Pre-store \tilde{y}_k dimensions
+    dimYTilde = np.array([y[k].shape[-1] + len(neighbourNodes[k]) for k in range(asc.numNodes)])
     for k in range(asc.numNodes):
-        dimYTilde[k] = y[k].shape[-1] + len(neighbourNodes[k])              # dimension of \tilde{y}_k
         slice = np.zeros((dimYTilde[k], dimYTilde[k]), dtype=complex)       # single autocorrelation matrix init
-        Ryy.append(np.tile(slice, (numFreqLines, 1, 1)))                    # speech + noise
-        Rnn.append(np.tile(slice, (numFreqLines, 1, 1)))                    # noise only
-        ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
-        ytilde.append(np.zeros((numFreqLines, numTimeFrames, dimYTilde[k]), dtype=complex))
+        #
         a.append(np.zeros((numFreqLines, numIter, dimYTilde[k]), dtype=complex))
         deltaSRO.append(np.zeros((numIter, dimYTilde[k])))
-        deltaVarPhiRes.append(np.zeros((numIter, dimYTilde[k])))
-        deltaVarPhiResCumulated.append(np.zeros((numIter, dimYTilde[k])))
-        varphi.append(np.zeros((numIter, dimYTilde[k])))
+        dPhiRes.append(np.zeros((numIter, dimYTilde[k])))
+        dPhiResC.append(np.zeros((numIter, dimYTilde[k])))
         estimatedSRO.append(np.zeros((numIter, dimYTilde[k])))
+        Rnn.append(np.tile(slice, (numFreqLines, 1, 1)))                    # noise only
+        ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
+        Ryy.append(np.tile(slice, (numFreqLines, 1, 1)))                    # speech + noise
+        varphi.append(np.zeros((numIter, dimYTilde[k])))
+        ytilde.append(np.zeros((numFreqLines, numTimeFrames, dimYTilde[k]), dtype=complex))
     
     # Filter coefficients update flag for each frequency
     goodAutocorrMatrices = np.array([False for _ in range(numFreqLines)])
@@ -240,13 +253,15 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
 
                 if goodAutocorrMatrices[kappa] and l % danseB == 0:
                     if settings.performGEVD:
-                        wk_tilde[k][kappa, l, :], Xmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                                                                            settings.GEVDrank, settings.referenceSensor)
+                        wk_tilde[k][kappa, l, :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                                                                        settings.GEVDrank, settings.referenceSensor)
                         if settings.compensateSROs:
-                            # Extract first column of X (:= Q^-H)
-                            x1 = Xmat[:, 0]
-                            for idx in range(len(neighbourNodes[k])):
-                                a[k][kappa, i, Mk + idx] = x1[Mk + idx]  # extract (M_k + q)^th element (""residuals"")
+                            eQe = Qmat[0, 0]    # denominator: first diagonal element of Q
+                            Xmat = np.linalg.inv(Qmat.conj().T)     # Q^-H
+                            QHe = Xmat[:, 0]     # numerator: first column of Q^-H
+                            # Extract (M_k + q)^th element (""residuals"") for each neighboring node q
+                            indices = [Mk + idx for idx in range(len(neighbourNodes[k]))]
+                            a[k][kappa, i, indices] = QHe[indices] / eQe  
                     else:                       
                         if settings.compensateSROs:
                             raise ValueError('Regular DANSE with SRO est./comp. not yet implemented.')
@@ -272,9 +287,9 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
                     phiVect = np.angle(a[k][:, i, Mk + idx] * a[k][:, i-1, Mk + idx].conj())            # element-wise product
                     # phiVect = np.angle(wk_tilde[k][:, l, Mk + idx] * wk_tilde[k][:, l-1, Mk + idx].conj())            # element-wise product
                     deltaSRO[k][i, Mk + idx]  = kappaVect.T @ phiVect / np.dot(kappaVect, kappaVect)       # other option: np.linalg.lstsq()
-                deltaVarPhiRes[k][i, :] = numFreqLines * deltaSRO[k][i, :] / (1 + deltaSRO[k][i, :])     # residual phase shifts
-                deltaVarPhiResCumulated[k][i, :] = deltaVarPhiRes[k][i, :] + deltaVarPhiRes[k][i-1, :]    # cumulated residual phase shifts
-                varphi[k][i, :] = deltaVarPhiResCumulated[k][i, :] + deltaVarPhiResCumulated[k][i-1, :]      # cumulated phase shifts
+                dPhiRes[k][i, :] = numFreqLines * deltaSRO[k][i, :] / (1 + deltaSRO[k][i, :])     # residual phase shifts
+                dPhiResC[k][i, :] = dPhiRes[k][i, :] + dPhiRes[k][i-1, :]    # cumulated residual phase shifts
+                varphi[k][i, :] = dPhiResC[k][i, :] + dPhiResC[k][i-1, :]      # cumulated phase shifts
                 # estimatedSRO[k][i, :] = varphi[k][i, :] / (numFreqLines - varphi[k][i, :])
                 estimatedSRO[k][i, :] = varphi[k][i, :] - varphi[k][i-1, :]
 
@@ -288,26 +303,23 @@ def danse_sequential(y_STFT, asc: classes.AcousticScenario, settings: classes.Pr
 
     print(f'DANSE computations completed in {np.round(time.perf_counter() - tStartGlobal, 2)} s.')
 
-    import matplotlib.pyplot as plt
-    plt.close()
-    fig = plt.figure(figsize=(10,6))
-    ax = fig.add_subplot(211)
-    for k in range(asc.numNodes):
-        for q in range(estimatedSRO[k].shape[-1] - y[k].shape[-1]):
-            plt.plot(deltaSRO[k][:, y[k].shape[-1] + q]/numFreqLines * 1e6, '.-', color=f'C{k}', label=f'$\\hat{{\\varepsilon}}(k={k+1}, q={neighbourNodes[k][q] + 1})$')
-            # plt.plot(estimatedSRO[k][:, y[k].shape[-1] + q]/numFreqLines * 1e6, '.-', color=f'C{k}', label=f'$\\hat{{\\varepsilon}}(k={k+1}, q={neighbourNodes[k][q] + 1})$')
-    plt.axhline(0, color='k', linestyle=':')
-    plt.xlabel('DANSE iteration')
-    plt.legend()
-    plt.ylabel('$\\Delta\\hat{\\varepsilon}$ [ppm]')
-    ax = fig.add_subplot(212)
-    for k in range(asc.numNodes):
-        plt.plot(varphi[k][:, y[k].shape[-1]])
-    plt.tight_layout()
-    plt.show()
-    stop = 1
-
-    plt.close()
-    plt.plot(phiVect)
+    # import matplotlib.pyplot as plt
+    # plt.close()
+    # fig = plt.figure(figsize=(10,6))
+    # ax = fig.add_subplot(211)
+    # for k in range(asc.numNodes):
+    #     for q in range(estimatedSRO[k].shape[-1] - y[k].shape[-1]):
+    #         plt.plot(deltaSRO[k][:, y[k].shape[-1] + q]/numFreqLines * 1e6, '.-', color=f'C{k}', label=f'$\\hat{{\\varepsilon}}(k={k+1}, q={neighbourNodes[k][q] + 1})$')
+    #         # plt.plot(estimatedSRO[k][:, y[k].shape[-1] + q]/numFreqLines * 1e6, '.-', color=f'C{k}', label=f'$\\hat{{\\varepsilon}}(k={k+1}, q={neighbourNodes[k][q] + 1})$')
+    # plt.axhline(0, color='k', linestyle=':')
+    # plt.xlabel('DANSE iteration')
+    # plt.legend()
+    # plt.ylabel('$\\Delta\\hat{\\varepsilon}$ [ppm]')
+    # ax = fig.add_subplot(212)
+    # for k in range(asc.numNodes):
+    #     plt.plot(varphi[k][:, y[k].shape[-1]])
+    # plt.tight_layout()
+    # plt.show()
+    # stop = 1
 
     return d, wkk, gkmk, z
