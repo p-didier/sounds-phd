@@ -38,7 +38,7 @@ def run_experiment(settings: classes.ProgramSettings):
     mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
 
     # DANSE
-    mySignals.desiredSigEst_STFT = danse(mySignals.sensorSignals_STFT, asc, settings, mySignals.VAD)
+    mySignals.desiredSigEst_STFT = danse(mySignals, asc, settings)
 
     # --------------- Post-process ---------------
     # Back to time-domain
@@ -237,13 +237,6 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
         Time vector.
     """
     
-    # mySignal = calcISTFT(mySignal_STFT,
-    #                     win=np.hanning(settings.stftWinLength), 
-    #                     N_STFT=settings.stftWinLength, 
-    #                     R_STFT=settings.stftEffectiveFrameLen, 
-    #                     sides='onesided')
-    # t = np.arange(mySignal.shape[0]) / fs
-
     for channel in range(X.shape[-1]):
         _, tmp = sig.istft(X[:, :, channel], 
                                     fs=fs,
@@ -266,20 +259,17 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     return x, t
 
 
-def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, algtype='DANSE'):
+def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
     """Main wrapper for DANSE computations.
+
     Parameters
     ----------
-    y_STFT : [Nf x Nt x Ns] np.ndarray (complex)
-        The microphone signals in the STFT domain.
+    signals : Signals object
+        The microphone signals and their relevant attributes.
     asc : AcousticScenario object
         Processed data about acoustic scenario (RIRs, dimensions, etc.).
     settings : ProgramSettings object
         The settings for the current run.
-    oVAD : [N x 1] np.ndarray (bool /or/ int)
-        Voice Activity Detector output.
-    algtype : str
-        Type of DANSE algorithm to use ("DANSE", "GEVD-DANSE", ...)
 
     Returns
     -------
@@ -287,18 +277,8 @@ def danse(y_STFT, asc: classes.AcousticScenario, settings: classes.ProgramSettin
         STFT representation of the desired signal at each of the Nn nodes. 
     """
 
-    # Compute frame-wise VAD
-    oVADframes = np.zeros((y_STFT.shape[1]), dtype=bool)
-    for ii in range(y_STFT.shape[1]):
-        VADinFrame = oVAD[ii * settings.stftEffectiveFrameLen : (ii + 1) * settings.stftEffectiveFrameLen - 1]
-        nZeros = sum(VADinFrame == 0)
-        oVADframes[ii] = nZeros <= settings.stftEffectiveFrameLen / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
-
     # DANSE it up
-    if algtype == 'DANSE': 
-        desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
-    elif algtype == 'GEVD-DANSE': 
-        desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(y_STFT, asc, settings, oVADframes)
+    desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
     
     return desiredSigEst_STFT
 
