@@ -7,7 +7,6 @@ import scipy.signal as sig
 from pathlib import Path, PurePath
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
-import warnings
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -15,7 +14,6 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 sys.path.append(f'{pathToRoot}/_general_fcts')
 from plotting.twodim import *
-from mySTFT.calc_STFT import calcISTFT
 import VAD
 from metrics import eval_enhancement
 
@@ -35,8 +33,6 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
-
-    # mySignals.plot_signals(0,0,settings)
 
     # Convert all DANSE input signals to the STFT domain
     mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
