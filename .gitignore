@@ -6761,3 +6761,6 @@
 02_data/01_acoustic_scenarios/J5Mk1_Ns2_Nn3/AS3_anechoic.csv
 02_data/01_acoustic_scenarios/J5Mk1_Ns2_Nn3/AS4_anechoic.csv
 02_data/01_acoustic_scenarios/J5Mk1_Ns2_Nn3/AS5_anechoic.csv
+*.pkl.gz
+*.wav
+*.csv
