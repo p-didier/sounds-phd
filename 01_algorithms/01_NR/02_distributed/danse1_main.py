@@ -38,7 +38,7 @@ def main():
         expAvgBeta=0.98,
         minNumAutocorrUpdates=10,
         initialWeightsAmplitude=1,
-        performGEVD=True,               # set to True for GEVD-DANSE
+        performGEVD=1,               # set to True for GEVD-DANSE
         SROsppm=[0, 0, 0],                 # SRO
         compensateSROs=True,            # if True, estimate + compensate SRO dynamically
         )

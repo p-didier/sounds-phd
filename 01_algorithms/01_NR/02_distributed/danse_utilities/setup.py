@@ -20,6 +20,7 @@ from metrics import eval_enhancement
 
 def run_experiment(settings: classes.ProgramSettings):
     """Wrapper - runs a DANSE experiment given certain settings.
+    
     Parameters
     ----------
     settings : ProgramSettings object
@@ -56,7 +57,8 @@ def run_experiment(settings: classes.ProgramSettings):
 
 
 def resample_for_sro(x, baseFs, SROppm):
-    """Resamples a vector given an SRO and a base sampling frequency
+    """Resamples a vector given an SRO and a base sampling frequency.
+
     Parameters
     ----------
     x : [N x 1] np.ndarray
@@ -157,6 +159,7 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
 
 def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, minNumDANSEupdates=10):
     """Wrapper for computing and storing evaluation metrics after signal enhancement.
+
     Parameters
     ----------
     sigs : Signals object
@@ -221,6 +224,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
 def get_istft(X, fs, settings: classes.ProgramSettings):
     """Derives STFT-domain signals' time-domain representation
     given certain settings.
+
     Parameters
     ----------
     X : [Nf x Nt x C] np.ndarray (complex)
@@ -278,7 +282,7 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     """
 
     # DANSE it up
-    desiredSigEst_STFT, wkk, gkmk, z = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
+    desiredSigEst_STFT, z = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
     
     return desiredSigEst_STFT
 
@@ -290,6 +294,7 @@ def whiten(sig):
 
 def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
     """Truncates/extends, resamples, centers, and scales a signal to match a target.
+
     Parameters
     ----------
     rawSignal : [N_in x 1] np.ndarray

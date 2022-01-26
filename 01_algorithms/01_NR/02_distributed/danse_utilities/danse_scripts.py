@@ -7,6 +7,7 @@ import scipy
 import scipy.signal
 from . import classes
 
+
 """
 References:
  - [1]: Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific 
@@ -45,17 +46,6 @@ def check_autocorr_est(Ryy, Rnn, nUpRyy=0, nUpRnn=0, min_nUp=0):
     if np.linalg.matrix_rank(Ryy) == Ryy.shape[0] and np.linalg.matrix_rank(Rnn) == Rnn.shape[0]:
         # Sufficient number of updates to get reasonable result
         if nUpRyy >= min_nUp and nUpRnn >= min_nUp:
-            # # Positive definiteness
-            # try:
-            #     np.linalg.cholesky(Ryy)
-            # except np.linalg.LinAlgError:
-            #     flag = False
-            # else:
-            #     try:
-            #         np.linalg.cholesky(Rnn)
-            #     except np.linalg.LinAlgError:
-            #         flag = False
-            #     else:
             flag = True
     return flag
 
@@ -161,15 +151,15 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
     ryd = []            # per-node list of cross-correlation vectors
     Ryy = []            # per-node list of signal+noise autocorrelation matrices
     dimYTilde = np.zeros(asc.numNodes, dtype=int)  # dimension of \tilde{y}_k: M_k + |\mathcal{Q}_k|
-    numFreqLines = int(frameSize / 2)
+    numFreqLines = int(frameSize / 2 + 1)
     for k in range(asc.numNodes):
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1) + len(neighbourNodes[k])
-        w.append(rng.random(size=(numIterations, numFreqLines, dimYTilde[k])) +\
-            1j * rng.random(size=(numIterations, numFreqLines, dimYTilde[k])))
-        y.append(np.zeros((numIterations, frameSize, sum(asc.sensorToNodeTags == k + 1))))
-        z.append(np.zeros((numIterations, frameSize, len(neighbourNodes[k])), dtype=complex))
-        ytilde.append(np.zeros((numIterations, frameSize, dimYTilde[k]), dtype=complex))
-        ytilde_hat.append(np.zeros((numIterations, numFreqLines, dimYTilde[k]), dtype=complex))
+        w.append(rng.random(size=(numFreqLines, numIterations, dimYTilde[k])) +\
+            1j * rng.random(size=(numFreqLines, numIterations, dimYTilde[k])))
+        y.append(np.zeros((frameSize, numIterations, sum(asc.sensorToNodeTags == k + 1))))
+        z.append(np.zeros((frameSize, numIterations, len(neighbourNodes[k])), dtype=complex))
+        ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
+        ytilde_hat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
         slice = np.zeros((dimYTilde[k], dimYTilde[k]), dtype=complex)       # single autocorrelation matrix init
         Rnn.append(np.tile(slice, (numFreqLines, 1, 1)))                    # noise only
@@ -181,60 +171,105 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
     # Desired signal estimate [frames x frequencies x nodes]
-    d = np.zeros((numIterations, numFreqLines, asc.numNodes), dtype=complex)
+    d = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)
 
-    u = 0
+    # Plot handles
+    showPlots = False
+    if showPlots:
+        import matplotlib.pyplot as plt
+        fig1 = plt.figure(figsize=(8,4))
+        timeVector = np.arange(totalNumSamples) / asc.samplingFreq
+
+    u = 1       # init updating node number
     for i in range(numIterations):
-        print(f'DANSE -- Iteration {i + 1}/{numIterations}...')
+        print(f'DANSE -- Iteration {i + 1}/{numIterations} -- Updating node #{u}...')
         for k in range(asc.numNodes):
-
-            # Identify local sensors
-            idxLocalSensors = asc.sensorToNodeTags == k + 1
             # Select time samples for current frame
             idxSamplesFrame = np.arange(i * frameSize, (i + 1) * frameSize)
             # Collect local observations
-            y[k][i, :, :] = yin[idxSamplesFrame][:, idxLocalSensors]  # [node idx][iteration, samples, sensors] 
+            y[k][:, i, :] = yin[idxSamplesFrame][:, asc.sensorToNodeTags == k + 1]  # [node idx][iteration, samples, sensors] 
             # Build complete observation vectors
-            ytilde_curr = y[k][i, :, :]
+            ytilde_curr = y[k][:, i, :]
             for idx, q in enumerate(neighbourNodes[k]):
                 # Identify remote sensors
-                idxRemoteSensors = asc.sensorToNodeTags == q + 1
-                yq = yin[idxSamplesFrame][:, idxRemoteSensors]
+                yq = yin[idxSamplesFrame][:, asc.sensorToNodeTags == q + 1]
                 # Go to frequency domain
                 yq_hat = np.fft.fft(yq, frameSize, axis=0)      # <-- np.fft.fft: frequencies are ordered from DC to Nyquist then -Nyquist to -DC (see https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
                 # Keep only positive frequencies
-                yq_hat = yq_hat[:numFreqLines]            # <-- TODO: check if that is correct depending on np.fft.fft definition
+                yq_hat = yq_hat[:numFreqLines]
                 # Compress using filter coefficients
-                zq_hat = np.einsum('ij,ij->i', w[q][i, :, :yq_hat.shape[1]].conj(), yq_hat)  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
+                zq_hat = np.einsum('ij,ij->i', w[q][:, i, :yq_hat.shape[1]].conj(), yq_hat)  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
                 # Format for IFFT 
-                zq_hat = np.concatenate((np.flipud(zq_hat.conj()), zq_hat), axis=0)     # <-- TODO: check if that is correct depending on np.fft.fft definition
+                # zq_hat = np.concatenate((zq_hat, np.flip(zq_hat.conj())), axis=0)
+                zq_hat[0] = zq_hat[0].real      # Set DC to real value
+                zq_hat[-1] = zq_hat[-1].real    # Set Nyquist to real value
+                zq_hat = np.concatenate((zq_hat, np.flip(zq_hat[:-1].conj())[:-1]))
                 # Back to time-domain
-                z[k][i, :, idx] = np.fft.ifft(zq_hat, frameSize)
-                zq = z[k][i, :, idx][:, np.newaxis]  # necessary for np.concatenate
+                z[k][:, i, idx] = np.fft.ifft(zq_hat, frameSize)
+                zq = z[k][:, i, idx][:, np.newaxis]  # necessary for np.concatenate
                 ytilde_curr = np.concatenate((ytilde_curr, zq), axis=1)
-            ytilde[k][i, :, :] = ytilde_curr    # <-- complete observation vectors
+                # Plot
+                if showPlots:
+                    fig1.clf()
+                    yinplot = yin[:, asc.sensorToNodeTags == q + 1]
+                    ax1 = fig1.add_subplot(3, 2, 1)
+                    ax1.plot(timeVector, yinplot[:, 0], 'k')
+                    ax1.plot(timeVector[idxSamplesFrame], yq[:, 0], 'r')
+                    ax1.set(title=f'Frame {i+1}/{numIterations} ({frameSize} samples) - Sensor 1')
+                    ax1.grid()
+                    #
+                    ax1 = fig1.add_subplot(3, 2, 3)
+                    ax1.plot(timeVector[idxSamplesFrame], yq[:, 0], 'r')
+                    ax1.set(title='Zoom on time frame: $y_{q1}$')
+                    ax1.grid()
+                    #
+                    freq = np.arange(yq_hat.shape[0])/yq_hat.shape[0] * asc.samplingFreq / 2
+                    ax1 = fig1.add_subplot(3, 2, 5)
+                    ax1.plot(freq, 20*np.log10(np.abs(yq_hat[:, 0])), 'g')
+                    ax1.set(title='FFT of time frame: $\hat{y}_{q1}$', ylabel='dB')
+                    ax1.grid()
+                    #
+                    ax1 = fig1.add_subplot(3, 2, 2)
+                    ax1.plot(20*np.log10(np.abs(zq_hat[:numFreqLines])), 'b')
+                    ax1.set(title='Compressed signal (freq. domain): $\hat{z}_{q1}$', ylabel='dB')
+                    ax1.grid()
+                    #
+                    ax1 = fig1.add_subplot(3, 2, 4)
+                    ax1.plot(timeVector[idxSamplesFrame], zq[:, 0], 'b')
+                    ax1.set(title='Compressed signal (time domain): $z_{q1}$', ylabel='dB')
+                    ax1.grid()
+                    #
+                    fig1.tight_layout()
+                    fig1.show()
+                stop = 1
+            ytilde[k][:, i, :] = ytilde_curr    # <-- complete observation vectors
             # Go to frequency domain
-            ytilde_hat_curr = np.fft.fft(ytilde[k][i, :, :], frameSize, axis=0)
+            ytilde_hat_curr = np.fft.fft(ytilde[k][:, i, :], frameSize, axis=0)
             # Keep only positive frequencies
-            ytilde_hat[k][i, :, :] = ytilde_hat_curr[:numFreqLines, :]      # <-- TODO: check if that is correct depending on np.fft.fft definition
+            ytilde_hat[k][:, i, :] = ytilde_hat_curr[:numFreqLines, :]
+            # Count autocorrelation matrices updates
+            if oVADframes[i]:
+                numUpdatesRyy[k] += 1
+            else:     
+                numUpdatesRnn[k] += 1
             # Loop over frequency lines
             for kappa in range(numFreqLines):
                 # Autocorrelation matrices update -- eq.(46) in ref.[1] /and-or/ eq.(20) in ref.[2].
                 if oVADframes[i]:
                     Ryy[k][kappa, :, :] = settings.expAvgBeta * Ryy[k][kappa, :, :] + \
-                        (1 - settings.expAvgBeta) * np.outer(ytilde[k][i, kappa, :], ytilde[k][i, kappa, :].conj())  # update signal + noise matrix
+                        (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i, :], ytilde_hat[k][kappa, i, :].conj())  # update signal + noise matrix
                 else:
                     Rnn[k][kappa, :, :] = settings.expAvgBeta * Rnn[k][kappa, :, :] + \
-                        (1 - settings.expAvgBeta) * np.outer(ytilde[k][i, kappa, :], ytilde[k][i, kappa, :].conj())   # update noise-only matrix
+                        (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i, :], ytilde_hat[k][kappa, i, :].conj())   # update noise-only matrix
 
                 #Check quality of autocorrelations estimates
                 if not goodAutocorrMatrices[kappa]:
                     goodAutocorrMatrices[kappa] = check_autocorr_est(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
                             numUpdatesRyy[k], numUpdatesRnn[k], settings.minNumAutocorrUpdates)
 
-                if goodAutocorrMatrices[kappa] and u == k:
+                if goodAutocorrMatrices[kappa] and u == k + 1:
                     if settings.performGEVD:
-                        w[k][i, kappa, :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                        w[k][kappa, i, :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
                                                                 settings.GEVDrank, settings.referenceSensor)
                     else:
                         # Reference sensor selection vector
@@ -243,18 +278,29 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
                         # Cross-correlation matrix update 
                         ryd[k][kappa, :] = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
                         # Update node-specific parameters of node k
-                        w[k][i, kappa, :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
+                        w[k][kappa, i, :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
                 elif i > 1:
                     # Do not update the filter coefficients
-                    w[k][i, kappa, :] = w[k][i-1, kappa, :]
+                    w[k][kappa, i, :] = w[k][kappa, i-1, :]
 
             # Compute desired signal estimate
-            d[i, :, k] = np.einsum('ij,ij->i', w[k][i, :, :].conj(), ytilde_hat[k][i, :, :])  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
+            d[:, i, k] = np.einsum('ij,ij->i', w[k][:, i, :].conj(), ytilde_hat[k][:, i, :])  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
 
-            # Update updating node index
-            u = (u % asc.numNodes) + 1
+        # Update updating node index
+        u = (u % asc.numNodes) + 1
+
             
     stop = 1
+
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(8,4))
+    nodeIdx = 0
+    climhigh = np.amax(20 * np.log10(np.abs(ytilde_hat[nodeIdx][:,:,0])))
+    climlow = np.amin(20 * np.log10(np.abs(ytilde_hat[nodeIdx][:,:,0])))
+    ax = fig.add_subplot(121)
+    ax.pcolormesh(20 * np.log10(np.abs(d[:,:,nodeIdx])), vmax=climhigh, vmin=climlow)
+    ax = fig.add_subplot(122)
+    ax.pcolormesh(20 * np.log10(np.abs(ytilde_hat[nodeIdx][:,:,0])))
     # ---------------------------------------------------------------------------------
 
     # # Extract useful variables
@@ -449,4 +495,4 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
     # # plt.show()
     # # stop = 1
 
-    return d, wkk, gkmk, z
+    return d, z
