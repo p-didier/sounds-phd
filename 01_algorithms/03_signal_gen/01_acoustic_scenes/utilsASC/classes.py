@@ -1,5 +1,5 @@
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,19 +14,19 @@ from plotting.twodim import plot_side_room
 
 
 @dataclass
-class AcousticScenario(object):
+class AcousticScenario():
     """Class for keeping track of acoustic scenario parameters"""
-    rirDesiredToSensors: np.ndarray     # RIRs between desired sources and sensors
-    rirNoiseToSensors: np.ndarray       # RIRs between noise sources and sensors
-    desiredSourceCoords: np.ndarray     # Coordinates of desired sources
-    sensorCoords: np.ndarray            # Coordinates of sensors
-    sensorToNodeTags: np.ndarray        # Tags relating each sensor to its node
-    noiseSourceCoords: np.ndarray       # Coordinates of noise sources
-    roomDimensions: np.ndarray          # Room dimensions   
-    absCoeff: float                     # Absorption coefficient
-    samplingFreq: int                   # Sampling frequency
-    numNodes: int                       # Number of nodes in network
-    distBtwSensors: float               # Distance btw. sensors at one node
+    rirDesiredToSensors: np.ndarray = np.array([1])     # RIRs between desired sources and sensors
+    rirNoiseToSensors: np.ndarray = np.array([1])       # RIRs between noise sources and sensors
+    desiredSourceCoords: np.ndarray = np.array([1])     # Coordinates of desired sources
+    sensorCoords: np.ndarray = np.array([1])            # Coordinates of sensors
+    sensorToNodeTags: np.ndarray = np.array([1])        # Tags relating each sensor to its node
+    noiseSourceCoords: np.ndarray = np.array([1])       # Coordinates of noise sources
+    roomDimensions: np.ndarray = np.array([1])          # Room dimensions   
+    absCoeff: float = 0.                                # Absorption coefficient
+    samplingFreq: int = 16000                           # Sampling frequency
+    numNodes: int = 2                                   # Number of nodes in network
+    distBtwSensors: float = 0.05                        # Distance btw. sensors at one node
 
     def __post_init__(self):
         self.numDesiredSources = self.desiredSourceCoords.shape[0]
@@ -34,44 +34,56 @@ class AcousticScenario(object):
         self.numNoiseSources = self.noiseSourceCoords.shape[0]    
         self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]
         return self
-        
-    @classmethod
-    def load(cls, filename: str):
-        return dataclass_methods.load(cls, filename)
+    
+    # Save and load
+    def load(self, foldername: str):
+        return dataclass_methods.load(self, foldername)
     def save(self, filename: str):
         dataclass_methods.save(self, filename)
 
     def plot(self):
 
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(121)
-        plot_side_room(ax, self.roomDimensions[0:2], 
+        fig, (a0, a1) = plt.subplots(2, 2, gridspec_kw={'height_ratios': [3, 1]})
+        plot_side_room(a0[0], self.roomDimensions[0:2], 
                     self.desiredSourceCoords[:, [0,1]], 
                     self.noiseSourceCoords[:, [0,1]], 
                     self.sensorCoords[:, [0,1]], self.sensorToNodeTags)
-        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
+        a0[0].set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
         #
-        ax = fig.add_subplot(122)
-        plot_side_room(ax, self.roomDimensions[1:], 
+        plot_side_room(a0[1], self.roomDimensions[1:], 
                     self.desiredSourceCoords[:, [1,2]], 
                     self.noiseSourceCoords[:, [1,2]],
                     self.sensorCoords[:, [1,2]],
                     self.sensorToNodeTags)
-        ax.set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
+        a0[1].set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
         # Add info
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        boxText = ''
+        boxText = 'Node distances\n\n'
         for ii in range(self.numNodes):
             for jj in range(self.desiredSourceCoords.shape[0]):
                 d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.desiredSourceCoords[jj,:]))
-                boxText += f'Node {ii + 1}$\\to$D{jj + 1}={np.round(d, 2)}m\n'
+                boxText += f'{ii + 1}$\\to$D{jj + 1}={np.round(d, 2)}m\n'
             for jj in range(self.noiseSourceCoords.shape[0]):
                 d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.noiseSourceCoords[jj,:]))
-                boxText += f'Node {ii + 1}$\\to$N{jj + 1}={np.round(d, 2)}m\n'
+                boxText += f'{ii + 1}$\\to$N{jj + 1}={np.round(d, 2)}m\n'
+            boxText += '\n'
         boxText = boxText[:-1]
-        ax.text(1.1, 0.9, boxText, transform=ax.transAxes, fontsize=10,
+        a0[1].text(1.1, 0.9, boxText, transform=a0[1].transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
-        #
+        # Plot RIRs
+        t = np.arange(self.rirDesiredToSensors.shape[0]) / self.samplingFreq
+        ymax = np.amax([np.amax(self.rirDesiredToSensors[:, 0, 0]), np.amax(self.rirNoiseToSensors[:, 0, 0])])
+        ymin = np.amin([np.amin(self.rirDesiredToSensors[:, 0, 0]), np.amin(self.rirNoiseToSensors[:, 0, 0])])
+        a1[0].plot(t, self.rirDesiredToSensors[:, 0, 0], 'k')
+        a1[0].grid()
+        a1[0].set(xlabel='$t$ [s]', title=f'RIR node 1 - D1')
+        a1[0].set_ylim([ymin, ymax])
+        a1[1].plot(t, self.rirNoiseToSensors[:, 0, 0], 'k')
+        a1[1].grid()
+        a1[1].set(xlabel='$t$ [s]', title=f'RIR node 1 - N1')
+        a1[1].set_ylim([ymin, ymax])
+        a1[1].text(1.1, 0.9, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}', transform=a1[1].transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
         fig.tight_layout()
         return fig
 

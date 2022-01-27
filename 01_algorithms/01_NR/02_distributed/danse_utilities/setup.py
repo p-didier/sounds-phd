@@ -5,6 +5,7 @@ import pandas as pd
 import soundfile as sf
 import scipy.signal as sig
 from pathlib import Path, PurePath
+
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
 # Find path to root folder
@@ -16,6 +17,8 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 from plotting.twodim import *
 import VAD
 from metrics import eval_enhancement
+sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
+from utilsASC.classes import AcousticScenario
 
 
 def run_experiment(settings: classes.ProgramSettings):
@@ -342,9 +345,7 @@ def generate_signals(settings: classes.ProgramSettings):
     """
 
     # Load acoustic scenario
-    asc = load_acoustic_scenario(settings.acousticScenarioPath,
-                                settings.plotAcousticScenario,
-                                settings.acScenarioPlotExportPath)
+    asc = AcousticScenario().load(settings.acousticScenarioPath)
 
     # Detect conflicts
     if asc.numDesiredSources > len(settings.desiredSignalFile):
@@ -432,98 +433,3 @@ def generate_signals(settings: classes.ProgramSettings):
         raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
 
     return signals, asc
-
-
-def load_acoustic_scenario(csvFilePath, plotScenario=False, figExportPath=''):
-    """Reads, interprets, and organizes a CSV file
-    containing an acoustic scenario and returns its 
-    contents.
-    Parameters
-    ----------
-    csvFilePath : str
-        Path to CSV file.   
-    plotScenario : bool
-        If true, plot visualization of acoustic scenario.       
-    figExportPath : str
-        Path to directory where to export the figure (only used if plotScenario is True).        
-
-    Returns
-    -------
-    acousticScenario : AcousticScenario object
-        Processed data about acoustic scenario (RIRs, dimensions, etc.).
-    """
-    # Check whether path exists
-    if not os.path.isfile(csvFilePath):
-        raise ValueError(f'The path provided\n\t\t"{csvFilePath}"\ndoes not correspond to an existing file.')
-
-    # Load dataframe
-    acousticScenario_df = pd.read_csv(csvFilePath,index_col=0)
-
-    # Count sources and receivers
-    numSpeechSources = sum('Source' in s for s in acousticScenario_df.index)       # number of speech sources
-    numNoiseSources  = sum('Noise' in s for s in acousticScenario_df.index)         # number of noise sources
-    numSensors       = sum('Sensor' in s for s in acousticScenario_df.index)        # number of sensors
-
-    # Extract single-valued data
-    roomDimensions   = [f for f in acousticScenario_df.rd if not np.isnan(f)]               # room dimensions
-    absCoeff         = [f for f in acousticScenario_df.alpha if not np.isnan(f)]            # absorption coefficient
-    absCoeff         = absCoeff[1]
-    samplingFreq     = [f for f in acousticScenario_df.Fs if not np.isnan(f)]               # sampling frequency
-    samplingFreq     = int(samplingFreq[1])
-    numNodes         = [f for f in acousticScenario_df.nNodes if not np.isnan(f)]           # number of nodes
-    numNodes         = int(numNodes[1])
-    distBtwSensors   = [f for f in acousticScenario_df.d_intersensor if not np.isnan(f)]    # inter-sensor distance
-    distBtwSensors   = int(distBtwSensors[1])
-
-    # Extract coordinates
-    desiredSourceCoords = np.zeros((numSpeechSources,3))
-    for ii in range(numSpeechSources):      # desired sources
-        desiredSourceCoords[ii,0] = acousticScenario_df.x[f'Source {ii + 1}']
-        desiredSourceCoords[ii,1] = acousticScenario_df.y[f'Source {ii + 1}']
-        desiredSourceCoords[ii,2] = acousticScenario_df.z[f'Source {ii + 1}']
-    sensorCoords = np.zeros((numSensors,3))
-    for ii in range(numSensors):            # sensors
-        sensorCoords[ii,0] = acousticScenario_df.x[f'Sensor {ii + 1}']
-        sensorCoords[ii,1] = acousticScenario_df.y[f'Sensor {ii + 1}']
-        sensorCoords[ii,2] = acousticScenario_df.z[f'Sensor {ii + 1}']
-    noiseSourceCoords = np.zeros((numNoiseSources,3))
-    for ii in range(numNoiseSources):       # noise sources
-        noiseSourceCoords[ii,0] = acousticScenario_df.x[f'Noise {ii + 1}']
-        noiseSourceCoords[ii,1] = acousticScenario_df.y[f'Noise {ii + 1}']
-        noiseSourceCoords[ii,2] = acousticScenario_df.z[f'Noise {ii + 1}']
-
-    # Prepare arrays to extract RIRs
-    rirLength = int(1/numNodes * sum('h_sn' in s for s in acousticScenario_df.index))    # number of samples in one RIR
-    rirDesiredToSensors = np.zeros((rirLength, numSensors, numSpeechSources))
-    rirNoiseToSensors = np.zeros((rirLength, numSensors, numNoiseSources))
-
-    # Identify dataframe columns containing RIR data
-    idxDataColumns = [ii for ii in range(len(acousticScenario_df.columns)) if acousticScenario_df.columns[ii][:4] == 'Node']
-    tagsSensors = np.zeros(numSensors, dtype=int)  # tags linking sensor to node
-
-    # Start RIRs extraction from dataframe
-    for idxEnum, idxColumn in enumerate(idxDataColumns):
-        ref = acousticScenario_df.columns[idxColumn]
-        nodeNumber = ref[4]
-        sensorData = acousticScenario_df[ref]
-        for jj in range(numSpeechSources):
-            tmp = sensorData[f'h_sn{jj + 1}'].to_numpy()
-            rirDesiredToSensors[:,idxEnum,jj] = tmp[~np.isnan(tmp)]    # source-to-node RIRs
-        for jj in range(numNoiseSources):
-            tmp = sensorData[f'h_nn{jj + 1}'].to_numpy()
-            rirNoiseToSensors[:,idxEnum,jj] = tmp[~np.isnan(tmp)]    # noise-to-node RIRs
-        tagsSensors[idxEnum] = nodeNumber
-
-    acousticScenario = classes.AcousticScenario(rirDesiredToSensors, rirNoiseToSensors,
-                                                desiredSourceCoords, sensorCoords, tagsSensors, noiseSourceCoords,
-                                                roomDimensions, absCoeff,
-                                                samplingFreq, numNodes, distBtwSensors)
-
-    # Make a plot of the acoustic scenario
-    if plotScenario:
-        fig = acousticScenario.plot()
-        fig.suptitle(csvFilePath[csvFilePath.rfind('/', 0, csvFilePath.rfind('/')) + 1:-4])
-        plt.tight_layout()
-
-    return acousticScenario
-

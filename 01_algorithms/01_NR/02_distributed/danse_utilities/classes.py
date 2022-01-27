@@ -39,7 +39,7 @@ class SamplingRateOffsets:
 class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
     # Signal generation parameters
-    acousticScenarioPath: str = ''          # path to acoustic scenario CSV file to be used
+    acousticScenarioPath: str = ''          # path to acoustic scenario to be used
     signalDuration: float = 1               # total signal duration [s]
     desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
     noiseSignalFile: list[str] = field(default_factory=list)              # list of paths to noise signal file(s)
@@ -70,9 +70,6 @@ class ProgramSettings(object):
 
     def __post_init__(self) -> None:
         # Checks on class attributes
-        if self.acousticScenarioPath[-4:] != '.csv':
-            self.acousticScenarioPath += '.csv'
-            print('Automatically appended ".csv" to string setting "acousticScenarioPath".')
         self.stftEffectiveFrameLen = int(self.stftWinLength * self.stftFrameOvlp)
         if 0. not in self.SROsppm:
             raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')

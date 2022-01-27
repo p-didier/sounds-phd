@@ -6,7 +6,7 @@
 #%%
 import ASgen
 import sys
-from utils.classes import ASCProgramSettings
+from utilsASC.classes import ASCProgramSettings
 import itertools
 import numpy as np
 from pathlib import Path, PurePath
@@ -34,7 +34,7 @@ rtPoor = 0.6    # quite reverberant
 rtMedium = 0.2  # a little reverberant
 rtGood = 0      # anechoic
 # Number of good-medium-poor scenarios to generate
-nAS = 1
+nAS = 10
 # Export folder
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/validations'
 
@@ -57,7 +57,7 @@ for idxRT in range(len(rts)):
 # ---------------------------------
 
 
-def main(experiments):
+def main(experiments, seed):
     """Wrapper for automated acoustic scenario generation.
     
     Parameters
@@ -66,19 +66,19 @@ def main(experiments):
         Each element of <experiments> is a dictionary containing
         an ASCProgramSettings object ("sets" key) and an export
         path string ("path" key).
+    seed : int
+        Global random generator seed (used to generate random sub-generators, one for each ASC)
     """
 
     for idxExp in range(len(experiments)):
-        print(f'ACOUSTIC SCENARIOS AUTOMATED GENERATION {idxExp + 1}/{len(experiments)}...\n')
-        ASgen.main(experiments[idxExp]['sets'], experiments[idxExp]['path'])
+        print(f'\nACOUSTIC SCENARIOS AUTOMATED GENERATION {idxExp + 1}/{len(experiments)}...\n')
+        ASgen.main(experiments[idxExp]['sets'], experiments[idxExp]['path'], globalSeed=seed)
     print('DONE.')
 
     return None
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(experiments))
+    sys.exit(main(experiments, seed))
 # ------------------------------------------------------------------------------------
 
-# %%
-''

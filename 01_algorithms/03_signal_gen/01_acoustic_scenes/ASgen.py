@@ -9,13 +9,15 @@ import os, sys
 from pathlib import Path, PurePath
 from scipy.spatial.transform import Rotation as rot
 from rimPypack.rimPy import rimPy
+import matplotlib
+matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
 while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 sys.path.append(f'{pathToRoot}/_general_fcts')
-from utils.classes import *
+from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
@@ -26,7 +28,7 @@ sets = ASCProgramSettings(
     numSpeechSources = 1,               # nr. of speech sources
     numNoiseSources = 1,                # nr. of noise sources
     numNodes = 2,                       # nr. of nodes
-    numSensorPerNode = 5,               # nr. of sensor per node,
+    numSensorPerNode = 1,               # nr. of sensor per node,
     # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
@@ -35,9 +37,10 @@ sets = ASCProgramSettings(
 )
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
 plotit = True  
+exportit = False
+globalSeed = 12345
 
-
-def main(sets, basepath, plotit=True):
+def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     """Main wrapper for acoustic scenarios generation.
     
     Parameters
@@ -46,35 +49,48 @@ def main(sets, basepath, plotit=True):
         Settings for the generation of a specific acoustic scenario (ASC).
     basepath : str
         Base directory where to export the ASC data.
+    globalSeed : int
+        Global random generator seed (used to generate random sub-generators, one for each ASC)
     plotit: bool
         If True, plots the ASC in figure.
+    exportit: bool
+        If True, export the ASC, settings, and figures.
     """
 
-    # Prepare export
+    # Create random generator
+    rngGlobal = np.random.default_rng(globalSeed)
+
+    # Export folder
     expFolder = f"{basepath}/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    if sets.revTime == 0:
+        expFolder += '_anechoic'
+    else:
+        expFolder += f'_RT{int(sets.revTime * 1e3)}ms'
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
-    nas = len(next(os.walk(expFolder))[2])   # count only files in export dir
-    fname = f"{expFolder}/AS{nas}"  # file name
-    if sets.revTime == 0:
-        fname += '_anechoic'
-    else:
-        fname += f'_RT{int(sets.revTime * 1e3)}ms'
 
     # Generate scenarios
     counter = 0 # counter the number of acoustic scenarios generated
     while counter < sets.numScenarios:
         print(f'Generating ASC {counter + 1}/{sets.numScenarios}...')
+        # Get sub-seed
+        sets.seed = rngGlobal.integers(low=0, high=9999, size=1)
         # Generate RIRs
         asc = genAS(sets)
+        
+        # Folder name
+        nas = len(next(os.walk(expFolder))[1])   # count only files in export dir
+        foldername = f"{expFolder}/AS{nas + 1}"  # file name
         # Export
-        asc.save(f'{expFolder}/AS{nas}')
-        sets.save(f'{expFolder}/AS{nas}')
+        if exportit:
+            asc.save(foldername)
+            sets.save(foldername)
         # Plot
         if plotit:
             fig = asc.plot()
-            fig.savefig(f'{expFolder}/AS{nas}/schematic.pdf')
-            fig.savefig(f'{expFolder}/AS{nas}/schematic.png')
+            if exportit:
+                fig.savefig(f'{foldername}/schematic.pdf')
+                fig.savefig(f'{foldername}/schematic.png')
             fig.show()
         counter += 1
 
@@ -231,5 +247,5 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(sets, basepath, plotit))
+    sys.exit(main(sets, basepath, plotit, exportit))
 # ------------------------------------------------------------------------------------

@@ -23,7 +23,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 
 # Set experiment settings
 mySettings = ProgramSettings(
-    acousticScenarioPath=f'{ascBasePath}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/validations/J2Mk[3, 2]_Ns1_Nn1/AS0',
     # acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],

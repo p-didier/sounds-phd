@@ -16,14 +16,11 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 # ------------------------
 
 # General parameters
-ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
+ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios/validations'
 signalsPath = f'{Path(__file__).parent}/validations/signals'
 
-# Subfolder where acoustic scenarios are stored
-ascSubdir = 'validations'
-
 # List all acoustic scenarios folders
-acousticScenarios = list(Path(f'{ascBasePath}/{ascSubdir}').iterdir())
+acousticScenarios = list(Path(ascBasePath).iterdir())
 # List all sound files
 speechFiles = [f for f in Path(f'{signalsPath}/speech').glob('**/*') if f.is_file()]
 noiseFiles = [f for f in Path(f'{signalsPath}/noise').glob('**/*') if f.is_file()]
