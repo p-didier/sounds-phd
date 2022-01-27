@@ -17,32 +17,39 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 from playsounds.playsounds import playwavfile
 # ------------------------
 
-def main():
-    """Main function for DANSE runs"""
-    # General parameters
-    ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
-    signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
+# General parameters
+ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
+signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 
-    # Set experiment settings
-    mySettings = ProgramSettings(
-        acousticScenarioPath=f'{ascBasePath}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
-        # acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
-        desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
-        noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-        signalDuration=10,
-        baseSNR=0,
-        plotAcousticScenario=False,
-        timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE filter updates
-        VADwinLength=40e-3,             # VAD window length [s]
-        VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
-        expAvgBeta=0.98,
-        minNumAutocorrUpdates=10,
-        initialWeightsAmplitude=1,
-        performGEVD=1,               # set to True for GEVD-DANSE
-        SROsppm=[0, 0, 0],                 # SRO
-        compensateSROs=True,            # if True, estimate + compensate SRO dynamically
-        )
-    print(mySettings)
+# Set experiment settings
+mySettings = ProgramSettings(
+    acousticScenarioPath=f'{ascBasePath}/J3Mk[1, 2, 3]_Ns1_Nn1/AS0_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
+    desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
+    noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
+    signalDuration=10,
+    baseSNR=0,
+    plotAcousticScenario=False,
+    timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE filter updates
+    VADwinLength=40e-3,             # VAD window length [s]
+    VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
+    expAvgBeta=0.98,
+    minNumAutocorrUpdates=10,
+    initialWeightsAmplitude=1,
+    performGEVD=1,               # set to True for GEVD-DANSE
+    SROsppm=[0, 0, 0],                 # SRO
+    compensateSROs=True,            # if True, estimate + compensate SRO dynamically
+    )
+# ------------------------
+
+def main(mySettings):
+    """Main function for DANSE runs.
+
+    Parameters
+    ----------
+    mySettings : ProgramSettings object
+        Experiment settings.    
+    """
 
     experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment name
     exportPath = f'{Path(__file__).parent}/res/{experimentName}'
@@ -54,10 +61,12 @@ def main():
         if val == 'y' or val == 'Y':
             runExpFlag = True
             print(f'\nRe-running experiment "{PurePath(exportPath).name}" ...\n')
+            print(mySettings)
         else:
             print('\nNot re-running experiment.\n')
     else:
         runExpFlag = True
+        print(mySettings)
     
     if runExpFlag:
         # Run experiment
@@ -68,6 +77,8 @@ def main():
 
     # Post-process
     get_figures_and_sound(exportPath, mySettings, showPlots=1, listen=False)
+
+    return None
 
 
 def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False, listeningMaxDuration=5.):
@@ -149,5 +160,5 @@ def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(mySettings))
 # ------------------------------------------------------------------------------------

@@ -1,10 +1,12 @@
 # %%
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Acoustic Scenario (AS) generation script.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 import numpy as np
-import matplotlib.pyplot as plt
 import os, sys
-import pandas as pd
 from pathlib import Path, PurePath
-from dataclasses import dataclass
 from scipy.spatial.transform import Rotation as rot
 from rimPypack.rimPy import rimPy
 # Find path to root folder
@@ -13,132 +15,89 @@ pathToRoot = Path(__file__)
 while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 sys.path.append(f'{pathToRoot}/_general_fcts')
-from plotting.threedim import plot_room
-from class_methods import dataclass_methods 
+from utils.classes import *
+
+# Define settings
+sets = ASCProgramSettings(
+    numScenarios = 1,                   # Number of AS to generate
+    samplingFrequency = 16e3,           # Sampling frequency [samples/s]
+    rirLength = 2**12,                  # RIR length [samples]
+    roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
+    numSpeechSources = 1,               # nr. of speech sources
+    numNoiseSources = 1,                # nr. of noise sources
+    numNodes = 2,                       # nr. of nodes
+    numSensorPerNode = 5,               # nr. of sensor per node,
+    # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
+    arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
+    sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
+    revTime = 0.2,                      # reverberation time [s]
+    seed = 12345                        # seed for random generator
+)
+basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
+plotit = True  
 
 
-# Acoustic Scenario (AS) generation script.
-
-def main():
-
-    # Define settings
-    sets = ProgramSettings(
-        numScenarios = 1,                   # Number of AS to generate
-        samplingFrequency = 16e3,           # Sampling frequency [samples/s]
-        rirLength = 2**12,                  # RIR length [samples]
-        roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
-        numSpeechSources = 1,               # nr. of speech sources
-        numNoiseSources = 1,                # nr. of noise sources
-        numNodes = 2,                       # nr. of nodes
-        numSensorPerNode = 5,               # nr. of sensor per node,
-        # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
-        arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
-        sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-        revTime = 0.2,                      # reverberation time [s]
-        seed = 12345                        # seed for random generator
-    )
-
-    # Local booleans
-    plotit = True        # If true, plots the AS
+def main(sets, basepath, plotit=True):
+    """Main wrapper for acoustic scenarios generation.
+    
+    Parameters
+    ----------
+    sets : ASCProgramSettings object
+        Settings for the generation of a specific acoustic scenario (ASC).
+    basepath : str
+        Base directory where to export the ASC data.
+    plotit: bool
+        If True, plots the ASC in figure.
+    """
 
     # Prepare export
-    expFolder = f"{pathToRoot}/02_data/01_acoustic_scenarios/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    expFolder = f"{basepath}/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
     nas = len(next(os.walk(expFolder))[2])   # count only files in export dir
     fname = f"{expFolder}/AS{nas}"  # file name
     if sets.revTime == 0:
         fname += '_anechoic'
-    fname += '.csv'
+    else:
+        fname += f'_RT{int(sets.revTime * 1e3)}ms'
 
     # Generate scenarios
     counter = 0 # counter the number of acoustic scenarios generated
     while counter < sets.numScenarios:
-        
+        print(f'Generating ASC {counter + 1}/{sets.numScenarios}...')
         # Generate RIRs
-        h_ns, h_nn, rs, rn, r, tags, rd, alpha = genAS(sets, plotit=plotit)
-        
-        # Prepare header for CSV export
-        header = {'rd': pd.Series(np.squeeze(rd)),
-                    'alpha': alpha,
-                    'Fs': sets.samplingFrequency,
-                    'nNodes': sets.numNodes, 
-                    'd_intersensor': sets.sensorSeparation}
-        #  
-        export_data(h_ns, h_nn, header, rs, rn, r, tags, fname)
-        sets.save(f'{expFolder}/simulSettings_AS{nas}')      # Save settings for potential re-run
-
+        asc = genAS(sets)
+        # Export
+        asc.save(f'{expFolder}/AS{nas}')
+        sets.save(f'{expFolder}/AS{nas}')
+        # Plot
+        if plotit:
+            fig = asc.plot()
+            fig.savefig(f'{expFolder}/AS{nas}/schematic.pdf')
+            fig.savefig(f'{expFolder}/AS{nas}/schematic.png')
+            fig.show()
         counter += 1
 
-    print('\n\nAll done.')
+    print('All done.')
 
-    return h_ns, h_nn
+    return None
         
 
-class micArrayAttributes:
-    def __init__(self, Mk, arraygeom, mic_sep):
-        self.Mk = Mk
-        self.array = arraygeom
-        self.mic_sep = mic_sep
-
-@dataclass
-class ProgramSettings:
-    """Class for keeping track of global simulation settings"""
-    roomDimBounds: list                             # [smallest, largest] room dimension possible [m]
-    numScenarios: int = 1                           # number of AS to generate
-    samplingFrequency: int = 16e3                   # sampling frequency [samples/s]
-    rirLength: int = 2**12                          # RIR length [samples]
-    numSpeechSources: int = 1                       # nr. of speech sources
-    numNoiseSources: int = 1                        # nr. of noise sources
-    numNodes: int = 3                               # nr. of nodes
-    numSensorPerNode: np.ndarray = np.array([1])    # nr. of sensor per node
-    revTime: float = 0.0                            # reverberation time [s]
-    arrayGeometry: str = 'linear'                   # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation: float = 0.05                  # separation between sensor in array (only used if numSensorPerNode > 1)
-    seed: int = 12345                               # seed for random generator
-    
-    @classmethod
-    def load(cls, filename: str):
-        return dataclass_methods.load(cls, filename)
-    def save(self, filename: str):
-        dataclass_methods.save(self, filename)
-    
-    def __post_init__(self):
-        """Initial program settings checks"""
-        if isinstance(self.numSensorPerNode, int):  # case where all nodes have the same number of sensors
-            self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode)
-        elif len(self.numSensorPerNode) == 1:       # case where all nodes have the same number of sensors
-            self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode[0])
-        elif len(self.numSensorPerNode) != self.numNodes:
-            raise ValueError('Each node should have a number of nodes assigned to it.')
-        return self
-
-
-def genAS(sets: ProgramSettings,plotit=False):
+def genAS(sets: ASCProgramSettings):
     """Computes the RIRs in a rectangular cavity where sensors, speech
     sources, and noise sources are present.
 
     Parameters
     ----------
-    sets : classes.ProgramSettings object.
+    sets : ASCProgramSettings object.
         The settings for the current run.
     plotit : bool.
         If true, plots the scenario in a figure.
 
     Returns
     -------
-    rirSpeechToNodes : [RIR_l x J x Ns] array of complex floats
-        RIRs between desired sources and sensors.  
-    rirNoiseToNodes : [RIR_l x J x Nn] array of complex floats
-        RIRs between noise sources and sensors.
-    speechSourceCoords : [Ns x 3] array of real floats
-        Speech source(s) coordinates [m].
-    noiseSourceCoords : [Nn x 3] array of real floats
-        Noise source(s) coordinates [m].
-    nodesCoords : [J x 3] array of real floats
-        Node(s) coordinates [m].
-    roomDimensions : [3,] list of real floats
-        Room dimensions [m].
+    acousticScenario : AcousticScenario object
+        Acoustic scenario (ASC).
     """
 
     # Create random generator
@@ -179,17 +138,6 @@ def genAS(sets: ProgramSettings,plotit=False):
         # Assign node tag
         sensorNodeTags[idxStart : idxEnd] = ii + 1
 
-    # If asked, show geometry on plot
-    if plotit:
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        plot_room(ax, roomDimensions)
-        ax.scatter(sensorsCoords[:,0],sensorsCoords[:,1],sensorsCoords[:,2], c='green')
-        ax.scatter(speechSourceCoords[:,0], speechSourceCoords[:,1], speechSourceCoords[:,2], c='blue')
-        ax.scatter(noiseSourceCoords[:,0], noiseSourceCoords[:,1], noiseSourceCoords[:,2], c='red')
-        ax.grid()
-        plt.show()
-
     # Walls reflection coefficient  
     reflectionCoeff = -1 * np.sqrt(1 - absorbCoeff)   
     
@@ -209,82 +157,23 @@ def genAS(sets: ProgramSettings,plotit=False):
                                         roomDimensions, reflectionCoeff, 
                                         sets.rirLength/sets.samplingFrequency, 
                                         sets.samplingFrequency)
-    
-    return rirSpeechToNodes, rirNoiseToNodes, speechSourceCoords, noiseSourceCoords, sensorsCoords, sensorNodeTags, roomDimensions, absorbCoeff
 
-  
-def export_data(h_sn, h_nn, header, rs, rn, r, tags, fname):
-    """Exports the necessary acoustic scenario data as CSV for 
-    later use in other simulations.
+    # Build output object
+    acousticScenario = AcousticScenario(
+        rirDesiredToSensors=rirSpeechToNodes,
+        rirNoiseToSensors=rirNoiseToNodes,
+        desiredSourceCoords=speechSourceCoords,
+        sensorCoords=sensorsCoords,
+        sensorToNodeTags=sensorNodeTags,
+        noiseSourceCoords=noiseSourceCoords,
+        roomDimensions=roomDimensions,
+        absCoeff=absorbCoeff,
+        samplingFreq=sets.samplingFrequency,
+        numNodes=sets.numNodes,
+        distBtwSensors=sets.sensorSeparation,
+    )
 
-    Parameters
-    ----------
-    h_sn : [RIR_l x M x Ns] array of complex floats
-        RIRs between desired sources and sensors.  
-    h_nn : [RIR_l x M x Nn] array of complex floats
-        RIRs between noise sources and sensors.
-    header : dictionary.
-        Other important information to exploit the exported data.
-    rs : [Ns x 3] array of real floats
-        Speech source(s) coordinates [m].
-    rn : [Nn x 3] array of real floats
-        Noise source(s) coordinates [m].
-    r : [M x 3] array of real floats
-        Sensor(s) coordinates [m].
-    tags : [M x 1] array of integers
-        Tags linking each sensor to a node.
-    fname : str.
-        Name of file to be exported.
-    """
-
-    # Check if export folder exists
-    os.path.realpath(fname)
-    mydir = str(Path(fname).parent)
-    if not os.path.isdir(mydir):
-        os.mkdir(mydir)   # if not, make directory
-        print(f'Directory "{mydir}" was created.')
-
-    # Source-to-node RIRs
-    data_df = pd.DataFrame()   # init dataframe
-    for ii in range(h_sn.shape[-1]):
-        for idxNode in range(np.amax(tags)):
-            # Build dataframe for desired source and current node
-            data_df_curr = pd.DataFrame(np.squeeze(h_sn[:, tags == idxNode + 1, ii]),\
-                columns=[f'Node{idxNode + 1}Sensor{idx + 1}' for idx in range(sum(tags == idxNode + 1))],\
-                index=[f'h_sn{ii + 1}' for idx in range(h_sn.shape[0])])
-            # Concatenate to global dataframe
-            data_df = pd.concat([data_df, data_df_curr])
-
-    # Noise-to-node RIRs
-    for ii in range(h_nn.shape[-1]):
-        for idxNode in range(np.amax(tags)):
-            # Build dataframe for noise source and current node
-            data_df_curr = pd.DataFrame(np.squeeze(h_nn[:, tags == idxNode + 1, ii]),\
-                columns=[f'Node{idxNode + 1}Sensor{idx + 1}' for idx in range(sum(tags == idxNode + 1))],\
-                index=[f'h_nn{ii + 1}' for idx in range(h_nn.shape[0])])
-            # Concatenate to global dataframe
-            data_df = pd.concat([data_df, data_df_curr])
-            
-    # Build header dataframe
-    header_df = pd.DataFrame(header)
-
-    # Build coordinates dataframes
-    rs_df = pd.DataFrame(rs,\
-                index=['Source %i' % (idx+1) for idx in range(rs.shape[0])],\
-                columns=['x','y','z'])
-    rn_df = pd.DataFrame(rn,\
-                index=['Noise %i' % (idx+1) for idx in range(rn.shape[0])],\
-                columns=['x','y','z'])
-    r_df = pd.DataFrame(r,\
-                index=['Sensor %i' % (idx+1) for idx in range(r.shape[0])],\
-                columns=['x','y','z'])
-
-    # Concatenate header + coordinates with rest of data
-    big_df = pd.concat([header_df,rs_df,rn_df,r_df,data_df])
-    big_df.to_csv(fname)
-
-    print('Data exported to CSV: "%s"' % Path(fname).name)
-    print('Find it in folder: %s' % str(Path(fname).parent))
+    return acousticScenario
 
 
 def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerator, force2D=False):
@@ -340,6 +229,7 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
 
     return sensorCoords
 
-
+# ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sets, basepath, plotit))
+# ------------------------------------------------------------------------------------

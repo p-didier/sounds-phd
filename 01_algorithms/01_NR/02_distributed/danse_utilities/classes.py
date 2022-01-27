@@ -464,13 +464,6 @@ def get_stft(x, fs, L, R):
         STFT time frames.
     """
     
-    # mySignal_STFT, freqBins = calcSTFT(mySignal, Fs=fs, 
-    #                                 win=np.hanning(stftWinLength), 
-    #                                 N_STFT=stftWinLength, 
-    #                                 R_STFT=stftEffectiveFrameLen, 
-    #                                 sides='onesided')
-    # timeFrames = np.linspace(0, 1, num=mySignal_STFT.shape[1]) * mySignal.shape[0] / fs
-
     for channel in range(x.shape[-1]):
         f, t, tmp = sig.stft(x[:, channel],
                             fs=fs,

@@ -282,7 +282,7 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     """
 
     # DANSE it up
-    desiredSigEst_STFT, z = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
+    desiredSigEst_STFT = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
     
     return desiredSigEst_STFT
 

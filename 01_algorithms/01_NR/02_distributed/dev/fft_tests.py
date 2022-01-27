@@ -36,20 +36,22 @@ z2 = np.fft.ifft(Z2, n)
 # print(np.amax(z2.imag))
 
 Z3 = rng.random(size=(int(n/2)+1,)) + 1j * rng.random(size=(int(n/2)+1,))
-Z3real = np.concatenate((Z3.real, np.flip(Z3[:-1].real)[:-1]))
-Z3imag = np.concatenate((Z3.imag, -np.flip(Z3.imag)))
-Z3imag = Z3.imag
+Z3[0] = Z3[0].real
+Z3[-1] = Z3[-1].real
+# Z3real = np.concatenate((Z3.real, np.flip(Z3[:-1].real)[:-1]))
+# Z3imag = np.concatenate((Z3.imag[:-1], np.flip(Z3.imag)[:]))
+# Z3imag = Z3.imag
 
 Z3 = np.concatenate((Z3, np.flip(Z3[:-1].conj())[:-1]))
 # Z3p = Z3real + 1j * Z3imag
 
-z3 = np.fft.ifft(Z3p, n)
+z3 = np.fft.ifft(Z3, n)
 print(np.amax(z3.imag))
 fig = plt.figure()
 ax = fig.add_subplot(211)
-plt.plot(Z3real, 'r')
-plt.plot(Z3imag, 'g')
+plt.plot(Z3.real, 'r')
+plt.plot(Z3.imag, 'g')
 ax = fig.add_subplot(212)
-# plt.plot(z3.imag, 'k')
+plt.plot(z3.imag, 'k')
 
 
