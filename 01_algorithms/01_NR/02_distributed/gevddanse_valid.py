@@ -33,7 +33,6 @@ speechFiles = [f for f in Path(f'{signalsPath}/speech').glob('**/*') if f.is_fil
 speechFile = speechFiles[0]     # select one speech signal
 noiseFiles = [f for f in Path(f'{signalsPath}/noise').glob('**/*') if f.is_file()]
 
-
 # Build experiments list
 experiments = []
 for i1, asc in enumerate(acousticScenarios):
@@ -57,7 +56,6 @@ for i1, asc in enumerate(acousticScenarios):
 
 print(f'About to run {len(experiments)} DANSE simulations...')
 
-#%%
 
 def main(experiments):
     """Main wrapper for running validation experiment of DANSE implementation.

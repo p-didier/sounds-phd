@@ -53,7 +53,6 @@ class ProgramSettings(object):
     VADwinLength: float = 40e-3             # VAD window length [s]
     VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
-    timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]    <-- TODO: figure out whether still necessary
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
     minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
@@ -467,7 +466,7 @@ def get_stft(x, fs, settings: ProgramSettings):
                             fs=fs,
                             window=settings.stftWin,
                             nperseg=settings.stftWinLength,
-                            noverlap=settings.stftEffectiveFrameLen,
+                            noverlap=int(settings.stftFrameOvlp * settings.stftWinLength),
                             return_onesided=True)
         if channel == 0:
             out = np.zeros((tmp.shape[0], tmp.shape[1], x.shape[-1]), dtype=complex)

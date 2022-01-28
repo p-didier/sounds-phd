@@ -192,7 +192,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     # Derive total number of nodes
     numNodes = np.amax(sigs.sensorToNodeTags)
     # Derive starting sample for metrics computations
-    startIdx = int(np.ceil(minNumDANSEupdates * settings.timeBtwConsecUpdates * sigs.fs))
+    startIdx = int(np.ceil(minNumDANSEupdates * settings.stftEffectiveFrameLen * sigs.fs))
     print(f"""
     Computing speech enhancement metrics from the {startIdx + 1}'th sample on
     (avoid SNR bias due to highly non-stationary noise power in first DANSE iterations)...
@@ -253,7 +253,7 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
                                     fs=fs,
                                     window=settings.stftWin, 
                                     nperseg=settings.stftWinLength, 
-                                    noverlap=settings.stftEffectiveFrameLen,
+                                    noverlap=int(settings.stftFrameOvlp * settings.stftWinLength),
                                     input_onesided=True)
         if channel == 0:
             x = np.zeros((len(tmp), X.shape[-1]))
