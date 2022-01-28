@@ -1,4 +1,5 @@
 
+from hashlib import new
 import numpy as np
 import scipy
 import scipy.signal
@@ -116,6 +117,10 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
     frameSize = settings.stftWinLength
     nNewSamplesPerFrame = settings.stftEffectiveFrameLen
     numIterations = int((yin.shape[0] - frameSize) / nNewSamplesPerFrame) + 1
+    win = np.hanning(frameSize)     # FFT window
+    win = win[:, np.newaxis]
+    fftscale = 1.0 / win.sum()
+    ifftscale = win.sum()
 
     # Identify neighbours of each node
     neighbourNodes = []
@@ -150,7 +155,8 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytilde_hat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
-        slice = np.zeros((dimYTilde[k], dimYTilde[k]), dtype=complex)       # single autocorrelation matrix init
+        # slice = np.zeros((dimYTilde[k], dimYTilde[k]), dtype=complex)       # single autocorrelation matrix init (zeros)
+        slice = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)       # single autocorrelation matrix init (identities)
         Rnn.append(np.tile(slice, (numFreqLines, 1, 1)))                    # noise only
         Ryy.append(np.tile(slice, (numFreqLines, 1, 1)))                    # speech + noise
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
@@ -167,8 +173,6 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
         print(f'DANSE -- Iteration {i + 1}/{numIterations} -- Updating node #{u}...')
         for k in range(asc.numNodes):
             # Select time samples for current frame
-            if i == numIterations - 1:
-                stop = 1
             idxSamplesFrame = np.arange(i * nNewSamplesPerFrame, i * nNewSamplesPerFrame + frameSize)
             # Collect local observations
             y[k][:, i, :] = yin[idxSamplesFrame][:, asc.sensorToNodeTags == k + 1]
@@ -178,7 +182,7 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
                 # Identify remote sensors
                 yq = yin[idxSamplesFrame][:, asc.sensorToNodeTags == q + 1]
                 # Go to frequency domain
-                yq_hat = np.fft.fft(yq, frameSize, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
+                yq_hat = fftscale * np.fft.fft(yq * win, frameSize, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
                 # Keep only positive frequencies
                 yq_hat = yq_hat[:numFreqLines]
                 # Compress using filter coefficients
@@ -189,12 +193,12 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
                 zq_hat[-1] = zq_hat[-1].real    # Set Nyquist to real value
                 zq_hat = np.concatenate((zq_hat, np.flip(zq_hat[:-1].conj())[:-1]))
                 # Back to time-domain
-                z[k][:, i, idx] = np.fft.ifft(zq_hat, frameSize)
+                z[k][:, i, idx] = ifftscale * np.fft.ifft(zq_hat, frameSize)
                 zq = z[k][:, i, idx][:, np.newaxis]  # necessary for np.concatenate
                 ytilde_curr = np.concatenate((ytilde_curr, zq), axis=1)
             ytilde[k][:, i, :] = ytilde_curr    # <-- complete observation vectors
             # Go to frequency domain
-            ytilde_hat_curr = np.fft.fft(ytilde[k][:, i, :], frameSize, axis=0)
+            ytilde_hat_curr = fftscale * np.fft.fft(ytilde[k][:, i, :] * win, frameSize, axis=0)
             # Keep only positive frequencies
             ytilde_hat[k][:, i, :] = ytilde_hat_curr[:numFreqLines, :]
             # Count autocorrelation matrices updates

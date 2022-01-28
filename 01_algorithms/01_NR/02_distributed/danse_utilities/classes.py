@@ -2,6 +2,7 @@ from cmath import isinf
 from dataclasses import dataclass, field
 import enum
 from multiprocessing.managers import ValueProxy
+from multiprocessing.sharedctypes import Value
 from operator import contains
 import sys, warnings
 from pathlib import PurePath, Path
@@ -47,6 +48,7 @@ class ProgramSettings(object):
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # STFT frame length [samples]
     stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
+    stftWin: np.ndarray = np.hanning(stftWinLength)  # STFT window
     # VAD parametesr
     VADwinLength: float = 40e-3             # VAD window length [s]
     VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
@@ -77,6 +79,9 @@ class ProgramSettings(object):
             self.desiredSignalFile = [self.desiredSignalFile]
         if not isinstance(self.noiseSignalFile, list):
             self.noiseSignalFile = [self.noiseSignalFile]
+        # Check window constraints
+        if not sig.check_NOLA(self.stftWin, self.stftWinLength, self.stftEffectiveFrameLen):
+            raise ValueError('Window NOLA contrained is not respected.')
         return self
 
     def __repr__(self):
@@ -215,7 +220,7 @@ class Signals(object):
         self.numSensors = len(self.sensorToNodeTags)
         _, self.nSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)
 
-    def get_all_stfts(self, fs, L, eL):
+    def get_all_stfts(self, fs, settings: ProgramSettings):
         """Derives time-domain signals' STFT representations
         given certain settings.
 
@@ -223,18 +228,12 @@ class Signals(object):
         ----------
         fs : int
             Sampling frequency [samples/s].
-        L : int
-            STFT window length [samples].
-        eL : int
-            STFT _effective_ window length (inc. overlap) [samples].
+        settings : ProgramSettings object
+            Settings (contains window, window length, overlap).
         """
-        # New fields:
-            # XXXX_STFT: STFT-domain representation of time-domain signal XXXX
-            # freqBins: STFT-domain frequency bins
-            # timeFrames: STFT-domain time frames
-        self.wetNoise_STFT, self.freqBins, self.timeFrames = get_stft(self.wetNoise, fs, L, eL)
-        self.wetSpeech_STFT, _, _ = get_stft(self.wetSpeech, fs, L, eL)
-        self.sensorSignals_STFT, _, _ = get_stft(self.sensorSignals, fs, L, eL)
+        self.wetNoise_STFT, self.freqBins, self.timeFrames = get_stft(self.wetNoise, fs, settings)
+        self.wetSpeech_STFT, _, _ = get_stft(self.wetSpeech, fs, settings)
+        self.sensorSignals_STFT, _, _ = get_stft(self.sensorSignals, fs, settings)
 
         self.stftComputed = True
 
@@ -263,7 +262,7 @@ class Signals(object):
         else:
             ax = fig.add_subplot(1,1,1)
             print('STFTs were not yet computed. Plotting only waveforms.')
-        delta = np.amax(self.sensorSignals)
+        delta = np.amax(np.abs(self.sensorSignals))
         ax.plot(self.timeVector, self.wetSpeech[:, effectiveSensorIdx], label='Desired')
         ax.plot(self.timeVector, self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
         ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
@@ -442,7 +441,7 @@ class Results:
         return fig
 
         
-def get_stft(x, fs, L, R):
+def get_stft(x, fs, settings: ProgramSettings):
     """Derives time-domain signals' STFT representation
     given certain settings.
     Parameters
@@ -451,10 +450,8 @@ def get_stft(x, fs, L, R):
         Time-domain signal(s).
     fs : int
         Sampling frequency [samples/s].
-    L : int
-        STFT window length [samples].
-    R : int
-        STFT _effective_ window length (inc. overlap) [samples].
+    settings : ProgramSettings object
+        Settings (contains window, window length, overlap)
 
     Returns
     -------
@@ -465,13 +462,12 @@ def get_stft(x, fs, L, R):
     t : [Nt x 1] np.ndarray (real)
         STFT time frames.
     """
-    
     for channel in range(x.shape[-1]):
         f, t, tmp = sig.stft(x[:, channel],
                             fs=fs,
-                            window=np.hanning(L),
-                            nperseg=L,
-                            noverlap=R,
+                            window=settings.stftWin,
+                            nperseg=settings.stftWinLength,
+                            noverlap=settings.stftEffectiveFrameLen,
                             return_onesided=True)
         if channel == 0:
             out = np.zeros((tmp.shape[0], tmp.shape[1], x.shape[-1]), dtype=complex)

@@ -40,7 +40,7 @@ def run_experiment(settings: classes.ProgramSettings):
     mySignals, asc = generate_signals(settings)
 
     # Convert all DANSE input signals to the STFT domain
-    mySignals.get_all_stfts(asc.samplingFreq, settings.stftWinLength, settings.stftEffectiveFrameLen)
+    mySignals.get_all_stfts(asc.samplingFreq, settings)
 
     # DANSE
     mySignals.desiredSigEst_STFT = danse(mySignals, asc, settings)
@@ -251,7 +251,7 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     for channel in range(X.shape[-1]):
         _, tmp = sig.istft(X[:, :, channel], 
                                     fs=fs,
-                                    window=np.hanning(settings.stftWinLength), 
+                                    window=settings.stftWin, 
                                     nperseg=settings.stftWinLength, 
                                     noverlap=settings.stftEffectiveFrameLen,
                                     input_onesided=True)

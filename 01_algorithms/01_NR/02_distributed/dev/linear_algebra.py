@@ -30,7 +30,9 @@ plt.plot(np.imag(z2 + 1), 'b--')
 #%%
 
 import numpy as np
+import scipy.signal
 
-a = np.array([1,2,3])
-a[:1]
-
+L = 1024
+R = 0.5
+a = np.hanning(L)
+scipy.signal.check_NOLA(a, L, L*(1-R))
