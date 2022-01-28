@@ -20,10 +20,9 @@ from playsounds.playsounds import playwavfile
 # General parameters
 ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
-
 # Set experiment settings
 mySettings = ProgramSettings(
-    acousticScenarioPath=f'{ascBasePath}/validations/J2Mk[3, 2]_Ns1_Nn1/AS0',
+    acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
@@ -40,20 +39,20 @@ mySettings = ProgramSettings(
     SROsppm=[0, 0, 0],                 # SRO
     compensateSROs=True,            # if True, estimate + compensate SRO dynamically
     )
+experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
+exportPath = f'{Path(__file__).parent}/res/{experimentName}'
 # ------------------------
 
-def main(mySettings):
+def main(mySettings, exportPath):
     """Main function for DANSE runs.
 
     Parameters
     ----------
     mySettings : ProgramSettings object
         Experiment settings.    
+    exportPath : str
+        Path to export directory, containing label of experiment. 
     """
-
-    experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment name
-    exportPath = f'{Path(__file__).parent}/res/{experimentName}'
-
     # Check if experiment has already been run
     runExpFlag = False
     if Path(exportPath).is_dir():
@@ -107,8 +106,8 @@ def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False
 
     # Plot scenario
     fig = results.acousticScenario.plot()
-    myPath = settings.acousticScenarioPath
-    fig.suptitle(myPath[myPath.rfind('/', 0, myPath.rfind('/')) + 1:-4])
+    myPath = Path(settings.acousticScenarioPath)
+    fig.suptitle(f'{myPath.parent.name}_{myPath.name}')
     fig.tight_layout()
     plt.savefig(f'{pathToResults}/acousScenario.png')
     if showPlots:
@@ -160,5 +159,5 @@ def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(mySettings))
+    sys.exit(main(mySettings, exportPath))
 # ------------------------------------------------------------------------------------

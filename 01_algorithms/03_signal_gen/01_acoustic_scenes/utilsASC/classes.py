@@ -23,16 +23,24 @@ class AcousticScenario():
     sensorToNodeTags: np.ndarray = np.array([1])        # Tags relating each sensor to its node
     noiseSourceCoords: np.ndarray = np.array([1])       # Coordinates of noise sources
     roomDimensions: np.ndarray = np.array([1])          # Room dimensions   
-    absCoeff: float = 0.                                # Absorption coefficient
-    samplingFreq: int = 16000                           # Sampling frequency
+    absCoeff: float = 1.                                # Absorption coefficient
+    samplingFreq: float = 16000.                        # Sampling frequency
     numNodes: int = 2                                   # Number of nodes in network
     distBtwSensors: float = 0.05                        # Distance btw. sensors at one node
 
     def __post_init__(self):
-        self.numDesiredSources = self.desiredSourceCoords.shape[0]
-        self.numSensors = self.sensorCoords.shape[0]
-        self.numNoiseSources = self.noiseSourceCoords.shape[0]    
-        self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]
+        self.numDesiredSources = self.desiredSourceCoords.shape[0]      # number of desired sources
+        self.numSensors = self.sensorCoords.shape[0]                    # number of sensors
+        self.numNoiseSources = self.noiseSourceCoords.shape[0]          # number of noise sources
+        self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]    # number of sensors per node
+        # if len(self.roomDimensions) == 3:
+        #     roomVolume = np.prod(self.roomDimensions)                               # room volume
+        #     roomSurface = 2 * (self.roomDimensions[0] * self.roomDimensions[1] +\
+        #                     self.roomDimensions[0] * self.roomDimensions[2] +\
+        #                     self.roomDimensions[1] * self.roomDimensions[2])        # room surface area (all walls + floor + ceiling)
+        #     self.revTime = 0.161 * roomVolume / (roomSurface * self.absCoeff)       # reverberation time
+        # else:
+        #     self.revTime = 0.
         return self
     
     # Save and load
@@ -68,8 +76,6 @@ class AcousticScenario():
                 boxText += f'{ii + 1}$\\to$N{jj + 1}={np.round(d, 2)}m\n'
             boxText += '\n'
         boxText = boxText[:-1]
-        a0[1].text(1.1, 0.9, boxText, transform=a0[1].transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
         # Plot RIRs
         t = np.arange(self.rirDesiredToSensors.shape[0]) / self.samplingFreq
         ymax = np.amax([np.amax(self.rirDesiredToSensors[:, 0, 0]), np.amax(self.rirNoiseToSensors[:, 0, 0])])
@@ -82,7 +88,11 @@ class AcousticScenario():
         a1[1].grid()
         a1[1].set(xlabel='$t$ [s]', title=f'RIR node 1 - N1')
         a1[1].set_ylim([ymin, ymax])
+        # Add text boxes
+        # a1[1].text(1.1, 0.9, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}\nRev. time:\n$T_{{60}}$ = {np.round(self.revTime, 2)}', transform=a1[1].transAxes, fontsize=10,
         a1[1].text(1.1, 0.9, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}', transform=a1[1].transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        a0[1].text(1.1, 0.9, boxText, transform=a0[1].transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
         fig.tight_layout()
         return fig

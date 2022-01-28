@@ -27,4 +27,10 @@ plt.plot(np.imag(z1 + 1), 'r-')
 plt.plot(np.real(z2), 'b--')
 plt.plot(np.imag(z2 + 1), 'b--')
 
+#%%
+
+import numpy as np
+
+a = np.array([1,2,3])
+a[:1]
 

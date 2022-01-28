@@ -51,7 +51,7 @@ class ProgramSettings(object):
     VADwinLength: float = 40e-3             # VAD window length [s]
     VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
-    timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]
+    timeBtwConsecUpdates: float = 0.4       # time between consecutive DANSE updates [s]    <-- TODO: figure out whether still necessary
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
     minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
@@ -70,15 +70,20 @@ class ProgramSettings(object):
 
     def __post_init__(self) -> None:
         # Checks on class attributes
-        self.stftEffectiveFrameLen = int(self.stftWinLength * self.stftFrameOvlp)
+        self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         if 0. not in self.SROsppm:
             raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+        if not isinstance(self.desiredSignalFile, list):
+            self.desiredSignalFile = [self.desiredSignalFile]
+        if not isinstance(self.noiseSignalFile, list):
+            self.noiseSignalFile = [self.noiseSignalFile]
         return self
 
     def __repr__(self):
+        path = Path(self.acousticScenarioPath)
         string = f"""
 --------- Program settings ---------
-Acoustic scenario: '{self.acousticScenarioPath[self.acousticScenarioPath.rfind('/', 0, self.acousticScenarioPath.rfind('/')) + 1:-4]}'
+Acoustic scenario: '{path.parent.name} : {path.name}'
 {self.signalDuration} seconds signals using desired file(s):
 \t{[PurePath(f).name for f in self.desiredSignalFile]}
 and noise signal file(s):
@@ -370,16 +375,16 @@ class Signals(object):
             #
             fname_noisy.append(f'{folder}/wav/noisy_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
             data = normalize_toint16(self.sensorSignals[:, idxSensor])
-            wavfile.write(fname_noisy[-1], self.fs, data)
+            wavfile.write(fname_noisy[-1], int(self.fs), data)
             #
             fname_desired.append(f'{folder}/wav/desired_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
             data = normalize_toint16(self.wetSpeech[:, idxSensor])
-            wavfile.write(fname_desired[-1], self.fs, data)
+            wavfile.write(fname_desired[-1], int(self.fs), data)
             #
             if len(self.desiredSigEst) > 0:  # if enhancement has been performed
                 fname_enhanced.append(f'{folder}/wav/enhanced_N{idxNode + 1}.wav')
                 data = normalize_toint16(self.desiredSigEst[:, idxNode])
-                wavfile.write(fname_enhanced[-1], self.fs, data)
+                wavfile.write(fname_enhanced[-1], int(self.fs), data)
         print(f'Signals exported in folder "{folder}/wav/".')
         # WAV files names dictionary
         fnames = dict([('Noisy', fname_noisy), ('Desired', fname_desired), ('Enhanced', fname_enhanced)])

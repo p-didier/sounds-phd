@@ -54,7 +54,7 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     # Frequency-weight segmental SNR
     fwSNRseg = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
     # Short-Time Objective Intelligibility (STOI)
-    stoi = stoi_fcn(cleanSignal, enhancedSignal, fs)
+    stoi = stoi_fcn(cleanSignal, enhancedSignal, int(fs))
     return snr, fwSNRseg, stoi
 
 

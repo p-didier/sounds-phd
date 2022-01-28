@@ -5,6 +5,7 @@ import pandas as pd
 import soundfile as sf
 import scipy.signal as sig
 from pathlib import Path, PurePath
+from scipy.signal._arraytools import zero_ext
 
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
@@ -118,7 +119,10 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
     numSensors = sigs.shape[-1]
     numNodes = len(np.unique(sensorToNodeTags))
     if numNodes != len(SROsppm):
-        raise ValueError('Number of sensors does not match number of given SRO values.')
+        if (np.array(SROsppm) == 0).all():
+            SROsppm = [0 for _ in range(numNodes)]
+        else:
+            raise ValueError('Number of sensors does not match number of given SRO values, and some of the latter are non-zero.')
 
     # Base time stamps
     timeVector = np.arange(sigs.shape[0]) / baseFs
@@ -255,7 +259,7 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
             x = np.zeros((len(tmp), X.shape[-1]))
         x[:, channel] = tmp
 
-    targetLength = np.round(settings.signalDuration * fs)
+    targetLength = int(np.round(settings.signalDuration * fs))
     if x.shape[0] < targetLength:
         x = np.concatenate((x, np.full((targetLength - x.shape[0], x.shape[1]), np.finfo(float).eps)))
     elif x.shape[0] > targetLength:
@@ -283,9 +287,22 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     desiredSigEst_STFT : [Nf x Nt x Nn] np.ndarry (complex)
         STFT representation of the desired signal at each of the Nn nodes. 
     """
+    # Prepare signals for Fourier transforms
+    frameSize = settings.stftWinLength
+    nNewSamplesPerFrame = settings.stftEffectiveFrameLen
+    y = signals.sensorSignals
+    # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 (see <scipy.signal.stft>'s `boundary` argument (default: `zeros`))
+    y = zero_ext(y, frameSize // 2, axis=0)
+    # 2) Zero-pad signal if necessary and derive number of time frames
+    if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
+        nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
+        print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
+        y = np.concatenate((y, np.zeros([nadd, y.shape[-1]])), axis=0)
+        if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
+            raise ValueError('There is a problem with the zero-padding...')
 
     # DANSE it up
-    desiredSigEst_STFT = danse_scripts.danse_sequential(signals.sensorSignals, asc, settings, signals.VAD, signals.timeStampsSROs)
+    desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD, signals.timeStampsSROs)
     
     return desiredSigEst_STFT
 
@@ -315,13 +332,13 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
         Processed signal.
     """
 
-    signalLength = desiredDuration * targetFs   # desired signal length [samples]
+    signalLength = int(desiredDuration * targetFs)   # desired signal length [samples]
     while len(rawSignal) < signalLength:
         rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
     if len(rawSignal) > signalLength:
         rawSignal = rawSignal[:desiredDuration * originalFs]  # truncate too long signals
     # Resample signal so that its sampling frequency matches the target
-    rawSignal = sig.resample(rawSignal, signalLength)   
+    rawSignal = sig.resample(rawSignal, signalLength) 
     # Whiten signal 
     sig_out = whiten(rawSignal) 
     return sig_out
@@ -354,7 +371,7 @@ def generate_signals(settings: classes.ProgramSettings):
         raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
 
     # Desired signal length [samples]
-    signalLength = settings.signalDuration * asc.samplingFreq   
+    signalLength = int(settings.signalDuration * asc.samplingFreq) 
 
     # Load + pre-process dry desired signals and build wet desired signals
     dryDesiredSignals = np.zeros((signalLength, asc.numDesiredSources))

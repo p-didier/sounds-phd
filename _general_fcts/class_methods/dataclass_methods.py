@@ -10,7 +10,7 @@ def save(self, foldername: str):
         Path(foldername).mkdir(parents=True)
         print(f'Created output directory "{foldername}".')
     pickle.dump(self, gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'wb'))
-    print(f'Data exported to directory\n"{foldername}".')
+    print(f'<{type(self).__name__}> object data exported to directory\n"{foldername}".')
 
 
 def load(self, foldername: str):
@@ -18,5 +18,5 @@ def load(self, foldername: str):
     if not Path(foldername).is_dir():
         raise ValueError(f'The folder "{foldername}" cannot be found.')
     p = pickle.load(gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'r'))
-    print(f'Data loaded from directory\n"{foldername}".')
+    print(f'<{type(self).__name__}> object data loaded from directory\n"{foldername}".')
     return p
