@@ -29,7 +29,6 @@ mySettings = ProgramSettings(
     signalDuration=5,
     baseSNR=-10,
     plotAcousticScenario=False,
-    timeBtwConsecUpdates=0.3,       # time btw. consecutive DANSE filter updates
     VADwinLength=40e-3,             # VAD window length [s]
     VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
     expAvgBeta=0.98,
@@ -43,7 +42,7 @@ experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment referen
 exportPath = f'{Path(__file__).parent}/res/{experimentName}'
 # ------------------------
 
-def main(mySettings, exportPath):
+def main(mySettings, exportPath, showPlots=1):
     """Main function for DANSE runs.
 
     Parameters
@@ -51,7 +50,9 @@ def main(mySettings, exportPath):
     mySettings : ProgramSettings object
         Experiment settings.    
     exportPath : str
-        Path to export directory, containing label of experiment. 
+        Path to export directory, containing label of experiment.
+    showPlots : bool
+        If True, shows plots in Python interpreter window.
     """
     # Check if experiment has already been run
     runExpFlag = False
@@ -75,7 +76,7 @@ def main(mySettings, exportPath):
         mySettings.save(exportPath)     # save settings
 
     # Post-process
-    get_figures_and_sound(exportPath, mySettings, showPlots=1, listen=False)
+    get_figures_and_sound(exportPath, mySettings, showPlots, listen=False)
 
     return None
 
