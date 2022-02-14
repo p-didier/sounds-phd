@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 import os, sys, time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -122,11 +123,10 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
         if (np.array(SROsppm) == 0).all():
             SROsppm = [0 for _ in range(numNodes)]
         else:
-            raise ValueError('Number of sensors does not match number of given SRO values, and some of the latter are non-zero.')
+            raise ValueError('Number of sensors does not match number of given non-zero SRO values.')
 
     # Base time stamps
     timeVector = np.arange(sigs.shape[0]) / baseFs
-
     sigsOut       = np.zeros((numSamples, numSensors))
     timeVectorOut = np.zeros((numSamples, numNodes))
     for idxSensor in range(numSensors):
@@ -291,9 +291,9 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     frameSize = settings.stftWinLength
     nNewSamplesPerFrame = settings.stftEffectiveFrameLen
     y = signals.sensorSignals
-    # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 (see <scipy.signal.stft>'s `boundary` argument (default: `zeros`))
+    # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 -- see <scipy.signal.stft>'s `boundary` argument (default: `zeros`)
     y = zero_ext(y, frameSize // 2, axis=0)
-    # 2) Zero-pad signal if necessary and derive number of time frames
+    # 2) Zero-pad signal if necessary
     if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
         nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
         print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
@@ -302,7 +302,12 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
             raise ValueError('There is a problem with the zero-padding...')
 
     # DANSE it up
-    desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD, signals.timeStampsSROs)
+    if settings.danseUpdating == 'sequential':
+        desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
+    elif settings.danseUpdating == 'simultaneous':
+        desiredSigEst_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, signals.timeStampsSROs)
+    else:
+        raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
     
     return desiredSigEst_STFT
 
@@ -421,6 +426,7 @@ def generate_signals(settings: classes.ProgramSettings):
     # --- Apply SROs ---
     wetNoise_norm, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
     wetSpeech_norm, timeStampsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    # ------------------
 
     # Build sensor signals
     sensorSignals = wetSpeech_norm + wetNoise_norm

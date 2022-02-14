@@ -23,7 +23,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    # acousticScenarioPath=f'{ascBasePath}/J2Mk[5 5]_Ns1_Nn1/AS0_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     signalDuration=5,
@@ -34,15 +34,17 @@ mySettings = ProgramSettings(
     expAvgBeta=0.98,
     minNumAutocorrUpdates=10,
     initialWeightsAmplitude=1,
-    performGEVD=1,               # set to True for GEVD-DANSE
-    SROsppm=[0, 0, 0],                 # SRO
+    performGEVD=1,                  # set to True for GEVD-DANSE
+    SROsppm=[0, 0],               # SRO
     compensateSROs=True,            # if True, estimate + compensate SRO dynamically
+    broadcastLength=8,              # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
+    danseUpdating='simultaneous'    # node-updating scheme
     )
 experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 exportPath = f'{Path(__file__).parent}/res/{experimentName}'
 # ------------------------
 
-def main(mySettings, exportPath, showPlots=1):
+def main(mySettings, exportPath, showPlots=1, lightExport=False):
     """Main function for DANSE runs.
 
     Parameters
@@ -69,19 +71,20 @@ def main(mySettings, exportPath, showPlots=1):
         print(mySettings)
     
     if runExpFlag:
-        # Run experiment
+        # ================ Run experiment ================
         results = run_experiment(mySettings)
+        # ================================================
         # Export
-        results.save(exportPath)        # save results
+        results.save(exportPath, lightExport)        # save results
         mySettings.save(exportPath)     # save settings
 
     # Post-process
-    get_figures_and_sound(exportPath, mySettings, showPlots, listen=False)
+    get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
 
     return None
 
 
-def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False, listeningMaxDuration=5.):
+def get_figures_and_sound(results, pathToResults, settings, showPlots=False, listen=False, listeningMaxDuration=5.):
     """From exported pkl.gz file names, import simulation results,
     plots them nicely, exports plots, exports relevent sounds,
     and, if asked, plays back the sounds. 
@@ -101,7 +104,7 @@ def get_figures_and_sound(pathToResults, settings, showPlots=False, listen=False
     """
 
     # Import results
-    results = Results().load(pathToResults)
+    # results = Results().load(pathToResults)
     # Export as WAV
     wavFilenames = results.signals.export_wav(pathToResults)
 

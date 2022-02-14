@@ -4,7 +4,7 @@ import enum
 from multiprocessing.managers import ValueProxy
 from multiprocessing.sharedctypes import Value
 from operator import contains
-import sys, warnings
+import sys, warnings, copy
 from pathlib import PurePath, Path
 import numpy as np
 import matplotlib.pyplot as plt
@@ -49,15 +49,18 @@ class ProgramSettings(object):
     stftWinLength: int = 1024               # STFT frame length [samples]
     stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
     stftWin: np.ndarray = np.hanning(stftWinLength)  # STFT window
-    # VAD parametesr
+    # VAD parameters
     VADwinLength: float = 40e-3             # VAD window length [s]
     VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
+    danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
-    expAvgBeta: float = 0.99                # exponential average constant (Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y^H[l])
+    expAvgBeta: float = 0.99                # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
     minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
     performGEVD: bool = False               # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
+    # Broadcasting parameters
+    broadcastLength: int = 8                # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
@@ -416,8 +419,16 @@ class Results:
     def load(self, filename: str):
         return dataclass_methods.load(self, filename)
 
-    def save(self, filename: str):
-        dataclass_methods.save(self, filename)
+    def save(self, filename: str, light=False):
+        """Exports results as pickle archive
+        If `light` is True, export a lighter version (not all results, just the minimum)
+        """
+        if light:
+            mycls = copy.copy(self)
+            delattr(mycls, 'signals')
+            dataclass_methods.save(mycls, filename)
+        else:
+            dataclass_methods.save(self, filename)
 
     def plot_enhancement_metrics(self):
         """Creates a visual representation of DANSE performance results."""

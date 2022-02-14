@@ -70,7 +70,7 @@ def main(experiments):
     for idxExp in range(len(experiments)):
 
         if not Path(experiments[idxExp]['path']).is_dir():
-            danse_main.main(experiments[idxExp]['sets'], experiments[idxExp]['path'], showPlots=0)
+            danse_main.main(experiments[idxExp]['sets'], experiments[idxExp]['path'], showPlots=0, lightExport=True)
         else:
             print(f'...NOT RUNNING "{Path(experiments[idxExp]["path"]).name}"...')
 

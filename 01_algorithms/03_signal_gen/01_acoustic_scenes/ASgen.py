@@ -32,7 +32,7 @@ sets = ASCProgramSettings(
     # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime = 0.2,                      # reverberation time [s]
+    revTime = 0.0,                      # reverberation time [s]
     seed = 12345                        # seed for random generator
 )
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
