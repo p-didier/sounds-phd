@@ -56,7 +56,6 @@ class ProgramSettings(object):
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.99                # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
-    minNumAutocorrUpdates: int = 10         # minimum number of autocorrelation matrices update before first filter coefficients update
     performGEVD: bool = False               # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     # Broadcasting parameters

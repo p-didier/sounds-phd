@@ -22,8 +22,8 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1 1]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     signalDuration=5,
@@ -32,7 +32,6 @@ mySettings = ProgramSettings(
     VADwinLength=40e-3,             # VAD window length [s]
     VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
     expAvgBeta=0.98,
-    minNumAutocorrUpdates=10,
     initialWeightsAmplitude=1,
     performGEVD=1,                  # set to True for GEVD-DANSE
     SROsppm=[0, 0],               # SRO

@@ -1,7 +1,10 @@
 
+from doctest import master
 from multiprocessing.sharedctypes import Value
+from turtle import shape
+from matplotlib.pyplot import fill
 import numpy as np
-import scipy, copy
+import scipy, time
 import scipy.signal
 from . import classes
 
@@ -210,6 +213,7 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
     # Autocorrelation matrices update counters
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
+    minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
     # Desired signal estimate [frames x frequencies x nodes]
     d = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)
 
@@ -264,7 +268,7 @@ def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.Progr
                 #Check quality of autocorrelations estimates
                 if not goodAutocorrMatrices[kappa]:
                     goodAutocorrMatrices[kappa] = check_autocorr_est(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                            numUpdatesRyy[k], numUpdatesRnn[k], settings.minNumAutocorrUpdates)
+                            numUpdatesRyy[k], numUpdatesRnn[k], minNumAutocorrUpdates)
 
                 if goodAutocorrMatrices[kappa] and u == k + 1:
                     if settings.performGEVD:
@@ -316,7 +320,7 @@ def danse_compression(yq, w, win):
     # Go to frequency domain
     yq_hat = fftscale * np.fft.fft(yq * win, len(win), axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
     # Keep only positive frequencies
-    yq_hat = yq_hat[:len(win) / 2]
+    yq_hat = yq_hat[:int(len(win) / 2 + 1)]
     # Compress using filter coefficients
     zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
     # Format for IFFT 
@@ -324,10 +328,32 @@ def danse_compression(yq, w, win):
     zq_hat[-1] = zq_hat[-1].real    # Set Nyquist to real value
     zq_hat = np.concatenate((zq_hat, np.flip(zq_hat[:-1].conj())[:-1]))
     # Back to time-domain
-    z = ifftscale * np.fft.ifft(zq_hat, len(win))
-    zq = z[:, np.newaxis]  # necessary for np.concatenate
+    zq = ifftscale * np.fft.ifft(zq_hat, len(win))
+    # zq = zq[:, np.newaxis]
 
     return zq
+
+
+def init_as_empty_buffer(nNeighbors):
+    """Returns a list of empty arrays, corresponding to the
+    neighbor-nodes buffers at a certain node.
+    
+    Parameters
+    ----------
+    nNeighbors : int
+        Number of neighbors of current node.
+
+    Returns
+    -------
+    out : list of empty arrays
+        Empty buffer.    
+    """
+    
+    out = []
+    for q in range(nNeighbors):
+        out.append(np.array([]))     # one empty array per neighbor (for each node)
+
+    return out
 
 
 def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, timeInstants):
@@ -360,24 +386,25 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, settings.referenceSensor]     # reference clock
 
-    lk = np.zeros(asc.numNodes)                                         # node-specific broadcast index
-    i = 0                                                               # DANSE iteration index
-    nSamplesLinedUpForBroadcast = np.zeros(asc.numNodes, dtype=int)     # node-specific number of samples lined up for broadcast 
-    nLocalSamplesSinceLastIter = np.zeros(asc.numNodes, dtype=int)      # node-specific number of new local samples since the last DANSE iteration 
-    lastSampleIdx = np.zeros(asc.numNodes, dtype=int)                   # last sample index lined up for broadcast
+    lk = np.zeros(asc.numNodes, dtype=int)                      # node-specific broadcast index
+    i = np.zeros(asc.numNodes, dtype=int)                       # !node-specific! DANSE iteration index
+    nReadyForBroadcast = np.zeros(asc.numNodes, dtype=int)      # node-specific number of samples lined up for broadcast 
+    nNewLocalSamples = np.zeros(asc.numNodes, dtype=int)        # node-specific number of new local samples since the last DANSE iteration 
+    lastSampleIdx = np.zeros(asc.numNodes, dtype=int)           # last sample index lined up for broadcast
     #
     w = []                                          # filter coefficients
-    Ryy = []
-    Rnn = []
-    ryd = []
-    ytilde = []
-    ytilde_hat = []
+    Ryy = []                                        # autocorrelation matrix when VAD=1
+    Rnn = []                                        # autocorrelation matrix when VAD=0
+    ryd = []                                        # cross-correlation between observations and estimations
+    ytilde = []                                     # local full observation vectors, time-domain
+    ytilde_hat = []                                 # local full observation vectors, frequency-domain
     z = []                                          # compressed signals - time domain (/!\ -- NOT THE SAME as in `danse_sequential`!)
-    zBufferEmpty = []                               # empty "incoming signals" buffers
+    zPreviousBuffer = []                            # previous-iteration "incoming signals from other nodes" buffer
+    zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
-    oVADframes = np.zeros(numIterations)
-    numFreqLines = int(frameSize / 2 + 1)
+    oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
+    numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
     # Filter coefficients update flag for each frequency
     goodAutocorrMatrices = np.array([False for _ in range(numFreqLines)])
     for k in range(asc.numNodes):
@@ -395,110 +422,130 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         bufferFlags.append(np.zeros(len(neighbourNodes[k])))    # init all buffer flags at 0 (assuming no over- or under-flow)
         #
-        zBufferEmpty.append([])
-        for q in neighbourNodes[k]:
-            zBufferEmpty[k].append(np.array([]))     # one empty array per neighbor (for each node) -- TODO: Test that out...
-    zPreviousBuffer = copy.copy(zBufferEmpty)       # "previous DANSE iteration" buffers
-    zBuffer = copy.copy(zBufferEmpty)               # "current DANSE iteration" buffers
+        zPreviousBuffer.append(init_as_empty_buffer(len(neighbourNodes[k])))
+        zBuffer.append(init_as_empty_buffer(len(neighbourNodes[k])))
+    # Desired signal estimate [frames x frequencies x nodes]
+    d = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)
+
     # Autocorrelation matrices update counters
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
+    minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
+    # Booleans
+    startedCompression = np.full(shape=(asc.numNodes,), fill_value=False)
+    compressAndBroadcastSignals = np.full(shape=(asc.numNodes,), fill_value=False)
 
-    for idxt, tMaster in enumerate(masterClock):  # loop over master clock instants
-
-        # =============================== Pre-DANSE time processing =============================== 
-        for k in range(asc.numNodes):   # loop over nodes
-
+    t0 = time.perf_counter()
+    for idxt, tMaster in enumerate(masterClock):    # loop over master clock instants
+        for k in range(asc.numNodes):               # loop over nodes
+            # =============================== Pre-DANSE time processing =============================== 
             if k == settings.referenceSensor:
                 # Special processing for reference sensor
-                nSamplesLinedUpForBroadcast[k] += 1
-                nLocalSamplesSinceLastIter[k] += 1
+                nReadyForBroadcast[k] += 1
+                nNewLocalSamples[k] += 1
                 idxCurrSample = idxt                    # number of samples accumulated at master-time `t` at node `k`
             else:
                 passedInstants = timeInstants[timeInstants[:, k] <= tMaster, k]     # list of passed time stamps at node `k`
                 idxCurrSample = len(passedInstants)     # number of samples accumulated at master-time `t` at node `k`
                 if lastSampleIdx[k] < idxCurrSample:
-                    nSamplesLinedUpForBroadcast[k] += idxCurrSample - lastSampleIdx[k]     # can be more than 1...
-                    nLocalSamplesSinceLastIter[k] += idxCurrSample - lastSampleIdx[k]      # can be more than 1...
+                    nReadyForBroadcast[k] += idxCurrSample - lastSampleIdx[k]     # can be more than 1...
+                    nNewLocalSamples[k] += idxCurrSample - lastSampleIdx[k]      # can be more than 1...
                 else:
                     pass    # if there is no new sample at node `k`, don't increment the node-specific numbers of samples
-            lastSampleIdx[k] = idxCurrSample    # record current sample at node `k`
+            lastSampleIdx[k] = idxCurrSample    # record current sample index at node `k`
+            
+            # Raise or do not raise flag for compressing + broadcasting
+            if not startedCompression[k]:
+                if nReadyForBroadcast[k] == frameSize:
+                    compressAndBroadcastSignals[k] = True
+                    startedCompression[k] = True
+            elif nReadyForBroadcast[k] == settings.broadcastLength:
+                compressAndBroadcastSignals[k] = True
+            else:
+                compressAndBroadcastSignals[k] = False
 
-            if nSamplesLinedUpForBroadcast[k] == settings.broadcastLength:  
+            if compressAndBroadcastSignals[k]:  
                 # ~~~~~~~~~~~~~~ Time to broadcast! ~~~~~~~~~~~~~~
                 # Extract current data chunk
-                yinCurr = yin[np.amax([0, lastSampleIdx[k] - frameSize]):lastSampleIdx[k], asc.sensorToNodeTags == k]
-                zLocal = danse_compression(yinCurr, w[k][:, i, :], win)        # local compressed signals
-                z[k][:, lk[k]] = zLocal                                     # store them
-                for q in neighbourNodes[k]:
+                yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
+                zLocal = danse_compression(yinCurr, w[k][:, i[k], :yinCurr.shape[-1]], win)        # local compressed signals
+                # z[k][:, lk[k]] = np.squeeze(zLocal)                                     # store them
+                for idxq in range(len(neighbourNodes[k])):
                     # Fill in neighbors' buffers with the L = `settings.broadcastLength` last samples of local compressed signals
-                    zBuffer[k][q] = np.concatenate((zBuffer[k][q], zLocal[-settings.broadcastLength:]), axis=0)     # TODO: reset (empty-out) buffer at some point
-                settings.broadcastLength[k] = 0     # reset broadcast buffer length
-                lk[k] += 1                          # increment broadcast index
+                    if lk[k] == 0:
+                        # Broadcast the entire compressed signal (1st broadcast period, no "old" samples)
+                        zBufferCurr = np.concatenate((zBuffer[k][idxq], zLocal), axis=0)
+                    else:
+                        # Only broadcast the L = `settings.broadcastLength` last samples of local compressed signals
+                        zBufferCurr = np.concatenate((zBuffer[k][idxq], zLocal[-settings.broadcastLength:]), axis=0)
+                    zBuffer[k][idxq] = zBufferCurr   # necessary for `np.concatenate()` afterwards
+                nReadyForBroadcast[k] = 0      # reset broadcast buffer length
+                lk[k] += 1                              # increment broadcast index
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # =========================================================================================
 
-            if nLocalSamplesSinceLastIter[k] == frameSize:
-                print(f'DANSE iteration {i+1}...')
+            if nNewLocalSamples[k] == frameSize:
+                print(f'Node {k+1}: DANSE iteration {i[k]+1} (tMaster = {np.round(tMaster, 3)}s/{np.round(masterClock[-1], 3)}s total)...')
                 # ~~~~~~~~~~~~~~ Time to update the filter coefficients! ~~~~~~~~~~~~~~
                 # Gather local observation vector
-                yLocalCurr = yin[(idxCurrSample - frameSize):idxCurrSample, asc.sensorToNodeTags == k]  # local sensor observations ("$\mathbf{y}_k$" in [1])
+                yLocalCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]  # local sensor observations ("$\mathbf{y}_k$" in [1])
                 # Process buffers
-                zFromBuffers = np.empty((0, frameSize), dtype=float)
-                for q in neighbourNodes[k]:
-                    Bq = len(zBuffer[k][q])
+                zFromBuffers = np.empty((frameSize, 0), dtype=float)
+                for idxq in range(len(neighbourNodes[k])):
+                    Bq = len(zBuffer[k][idxq])
                     
                     if Bq == frameSize:     # case 1: no broadcast frame mismatch between node `k` and node `q`
-                        zFromBuffers = np.concatenate((zFromBuffers, zBuffer[k][q]), axis=0)    # TODO: check axis
+                        zFromBuffers = np.concatenate((zFromBuffers, zBuffer[k][idxq][:, np.newaxis]), axis=1)
 
-                    if Bq == frameSize - settings.broadcastLength:     # case 2: positive broadcast frame mismatch between node `k` and node `q`
-                        if i == 0:
-                            raise ValueError(f'Buffer underflow occured at first DANSE iteration (node k={k+1}`s B_{q+1} buffer).')
-                        bufferFlags[k][q] = -1      # raise negative flag
+                    elif Bq == frameSize - settings.broadcastLength:     # case 2: positive broadcast frame mismatch between node `k` and node `q`
+                        if i[k] == 0:
+                            raise ValueError(f'Buffer underflow occured at first DANSE iteration (node k={k+1}`s B_{neighbourNodes[k][idxq]+1} buffer).')
+                        bufferFlags[k][idxq] = -1      # raise negative flag
                         # Use previous iteration's buffer
-                        zUnderFlow = np.concatenate((zPreviousBuffer[k][q][-settings.broadcastLength:], zBuffer[k][q]), axis=1) # TODO: check axis
-                        zFromBuffers = np.concatenate((zFromBuffers, zUnderFlow), axis=0)   # TODO: check axis
+                        zUnderFlow = np.concatenate((zPreviousBuffer[k][idxq][-settings.broadcastLength:, np.newaxis], zBuffer[k][idxq][:, np.newaxis]), axis=1)
+                        zFromBuffers = np.concatenate((zFromBuffers, zUnderFlow), axis=0)
 
-                    if Bq == frameSize + settings.broadcastLength:     # case 3: negative broadcast frame mismatch between node `k` and node `q`
-                        bufferFlags[k][q] = 1       # raise positive flag
+                    elif Bq == frameSize + settings.broadcastLength:     # case 3: negative broadcast frame mismatch between node `k` and node `q`
+                        bufferFlags[k][idxq] = 1       # raise positive flag
                         # Discard L = `settings.broadcastLength` oldest samples in buffer
-                        zFromBuffers = np.concatenate((zFromBuffers, zBuffer[k][q][settings.broadcastLength:]), axis=0)    # TODO: check axis
+                        zFromBuffers = np.concatenate((zFromBuffers, zBuffer[k][idxq][settings.broadcastLength:, np.newaxis]), axis=1)
 
                     else:
-                        raise ValueError(f'Node k={k+1}: Unexpected buffer size for neighbor node q={q+1}.')    # TODO: ensure that we never get that error
+                        raise ValueError(f'Node k={k+1}: Unexpected buffer size for neighbor node q={neighbourNodes[k][idxq]+1}.')
                         
                 # Build full available observation vector
-                yTildeCurr = np.concatenate((yLocalCurr, zFromBuffers))
-                ytilde[k][:, i, :] = yTildeCurr
+                yTildeCurr = np.concatenate((yLocalCurr, zFromBuffers), axis=1)
+                ytilde[k][:, i[k], :] = yTildeCurr
                 # Go to frequency domain
-                ytilde_hat_curr = fftscale * np.fft.fft(ytilde[k][:, i, :] * win, frameSize, axis=0)
+                ytilde_hat_curr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
                 # Keep only positive frequencies
-                ytilde_hat[k][:, i, :] = ytilde_hat_curr[:numFreqLines, :]
+                ytilde_hat[k][:, i[k], :] = ytilde_hat_curr[:numFreqLines, :]
                 # Compute VAD
-                VADinFrame = oVAD[(idxCurrSample - frameSize):idxCurrSample]
-                oVADframes[i] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
+                VADinFrame = oVAD[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1)]
+                oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
                 # Count autocorrelation matrices updates
-                if oVADframes[i]:
+                if oVADframes[i[k]]:
                     numUpdatesRyy[k] += 1
                 else:     
                     numUpdatesRnn[k] += 1
                 # Loop over frequency lines
                 for kappa in range(numFreqLines):
                     # Autocorrelation matrices update -- eq.(46) in ref.[1] /and-or/ eq.(20) in ref.[3].
-                    if oVADframes[i]:
+                    if oVADframes[i[k]]:
                         Ryy[k][kappa, :, :] = settings.expAvgBeta * Ryy[k][kappa, :, :] + \
-                            (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i, :], ytilde_hat[k][kappa, i, :].conj())  # update signal + noise matrix
+                            (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())  # update signal + noise matrix
                     else:
                         Rnn[k][kappa, :, :] = settings.expAvgBeta * Rnn[k][kappa, :, :] + \
-                            (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i, :], ytilde_hat[k][kappa, i, :].conj())   # update noise-only matrix
+                            (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())   # update noise-only matrix
 
-                    #Check quality of autocorrelations estimates
+                    # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                     if not goodAutocorrMatrices[kappa]:
                         goodAutocorrMatrices[kappa] = check_autocorr_est(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                                numUpdatesRyy[k], numUpdatesRnn[k], settings.minNumAutocorrUpdates)
+                                numUpdatesRyy[k], numUpdatesRnn[k], minNumAutocorrUpdates)
 
                     if goodAutocorrMatrices[kappa]:
                         if settings.performGEVD:
-                            w[k][kappa, i, :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                            w[k][kappa, i[k], :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
                                                                     settings.GEVDrank, settings.referenceSensor)
                         else:
                             # Reference sensor selection vector
@@ -507,22 +554,27 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             # Cross-correlation matrix update 
                             ryd[k][kappa, :] = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
                             # Update node-specific parameters of node k
-                            w[k][kappa, i, :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
-                    elif i > 1:
+                            w[k][kappa, i[k], :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
+                    elif i[k] > 1:
                         # Do not update the filter coefficients
-                        w[k][kappa, i, :] = w[k][kappa, i - 1, :]
-                
+                        w[k][kappa, i[k], :] = w[k][kappa, i[k] - 1, :]
+
+                # Compute desired signal estimate
+                d[:, i[k], k] = np.einsum('ij,ij->i', w[k][:, i[k], :].conj(), ytilde_hat[k][:, i[k], :])  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
+
                 # Increment DANSE iteration index
-                i += 1
+                i[k] += 1
+                # Reset counters
+                nNewLocalSamples[k] = 0
                 # Update buffers status for node `k`
-                zPreviousBuffer[k] = copy.copy(zBuffer[k])    # TODO make sure this is the correct way to copy objects in this case
-                zBuffer[k] = copy.copy(zBufferEmpty[k])       # TODO make sure this is the correct way to copy objects in this case
+                zPreviousBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
+                zBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-        # =========================================================================================
 
     print('Simultaneous DANSE processing all done.')
+    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {np.round(time.perf_counter() - t0, 2)}s.')
 
     stop = 1
 
-    return 0
+    return d
