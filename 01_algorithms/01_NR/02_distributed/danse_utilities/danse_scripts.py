@@ -551,18 +551,22 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
                     # Count autocorrelation matrices updates
                     if oVADframes[i[k]]:
+                        Ryy[k] = settings.expAvgBeta * Ryy[k] + (1 - settings.expAvgBeta) *\
+                            np.einsum('ij,ik->ijk', ytilde_hat[k][:, i[k], :], ytilde_hat[k][:, i[k], :].conj())  # update signal + noise matrix
                         numUpdatesRyy[k] += 1
                     else:     
+                        Rnn[k] = settings.expAvgBeta * Rnn[k] + (1 - settings.expAvgBeta) *\
+                            np.einsum('ij,ik->ijk', ytilde_hat[k][:, i[k], :], ytilde_hat[k][:, i[k], :].conj())  # update signal + noise matrix
                         numUpdatesRnn[k] += 1
                     # Loop over frequency lines
                     for kappa in range(numFreqLines):
                         # Autocorrelation matrices update -- eq.(46) in ref.[1] /and-or/ eq.(20) in ref.[3].
-                        if oVADframes[i[k]]:
-                            Ryy[k][kappa, :, :] = settings.expAvgBeta * Ryy[k][kappa, :, :] + \
-                                (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())  # update signal + noise matrix
-                        else:
-                            Rnn[k][kappa, :, :] = settings.expAvgBeta * Rnn[k][kappa, :, :] + \
-                                (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())   # update noise-only matrix
+                        # if oVADframes[i[k]]:
+                        #     Ryy[k][kappa, :, :] = settings.expAvgBeta * Ryy[k][kappa, :, :] + \
+                        #         (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())  # update signal + noise matrix
+                        # else:
+                        #     Rnn[k][kappa, :, :] = settings.expAvgBeta * Rnn[k][kappa, :, :] + \
+                        #         (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())   # update noise-only matrix
 
                         # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                         if not goodAutocorrMatrices[kappa]:

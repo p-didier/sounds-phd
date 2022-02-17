@@ -36,3 +36,22 @@ L = 1024
 R = 0.5
 a = np.hanning(L)
 scipy.signal.check_NOLA(a, L, L*(1-R))
+
+#%% -- Outer product along rows of 2D matrix to form 3D tensor
+
+import numpy as np
+
+seed = 123421
+rng = np.random.default_rng(seed)
+n1 = 10
+n2 = 15
+my2Dmat = rng.random(size=(n1, n2)) + 1j * rng.random(size=(n1, n2))
+test = np.einsum('ij,ik->ijk', my2Dmat, my2Dmat.conj())  # update signal + noise matrix
+
+truth = np.zeros((n1,n2,n2), dtype=complex)
+for ii in range(n1):
+    truth[ii, :, :] = np.outer(my2Dmat[ii, :], my2Dmat[ii, :].conj())
+
+print(test.shape)
+print(truth.shape)
+print((test == truth).all())
