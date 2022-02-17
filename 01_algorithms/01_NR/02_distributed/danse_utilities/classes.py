@@ -1,5 +1,3 @@
-import time
-t0 = time.perf_counter()
 from dataclasses import dataclass, field
 import sys, warnings, copy
 from pathlib import PurePath, Path
@@ -7,7 +5,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 import scipy.signal as sig
-print(f'classes.py -- Global packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 # Find path to root folder
 if not any("_general_fcts" in s for s in sys.path):
     rootFolder = 'sounds-phd'
@@ -15,12 +12,8 @@ if not any("_general_fcts" in s for s in sys.path):
     while PurePath(pathToRoot).name != rootFolder:
         pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/_general_fcts')
-t0 = time.perf_counter()
 import class_methods.dataclass_methods as met
-print(f'classes.py -- `class_methods` loaded ({round(time.perf_counter() - t0, 2)}s)')
-t0 = time.perf_counter()
 from plotting.twodim import plot_side_room
-print(f'classes.py -- `plot_side_room` loaded ({round(time.perf_counter() - t0, 2)}s)')
 
 
 @dataclass
@@ -109,7 +102,7 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
                 string += f'\nSRO Node {idxNode + 1} = {self.SROsppm[idxNode]} ppm'
                 if self.SROsppm[idxNode] == 0:
                     string += ' (base sampling freq.)'
-        string += '\n\n'
+        string += '\n'
         return string
 
     def load(self, filename: str):

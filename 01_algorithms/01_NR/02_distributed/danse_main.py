@@ -1,5 +1,6 @@
 # Using the "danse_env" virtual environment
 # %%
+# ---------------- Imports
 import time
 t00 = time.perf_counter()
 from pathlib import Path, PurePath
@@ -14,16 +15,17 @@ from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
 # Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
 if not any("_general_fcts" in s for s in sys.path):
-    rootFolder = 'sounds-phd'
-    pathToRoot = Path(__file__)
-    while PurePath(pathToRoot).name != rootFolder:
-        pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/_general_fcts')
+if not any("_third_parties" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_third_parties')
 from playsounds.playsounds import playwavfile
 print(f'Custom (non-DANSE) packages loaded ({round(time.perf_counter() - t0, 2)}s)')
-print(f'Total packages loading time: {round(time.perf_counter() - t00, 2)}s')
+print(f'Total packages loading time: {round(time.perf_counter() - t00, 2)}s\n')
 # ------------------------
 
 # General parameters
@@ -35,7 +37,7 @@ mySettings = ProgramSettings(
     acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=5,
+    signalDuration=3,
     baseSNR=-10,
     plotAcousticScenario=False,
     VADwinLength=40e-3,             # VAD window length [s]

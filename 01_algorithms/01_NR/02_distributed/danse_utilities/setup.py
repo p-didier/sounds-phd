@@ -1,17 +1,13 @@
 import sys, time
-t0 = time.perf_counter()
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
 import scipy.signal as sig
 from pathlib import Path, PurePath
 from scipy.signal._arraytools import zero_ext
-print(f'setup.py -- Global packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 
-t0 = time.perf_counter()
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
-print(f'setup.py -- <classes> and <danse_scripts> packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 if not any("_general_fcts" in s for s in sys.path):
     # Find path to root folder
     rootFolder = 'sounds-phd'
@@ -19,16 +15,9 @@ if not any("_general_fcts" in s for s in sys.path):
     while PurePath(pathToRoot).name != rootFolder:
         pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/_general_fcts')
-t0 = time.perf_counter()
 from plotting.twodim import *
-print(f'setup.py -- plotting2D packages loaded ({round(time.perf_counter() - t0, 2)}s)')
-t0 = time.perf_counter()
 import VAD
-print(f'setup.py -- VAD package loaded ({round(time.perf_counter() - t0, 2)}s)')
-t0 = time.perf_counter()
 from metrics import eval_enhancement
-print(f'setup.py -- eval_enhancement package loaded ({round(time.perf_counter() - t0, 2)}s)')
-t0 = time.perf_counter()
 if not any("01_acoustic_scenes" in s for s in sys.path):
     # Find path to root folder
     rootFolder = 'sounds-phd'
@@ -37,7 +26,6 @@ if not any("01_acoustic_scenes" in s for s in sys.path):
         pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 from utilsASC.classes import AcousticScenario
-print(f'setup.py -- utilsASC packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 
 
 def run_experiment(settings: classes.ProgramSettings):

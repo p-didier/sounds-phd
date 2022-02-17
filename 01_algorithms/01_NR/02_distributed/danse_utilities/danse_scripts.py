@@ -1,4 +1,5 @@
 
+from doctest import master
 import numpy as np
 import scipy, time
 import scipy.signal
@@ -429,6 +430,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
     minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
+    # Important instants
+    idxBroadcasts = [[] for _ in range(asc.numNodes)]
+    idxUpdates = [[] for _ in range(asc.numNodes)]
     # Booleans
     startedCompression = np.full(shape=(asc.numNodes,), fill_value=False)
     compressAndBroadcastSignals = np.full(shape=(asc.numNodes,), fill_value=False)
@@ -463,6 +467,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 compressAndBroadcastSignals[k] = False
 
             if compressAndBroadcastSignals[k]:  
+                print(f'tMaster = {tMaster}s: Node {k+1} broadcasts to its neighbors - tEnd = {np.round(masterClock[-1], 2)}')
+                idxBroadcasts[k].append(idxt)
                 # ~~~~~~~~~~~~~~ Time to broadcast! ~~~~~~~~~~~~~~
                 # Extract current data chunk
                 yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
@@ -479,16 +485,20 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 nReadyForBroadcast[k] = 0      # reset broadcast buffer length
                 lk[k] += 1                              # increment broadcast index
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            else:
+                # print(f'tMaster = {tMaster}s: Node {k+1} does nothing')
+                pass
             # =========================================================================================
 
             if nNewLocalSamples[k] == nExpectedNewSamplesPerFrame:
-                print(f'Node {k+1}: DANSE iteration (#{i[k]+1}; tMaster = {np.round(tMaster, 3)}s/{np.round(masterClock[-1], 3)}s total)')
+                print(f'tMaster = {tMaster}s: Node {k+1} DANSE iteration #{i[k]+1} - tEnd = {np.round(masterClock[-1], 2)}')
                 if lastSampleIdx[k] < frameSize - 1:
                     nNewLocalSamples[k] = 0     # if there are not enough samples to perform the `frameSize`-points FFT, we reset the counter (first iteration, basically)
                     zPreviousBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
                     zBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
                 else:
                     # ~~~~~~~~~~~~~~ Time to update the filter coefficients! ~~~~~~~~~~~~~~
+                    idxUpdates[k].append(idxt)
                     # Gather local observation vector
                     yLocalCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]  # local sensor observations ("$\mathbf{y}_k$" in [1])
                     
@@ -581,9 +591,25 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     zBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
                     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
     print('Simultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {np.round(time.perf_counter() - t0, 2)}s.')
+
+    if 1:
+        import matplotlib.pyplot as plt
+        instants = np.zeros((len(masterClock), asc.numNodes))
+        for k in range(asc.numNodes):
+            instants[idxBroadcasts[k], k] = 1   # broadcasts
+            instants[idxUpdates[k], k] = 2      # updates
+        fig = plt.figure(figsize=(8,4))
+        ax = fig.add_subplot(111)
+        ax.plot(masterClock, instants)
+        ax.grid()
+        ax.set_yticks([0,1,2])
+        ax.set_yticklabels(['Gathers','Broadcasts','Updates'])
+        ax.set_ylim([-0.5, 2.5])
+        plt.tight_layout()	
+        plt.show()
+        stop = 1
 
     stop = 1
 

@@ -1,4 +1,4 @@
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 import numpy as np
 
 def plot_room2D(ax, rd):
@@ -12,17 +12,17 @@ def plot_room2D(ax, rd):
     return None
 
 
-# def plotSTFT(data):
+def plotSTFT(data):
     
-#     fig, ax = plt.subplots()
-#     ax.imshow(20*np.log10(np.abs(data)))
-#     ax.invert_yaxis()
-#     ax.set_aspect('auto')
-#     ax.grid()
-#     # ax.set(xlabel='$t$ [s]')
-#     plt.show()
+    fig, ax = plt.subplots()
+    ax.imshow(20*np.log10(np.abs(data)))
+    ax.invert_yaxis()
+    ax.set_aspect('auto')
+    ax.grid()
+    # ax.set(xlabel='$t$ [s]')
+    plt.show()
 
-#     return None
+    return None
     
 
 def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20):
