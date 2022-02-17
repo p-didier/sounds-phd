@@ -1,23 +1,26 @@
-from cmath import isinf
+import time
+t0 = time.perf_counter()
 from dataclasses import dataclass, field
-import enum
-from multiprocessing.managers import ValueProxy
-from multiprocessing.sharedctypes import Value
-from operator import contains
 import sys, warnings, copy
 from pathlib import PurePath, Path
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
 import scipy.signal as sig
+print(f'classes.py -- Global packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 # Find path to root folder
-rootFolder = 'sounds-phd'
-pathToRoot = Path(__file__)
-while PurePath(pathToRoot).name != rootFolder:
-    pathToRoot = pathToRoot.parent
-sys.path.append(f'{pathToRoot}/_general_fcts')
-from class_methods import dataclass_methods
+if not any("_general_fcts" in s for s in sys.path):
+    rootFolder = 'sounds-phd'
+    pathToRoot = Path(__file__)
+    while PurePath(pathToRoot).name != rootFolder:
+        pathToRoot = pathToRoot.parent
+    sys.path.append(f'{pathToRoot}/_general_fcts')
+t0 = time.perf_counter()
+import class_methods.dataclass_methods as met
+print(f'classes.py -- `class_methods` loaded ({round(time.perf_counter() - t0, 2)}s)')
+t0 = time.perf_counter()
 from plotting.twodim import plot_side_room
+print(f'classes.py -- `plot_side_room` loaded ({round(time.perf_counter() - t0, 2)}s)')
 
 
 @dataclass
@@ -110,10 +113,10 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
         return string
 
     def load(self, filename: str):
-        return dataclass_methods.load(self, filename)
+        return met.load(self, filename)
 
     def save(self, filename: str):
-        dataclass_methods.save(self, filename)
+        met.save(self, filename)
 
 
 
@@ -180,7 +183,6 @@ class EnhancementMeasures:
     snr: dict         # Unweighted SNR
     fwSNRseg: dict    # Frequency-weighted segmental SNR
     stoi: dict        # Short-Time Objective Intelligibility
-    # sisnr: dict       # Speech-Intelligibility-weighted SNR
 
 
 @dataclass
@@ -416,7 +418,7 @@ class Results:
     acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
 
     def load(self, filename: str):
-        return dataclass_methods.load(self, filename)
+        return met.load(self, filename)
 
     def save(self, filename: str, light=False):
         """Exports results as pickle archive
@@ -425,9 +427,9 @@ class Results:
         if light:
             mycls = copy.copy(self)
             delattr(mycls, 'signals')
-            dataclass_methods.save(mycls, filename)
+            met.save(mycls, filename)
         else:
-            dataclass_methods.save(self, filename)
+            met.save(self, filename)
 
     def plot_enhancement_metrics(self):
         """Creates a visual representation of DANSE performance results."""

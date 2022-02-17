@@ -1,5 +1,3 @@
-from multiprocessing.managers import ValueProxy
-from sys import path_importer_cache
 import simpleaudio as sa
 import numpy as np
 from pathlib import Path

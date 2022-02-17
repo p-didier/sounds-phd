@@ -3,13 +3,14 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 import numpy as np
 import matplotlib.pyplot as plt
-# Find path to root folder
-rootFolder = 'sounds-phd'
-pathToRoot = Path(__file__)
-while PurePath(pathToRoot).name != rootFolder:
-    pathToRoot = pathToRoot.parent
-sys.path.append(f'{pathToRoot}/_general_fcts')
-from class_methods import dataclass_methods 
+if not any("_general_fcts" in s for s in sys.path):
+    # Find path to root folder
+    rootFolder = 'sounds-phd'
+    pathToRoot = Path(__file__)
+    while PurePath(pathToRoot).name != rootFolder:
+        pathToRoot = pathToRoot.parent
+    sys.path.append(f'{pathToRoot}/_general_fcts')
+import class_methods.dataclass_methods as met
 from plotting.twodim import plot_side_room
 
 
@@ -45,9 +46,9 @@ class AcousticScenario():
     
     # Save and load
     def load(self, foldername: str):
-        return dataclass_methods.load(self, foldername)
+        return met.load(self, foldername)
     def save(self, filename: str):
-        dataclass_methods.save(self, filename)
+        met.save(self, filename)
 
     def plot(self):
 
@@ -122,9 +123,9 @@ class ASCProgramSettings:
     
     @classmethod
     def load(cls, filename: str):
-        return dataclass_methods.load(cls, filename)
+        return met.load(cls, filename)
     def save(self, filename: str):
-        dataclass_methods.save(self, filename)
+        met.save(self, filename)
     
     def __post_init__(self):
         """Initial program settings checks"""

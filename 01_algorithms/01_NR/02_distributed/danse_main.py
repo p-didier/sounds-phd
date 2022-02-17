@@ -1,20 +1,29 @@
 # Using the "danse_env" virtual environment
 # %%
-from danse_utilities.classes import ProgramSettings, Results
-from danse_utilities.setup import run_experiment
+import time
+t00 = time.perf_counter()
 from pathlib import Path, PurePath
 import sys
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
-#
+print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
+t0 = time.perf_counter()
+from danse_utilities.classes import ProgramSettings
+from danse_utilities.setup import run_experiment
+print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
+t0 = time.perf_counter()
 # Find path to root folder
-rootFolder = 'sounds-phd'
-pathToRoot = Path(__file__)
-while PurePath(pathToRoot).name != rootFolder:
-    pathToRoot = pathToRoot.parent
-sys.path.append(f'{pathToRoot}/_general_fcts')
+if not any("_general_fcts" in s for s in sys.path):
+    rootFolder = 'sounds-phd'
+    pathToRoot = Path(__file__)
+    while PurePath(pathToRoot).name != rootFolder:
+        pathToRoot = pathToRoot.parent
+    sys.path.append(f'{pathToRoot}/_general_fcts')
+    sys.path.append(f'{pathToRoot}/_third_parties')
 from playsounds.playsounds import playwavfile
+print(f'Custom (non-DANSE) packages loaded ({round(time.perf_counter() - t0, 2)}s)')
+print(f'Total packages loading time: {round(time.perf_counter() - t00, 2)}s')
 # ------------------------
 
 # General parameters
@@ -23,7 +32,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1 1]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     signalDuration=5,

@@ -1,7 +1,3 @@
-from cmath import isnan
-from datetime import timedelta
-import time
-from numba.core.types.scalars import EnumMember
 import numpy as np
 import sys
 import scipy.signal as sig
@@ -13,7 +9,8 @@ rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
 while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
-sys.path.append(f'{pathToRoot}/_third_parties')
+if f'{pathToRoot}/_third_parties' not in sys.path:
+    sys.path.append(f'{pathToRoot}/_third_parties')
 
 
 def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03):

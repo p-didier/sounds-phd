@@ -1,0 +1,15 @@
+{
+    "include": [
+      "_general_fcts",
+      "_third_parties",
+      "01_algorithms"
+    ],
+    
+    "exclude": [
+      "**/node_modules",
+      "**/__pycache__"
+    ],
+  
+    "ignore": [
+    ],
+}
