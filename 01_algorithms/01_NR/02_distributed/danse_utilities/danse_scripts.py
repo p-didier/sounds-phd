@@ -1,8 +1,9 @@
 
 from doctest import master
 import numpy as np
-import scipy, time
+import scipy, time, datetime
 import scipy.signal
+from numba import njit
 from . import classes
 
 
@@ -105,7 +106,31 @@ def check_autocorr_est(Ryy, Rnn, nUpRyy=0, nUpRnn=0, min_nUp=0):
     return flag
 
 
-def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0):
+# -------- JIT-ed subfunctions for perform_gevd() --------
+@njit
+def invert_jitted(A):
+    B = np.linalg.inv(A)
+    return B
+
+@njit
+def sortevls_jitted(Qmat, sigma, rank):
+    idx = np.flip(np.argsort(sigma))
+    GEVLs_yy = np.flip(np.sort(sigma))
+    Sigma_yy = np.diag(GEVLs_yy)
+    Qmat = Qmat[:, idx]
+    diagveig = np.array([1 - 1/sigma for sigma in GEVLs_yy[:rank]])   # rank <GEVDrank> approximation
+    diagveig = np.append(diagveig, np.zeros(Sigma_yy.shape[0] - rank))
+    return diagveig, Qmat
+
+@njit
+def getw_jitted(Qmat, diagveig, Evect):
+    diagveig = diagveig.astype(np.complex128)
+    Evect = Evect.astype(np.complex128)
+    return np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect
+# --------------------------------------------------------
+
+
+def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0, jitted=False):
     """GEVD computations for DANSE.
     
     Parameters
@@ -118,6 +143,8 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0):
         GEVD rank approximation.
     refSensorIdx : int
         Index of the reference sensor (>=0).
+    jitted : bool
+        If True, just a Just-In-Time (JIT) implementation via numba.
 
     Returns
     -------
@@ -129,19 +156,23 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0):
     # Reference sensor selection vector 
     Evect = np.zeros((Ryy.shape[0],))
     Evect[refSensorIdx] = 1
-    # Perform generalized eigenvalue decomposition
+    # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted
     sigma, Xmat = scipy.linalg.eigh(Ryy, Rnn)
-    Qmat = np.linalg.inv(Xmat.conj().T)
-    # Sort eigenvalues in descending order
-    idx = np.flip(np.argsort(sigma))
-    GEVLs_yy = np.flip(np.sort(sigma))
-    Sigma_yy = np.diag(GEVLs_yy)
-    Qmat = Qmat[:, idx]
-    # Estimate speech covariance matrix
-    diagveig = np.array([1 - 1/sigma for sigma in GEVLs_yy[:rank]])   # rank <GEVDrank> approximation
-    diagveig = np.append(diagveig, np.zeros(Sigma_yy.shape[0] - rank))
-    # LMMSE weights
-    w = np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect 
+    if jitted:
+        Qmat = invert_jitted(Xmat.conj().T)
+        diagveig, Qmat = sortevls_jitted(Qmat, sigma, rank)
+        w = getw_jitted(Qmat, diagveig, Evect)
+    else:
+        Qmat = np.linalg.inv(Xmat.conj().T)
+        # Sort eigenvalues in descending order
+        idx = np.flip(np.argsort(sigma))
+        GEVLs_yy = np.flip(np.sort(sigma))
+        Sigma_yy = np.diag(GEVLs_yy)
+        Qmat = Qmat[:, idx]
+        diagveig = np.array([1 - 1/sigma for sigma in GEVLs_yy[:rank]])   # rank <GEVDrank> approximation
+        diagveig = np.append(diagveig, np.zeros(Sigma_yy.shape[0] - rank))
+        # LMMSE weights
+        w = np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect
     return w, Qmat
 
 
@@ -331,28 +362,6 @@ def danse_compression(yq, w, win):
     return zq
 
 
-def init_as_empty_buffer(nNeighbors):
-    """Returns a list of empty arrays, corresponding to the
-    neighbor-nodes buffers at a certain node.
-    
-    Parameters
-    ----------
-    nNeighbors : int
-        Number of neighbors of current node.
-
-    Returns
-    -------
-    out : list of empty arrays
-        Empty buffer.    
-    """
-    
-    out = []
-    for q in range(nNeighbors):
-        out.append(np.array([]))     # one empty array per neighbor (for each node)
-
-    return out
-
-
 def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, timeInstants):
     """Wrapper for Simultaneous-Node-Updating DANSE (rs-DANSE) [2].
 
@@ -421,8 +430,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         z.append(np.empty((frameSize, 0), dtype=float))
         zPrevious.append(np.empty((frameSize, 0), dtype=float))
-        zPreviousBuffer.append(init_as_empty_buffer(len(neighbourNodes[k])))
-        zBuffer.append(init_as_empty_buffer(len(neighbourNodes[k])))
+        zPreviousBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
     # Desired signal estimate [frames x frequencies x nodes]
     d = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)
 
@@ -466,8 +475,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             else:
                 compressAndBroadcastSignals[k] = False
 
-            if compressAndBroadcastSignals[k]:  
-                print(f'tMaster = {tMaster}s: Node {k+1} broadcasts to its neighbors - tEnd = {np.round(masterClock[-1], 2)}')
+            if compressAndBroadcastSignals[k]: 
+                if k == settings.referenceSensor and lk[k] % 100 == 0:
+                    print(f'tMaster = {tMaster}s(/{np.round(masterClock[-1], 2)}s): Ref. node {k+1}`s {lk[k]}^th broadcast to its neighbors')
                 idxBroadcasts[k].append(idxt)
                 # ~~~~~~~~~~~~~~ Time to broadcast! ~~~~~~~~~~~~~~
                 # Extract current data chunk
@@ -486,18 +496,17 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 lk[k] += 1                              # increment broadcast index
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             else:
-                # print(f'tMaster = {tMaster}s: Node {k+1} does nothing')
-                pass
+                pass    # no broadcast at this instant
             # =========================================================================================
 
             if nNewLocalSamples[k] == nExpectedNewSamplesPerFrame:
-                print(f'tMaster = {tMaster}s: Node {k+1} DANSE iteration #{i[k]+1} - tEnd = {np.round(masterClock[-1], 2)}')
                 if lastSampleIdx[k] < frameSize - 1:
                     nNewLocalSamples[k] = 0     # if there are not enough samples to perform the `frameSize`-points FFT, we reset the counter (first iteration, basically)
-                    zPreviousBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
-                    zBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
+                    zPreviousBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
+                    zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
                 else:
                     # ~~~~~~~~~~~~~~ Time to update the filter coefficients! ~~~~~~~~~~~~~~
+                    t0update = time.perf_counter()
                     idxUpdates[k].append(idxt)
                     # Gather local observation vector
                     yLocalCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]  # local sensor observations ("$\mathbf{y}_k$" in [1])
@@ -562,8 +571,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                         if goodAutocorrMatrices[kappa]:
                             if settings.performGEVD:    # GEVD update
-                                w[k][kappa, i[k], :], Qmat = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                                                                        settings.GEVDrank, settings.referenceSensor)
+                                w[k][kappa, i[k], :], _ = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                                                                        settings.GEVDrank, settings.referenceSensor, jitted=False)
                             else:   # regular update
                                 # Reference sensor selection vector
                                 Evect = np.zeros((dimYTilde[k],))
@@ -587,14 +596,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     zPrevious[k] = z[k]
                     z[k] = np.empty((frameSize, 0), dtype=float)
                     # Update buffers status for node `k`
-                    zPreviousBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
-                    zBuffer[k] = init_as_empty_buffer(len(neighbourNodes[k]))
+                    zPreviousBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
+                    zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
+                    print(f'tMaster = {tMaster}s(/{np.round(masterClock[-1], 2)}s): Node {k+1} DANSE iteration #{i[k]+1} (took {int(1e3 * (time.perf_counter() - t0update))}ms)')
                     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    print('Simultaneous DANSE processing all done.')
-    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {np.round(time.perf_counter() - t0, 2)}s.')
+    print('\nSimultaneous DANSE processing all done.')
+    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
 
-    if 1:
+
+    if 0:
         import matplotlib.pyplot as plt
         instants = np.zeros((len(masterClock), asc.numNodes))
         for k in range(asc.numNodes):
