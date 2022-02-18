@@ -167,13 +167,64 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0, jitted=False):
         # Sort eigenvalues in descending order
         idx = np.flip(np.argsort(sigma))
         GEVLs_yy = np.flip(np.sort(sigma))
-        Sigma_yy = np.diag(GEVLs_yy)
         Qmat = Qmat[:, idx]
         diagveig = np.array([1 - 1/sigma for sigma in GEVLs_yy[:rank]])   # rank <GEVDrank> approximation
-        diagveig = np.append(diagveig, np.zeros(Sigma_yy.shape[0] - rank))
+        diagveig = np.append(diagveig, np.zeros(Ryy.shape[0] - rank))
         # LMMSE weights
         w = np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect
     return w, Qmat
+
+
+def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0, jitted=False):
+    """GEVD computations for DANSE, `for`-loop free.
+    
+    Parameters
+    ----------
+    Ryy : [M x N x N] np.ndarray (complex)
+        Autocorrelation matrix between the sensor signals.
+    Rnn : [M x N x N] np.ndarray (complex)
+        Autocorrelation matrix between the noise signals.
+    rank : int
+        GEVD rank approximation.
+    refSensorIdx : int
+        Index of the reference sensor (>=0).
+    jitted : bool
+        If True, just a Just-In-Time (JIT) implementation via numba.
+
+    Returns
+    -------
+    w : [M x N] np.ndarray (complex)
+        GEVD-DANSE filter coefficients.
+    Qmat : [M x N x N] np.ndarray (complex)
+        Hermitian conjugate inverse of the generalized eigenvectors matrix of the pencil {Ryy, Rnn}.
+    """
+    # ------------ for-loop-free estimate ------------
+    n = Ryy.shape[-1]
+    nKappas = Ryy.shape[0]
+    # Reference sensor selection vector 
+    Evect = np.zeros((n,))
+    Evect[refSensorIdx] = 1
+
+    sigma = np.zeros((nKappas, n))
+    Xmat = np.zeros((nKappas, n, n), dtype=complex)
+    for kappa in range(nKappas):
+        # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted
+        sigmacurr, Xmatcurr = scipy.linalg.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
+        # Flip Xmat to sort eigenvalues in descending order
+        idx = np.flip(np.argsort(sigmacurr))
+        sigma[kappa, :] = sigmacurr[idx]
+        Xmat[kappa, :, :] = Xmatcurr[:, idx]
+    Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0,2,1]))
+    # GEVLs tensor
+    Dmat = np.zeros((nKappas, n, n))
+    Dmat[:, 0, 0] = np.squeeze(1 - 1/sigma[:, :rank])
+    # LMMSE weights
+    QH = np.transpose(Qmat.conj(), axes=[0,2,1])
+    QmH = np.linalg.inv(QH)
+    w = np.matmul(np.matmul(np.matmul(QmH, Dmat), QH), Evect)
+
+    return w, Qmat
+
 
 
 def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):
@@ -412,8 +463,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
-    # Filter coefficients update flag for each frequency
-    goodAutocorrMatrices = np.array([False for _ in range(numFreqLines)])
     for k in range(asc.numNodes):
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1) + len(neighbourNodes[k])
         w.append(rng.random(size=(numFreqLines, numIterations, dimYTilde[k])) +\
@@ -445,6 +494,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Booleans
     startedCompression = np.full(shape=(asc.numNodes,), fill_value=False)
     compressAndBroadcastSignals = np.full(shape=(asc.numNodes,), fill_value=False)
+    startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)    # start updates flag
 
     t0 = time.perf_counter()
     for idxt, tMaster in enumerate(masterClock):    # loop over master clock instants
@@ -558,36 +608,33 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         Rnn[k] = settings.expAvgBeta * Rnn[k] + (1 - settings.expAvgBeta) *\
                             np.einsum('ij,ik->ijk', ytilde_hat[k][:, i[k], :], ytilde_hat[k][:, i[k], :].conj())  # update signal + noise matrix
                         numUpdatesRnn[k] += 1
-                    # Loop over frequency lines
-                    for kappa in range(numFreqLines):
-                        # Autocorrelation matrices update -- eq.(46) in ref.[1] /and-or/ eq.(20) in ref.[3].
-                        # if oVADframes[i[k]]:
-                        #     Ryy[k][kappa, :, :] = settings.expAvgBeta * Ryy[k][kappa, :, :] + \
-                        #         (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())  # update signal + noise matrix
-                        # else:
-                        #     Rnn[k][kappa, :, :] = settings.expAvgBeta * Rnn[k][kappa, :, :] + \
-                        #         (1 - settings.expAvgBeta) * np.outer(ytilde_hat[k][kappa, i[k], :], ytilde_hat[k][kappa, i[k], :].conj())   # update noise-only matrix
+                    # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
+                    if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
+                        startUpdates[k] = True
 
-                        # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
-                        if not goodAutocorrMatrices[kappa]:
-                            goodAutocorrMatrices[kappa] = check_autocorr_est(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                                    numUpdatesRyy[k], numUpdatesRnn[k], minNumAutocorrUpdates)
+                    if startUpdates[k]:
+                        # No `for`-loop versions
+                        if settings.performGEVD:    # GEVD update
+                            w[k][:, i[k], :], _ = perform_gevd_noforloop(Ryy[k], Rnn[k], settings.GEVDrank, settings.referenceSensor, jitted=False)
+                        else:   # regular update
+                            raise ValueError('Not yet implemented')
 
-                        if goodAutocorrMatrices[kappa]:
-                            if settings.performGEVD:    # GEVD update
-                                w[k][kappa, i[k], :], _ = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                                                                        settings.GEVDrank, settings.referenceSensor, jitted=False)
-                            else:   # regular update
-                                # Reference sensor selection vector
-                                Evect = np.zeros((dimYTilde[k],))
-                                Evect[settings.referenceSensor] = 1
-                                # Cross-correlation matrix update 
-                                ryd[k][kappa, :] = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
-                                # Update node-specific parameters of node k
-                                w[k][kappa, i[k], :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
-                        elif i[k] > 1:
-                            # Do not update the filter coefficients
-                            w[k][kappa, i[k], :] = w[k][kappa, i[k] - 1, :]
+                        # # Loop over frequency lines
+                        # for kappa in range(numFreqLines):
+                        #     if settings.performGEVD:    # GEVD update
+                        #         w[k][kappa, i[k], :], _ = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
+                        #                                                 settings.GEVDrank, settings.referenceSensor, jitted=False)
+                        #     else:   # regular update
+                        #         # Reference sensor selection vector
+                        #         Evect = np.zeros((dimYTilde[k],))
+                        #         Evect[settings.referenceSensor] = 1
+                        #         # Cross-correlation matrix update 
+                        #         ryd[k][kappa, :] = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
+                        #         # Update node-specific parameters of node k
+                        #         w[k][kappa, i[k], :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
+                    elif i[k] > 1:
+                        # Do not update the filter coefficients
+                        w[k][:, i[k], :] = w[k][:, i[k] - 1, :]
 
                     # Compute desired signal estimate
                     d[:, i[k], k] = np.einsum('ij,ij->i', w[k][:, i[k], :].conj(), ytilde_hat[k][:, i[k], :])  # vectorized way to do things https://stackoverflow.com/a/15622926/16870850
