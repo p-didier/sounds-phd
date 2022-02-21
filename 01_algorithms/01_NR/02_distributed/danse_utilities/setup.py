@@ -1,4 +1,7 @@
 import sys, time
+from tracemalloc import stop
+from turtle import st
+from xml.dom.expatbuilder import FragmentBuilderNS
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -52,12 +55,16 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst_STFT = danse(mySignals, asc, settings)
+    mySignals.desiredSigEst_STFT, mySignals.desiredSigEstLocal_STFT = danse(mySignals, asc, settings)
 
     # --------------- Post-process ---------------
     # Back to time-domain
     mySignals.desiredSigEst, mySignals.timeVector = get_istft(mySignals.desiredSigEst_STFT,
                                                             asc.samplingFreq, settings)
+    mySignals.desiredSigEstLocal, _ = get_istft(mySignals.desiredSigEstLocal_STFT,
+                                                            asc.samplingFreq, settings)
+
+    np.amin(np.abs(mySignals.desiredSigEst_STFT))
     # Compute speech enhancement evaluation metrics
     enhancementEval = evaluate_enhancement_outcome(mySignals, settings)
     # Build output object
@@ -293,31 +300,54 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     Returns
     -------
     desiredSigEst_STFT : [Nf x Nt x Nn] np.ndarry (complex)
-        STFT representation of the desired signal at each of the Nn nodes. 
+        STFT representation of the desired signal at each of the Nn nodes -- using full-observations vectors (also data coming from neighbors).
+    desiredSigEstLocal_STFT : [Nf x Nt x Nn] np.ndarry (complex)
+        STFT representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
     """
-    # Prepare signals for Fourier transforms
+    # --------- Prepare signals for Fourier transforms ---------
     frameSize = settings.stftWinLength
     nNewSamplesPerFrame = settings.stftEffectiveFrameLen
     y = signals.sensorSignals
     # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 -- see <scipy.signal.stft>'s `boundary` argument (default: `zeros`)
     y = zero_ext(y, frameSize // 2, axis=0)
+    # --- Also adapt timeInstants vector
+    t = signals.timeStampsSROs
+    dt = np.diff(t, axis=0)[0, :]   # delta t between each time instant for each node
+    tpre = np.zeros((frameSize // 2, asc.numNodes))
+    tpost = np.zeros((frameSize // 2, asc.numNodes))
+    for k in range(asc.numNodes):
+        tpre[:, k] = np.linspace(start= - dt[k] * (frameSize // 2), stop=-dt[k], num=frameSize // 2)
+        tpost[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * (frameSize // 2), num=frameSize // 2)
+    t = np.concatenate((tpre, t, tpost), axis=0)
     # 2) Zero-pad signal if necessary
     if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
         nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
         print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
         y = np.concatenate((y, np.zeros([nadd, y.shape[-1]])), axis=0)
+        # Adapt time vector too
+        tzp = np.zeros((nadd, asc.numNodes))
+        for k in range(asc.numNodes):
+            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)
+        t = np.concatenate((t, tzp), axis=0)
         if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
             raise ValueError('There is a problem with the zero-padding...')
+    # ------------------------------------------------------
+    # 
+    # for k in range(asc.numNodes):
+    #     if len(np.unique(t[:, k])) != len(t[:, k]):
+    #         stop =1
+
 
     # DANSE it up
+    desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, signals.timeStampsSROs)
+        desiredSigEst_STFT, desiredSigEstLocal_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
     
-    return desiredSigEst_STFT
+    return desiredSigEst_STFT, desiredSigEstLocal_STFT
 
 
 def whiten(sig):

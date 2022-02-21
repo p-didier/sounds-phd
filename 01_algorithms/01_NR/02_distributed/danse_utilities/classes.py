@@ -191,8 +191,10 @@ class Signals(object):
     VAD: np.ndarray                                     # Voice Activity Detector (1 = voice presence; 0 = noise only)
     timeVector: np.ndarray                              # Time vector (for time-domain signals)
     sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
-    desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain
-    desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain
+    desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
+    desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)
+    desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain -- using full-observations vectors (also data coming from neighbors)
+    desiredSigEstLocal_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using only local observations (not data coming from neighbors)
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: int = 16e3                                      # Sampling frequency [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
@@ -261,10 +263,11 @@ class Signals(object):
         delta = np.amax(np.abs(self.sensorSignals))
         ax.plot(self.timeVector, self.wetSpeech[:, effectiveSensorIdx], label='Desired')
         ax.plot(self.timeVector, self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
-        ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
-        ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 4*delta, label='Noisy')
+        # ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
+        ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 2*delta, label='Noisy')
         if desiredSignalsAvailable:        
-            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - 6*delta, label='Enhanced')
+            ax.plot(self.timeVector, self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
+            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - 6*delta, label='Enhanced (global)')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
@@ -289,18 +292,26 @@ class Signals(object):
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Desired')
             plt.xticks([])
-            ax = fig.add_subplot(nRows,2,4)     # Wet noise only
-            data = 20 * np.log10(np.abs(np.squeeze(self.wetNoise_STFT[:, :, effectiveSensorIdx])))
-            stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noise-only')
-            plt.xticks([])
-            ax = fig.add_subplot(nRows,2,6)     # Sensor signals
+            # ax = fig.add_subplot(nRows,2,4)     # Wet noise only
+            # data = 20 * np.log10(np.abs(np.squeeze(self.wetNoise_STFT[:, :, effectiveSensorIdx])))
+            # stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noise-only')
+            # plt.xticks([])
+            ax = fig.add_subplot(nRows,2,4)     # Sensor signals
             data = 20 * np.log10(np.abs(np.squeeze(self.sensorSignals_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noisy')
             if desiredSignalsAvailable:
                 plt.xticks([])
-                ax = fig.add_subplot(nRows,2,8)     # Enhanced signals
+                ax = fig.add_subplot(nRows,2,6)     # Enhanced signals (local)
+                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, nodeIdx])))
+                lab = 'Enhanced (local)'
+                if settings.performGEVD:
+                    lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
+                stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
+                ax.set(xlabel='$t$ [s]')
+                plt.xticks([])
+                ax = fig.add_subplot(nRows,2,8)     # Enhanced signals (global)
                 data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx])))
-                lab = 'Enhanced'
+                lab = 'Enhanced (global)'
                 if settings.performGEVD:
                     lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
                 stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
