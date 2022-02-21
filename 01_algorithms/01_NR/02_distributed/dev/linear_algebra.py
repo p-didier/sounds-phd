@@ -132,3 +132,44 @@ print((test == truth).all())
 
 
 # %%
+
+import numpy as np
+import time
+import scipy.linalg
+
+seed = 123421
+rng = np.random.default_rng(seed)
+
+n = 5
+nKappas = 500
+referenceSensor = 0
+Ryy = np.zeros((nKappas, n, n), dtype=complex)
+Rnn = np.zeros((nKappas, n, n), dtype=complex)
+for kappa in range(nKappas):
+    mat = rng.random(size=(n, n)) + 1j * rng.random(size=(n, n))
+    Ryy[kappa, :, :] = np.dot(mat, mat.conj().T)     # positive definite, full-rank matrix
+    mat2 = rng.random(size=(n, n)) + 1j * rng.random(size=(n, n))
+    Rnn[kappa, :, :] = np.dot(mat2, mat2.conj().T)   # positive definite, full-rank matrix
+
+Evect = np.zeros((n,))
+Evect[referenceSensor] = 1
+
+ryd = np.zeros((nKappas, n), dtype=complex)
+w = np.zeros((nKappas, n), dtype=complex)
+for kappa in range(nKappas):
+    # Cross-correlation matrix update 
+    ryd[kappa, :] = (Ryy[kappa, :, :] - Rnn[kappa, :, :]) @ Evect
+    # Update node-specific parameters of node k
+    w[kappa, :] = np.linalg.inv(Ryy[kappa, :, :]) @ ryd[kappa, :]
+truth = w
+
+# Cross-correlation matrix update 
+ryd = np.matmul(Ryy - Rnn, Evect)
+# Update node-specific parameters of node k
+Ryyinv = np.linalg.inv(Ryy)
+test = np.matmul(Ryyinv, ryd)  # TODO -- 
+
+print('done')
+print(truth.shape)
+print(test.shape)
+print((test == truth).all())

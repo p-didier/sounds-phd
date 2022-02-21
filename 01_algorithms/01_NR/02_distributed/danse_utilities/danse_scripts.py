@@ -618,20 +618,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             w[k][:, i[k], :], _ = perform_gevd_noforloop(Ryy[k], Rnn[k], settings.GEVDrank, settings.referenceSensor, jitted=False)
                         else:   # regular update
                             raise ValueError('Not yet implemented')
-
-                        # # Loop over frequency lines
-                        # for kappa in range(numFreqLines):
-                        #     if settings.performGEVD:    # GEVD update
-                        #         w[k][kappa, i[k], :], _ = perform_gevd(Ryy[k][kappa, :, :], Rnn[k][kappa, :, :],
-                        #                                                 settings.GEVDrank, settings.referenceSensor, jitted=False)
-                        #     else:   # regular update
-                        #         # Reference sensor selection vector
-                        #         Evect = np.zeros((dimYTilde[k],))
-                        #         Evect[settings.referenceSensor] = 1
-                        #         # Cross-correlation matrix update 
-                        #         ryd[k][kappa, :] = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ Evect
-                        #         # Update node-specific parameters of node k
-                        #         w[k][kappa, i[k], :] = np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd[k][kappa, :]
                     elif i[k] > 1:
                         # Do not update the filter coefficients
                         w[k][:, i[k], :] = w[k][:, i[k] - 1, :]
