@@ -47,10 +47,11 @@ mySettings = ProgramSettings(
     performGEVD=1,                  # set to True for GEVD-DANSE
     SROsppm=[0, 0],               # SRO
     compensateSROs=True,            # if True, estimate + compensate SRO dynamically
-    broadcastLength=8,              # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
-    danseUpdating='simultaneous'    # node-updating scheme
+    broadcastLength=8,              # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    # danseUpdating='simultaneous'    # node-updating scheme
     )
-experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
+# experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
+experimentName = f'testings_noSROs/danse_{mySettings.danseUpdating}' # experiment reference label
 exportPath = f'{Path(__file__).parent}/res/{experimentName}'
 # ------------------------
 
