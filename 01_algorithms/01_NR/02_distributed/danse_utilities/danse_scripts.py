@@ -496,19 +496,17 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighbourNodesk, ik, 
     return z, skipUpdate
 
 
-def count_samples(tVects, instant, k, lastSampIdx, nSampBC, nSampLocal):
+def count_samples(tVect, instant, lastSampIdx, nSampBC, nSampLocal):
     """Counts the number of past samples at master clock instant `instant`
     and updates the number of samples lined up for broadcast, as well as 
     the number of new samples captured since the last DANSE iteration.
     
     Parameters
     ----------
-    tVects : [Nt x numNodes] np.ndarray
-        Time stamps vectors for each node in network.
+    tVect : [Nt x 1] np.ndarray
+        Time stamps vectors for current node.
     instant : float
         Current master clock time instant [s].
-    k : int
-        Current node index.
     lastSampIdx : int
         Index of the last samples captured by node `k`.
     nSampBC : int
@@ -526,12 +524,12 @@ def count_samples(tVects, instant, k, lastSampIdx, nSampBC, nSampLocal):
         Updated number of new local samples captured since the last DANSE update.
     """
 
-    passedInstants = tVects[tVects[:, k] <= instant, k]     # list of passed time stamps at node `k`
+    passedInstants = tVect[tVect <= instant]     # list of passed time stamps at node `k`
     idxCurrSample = len(passedInstants) - 1                 # number of samples accumulated at master-time `t` at node `k`
-    nSampBC[k] += idxCurrSample - lastSampIdx[k]            # can be more than 1 when SROs are present...
-    nSampLocal[k] += idxCurrSample - lastSampIdx[k]         # can be more than 1 when SROs are present...
+    nSampBC += idxCurrSample - lastSampIdx            # can be more than 1 when SROs are present...
+    nSampLocal += idxCurrSample - lastSampIdx         # can be more than 1 when SROs are present...
     
-    lastSampIdx[k] = idxCurrSample    # update current sample index at node `k`
+    lastSampIdx = idxCurrSample    # update current sample index at node `k`
     
     return lastSampIdx, nSampBC, nSampLocal
 
@@ -565,7 +563,7 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
     elif nSampBC == L:     # not the first broadcast -- need `settings.broadcastLength` new samples to perform compression in freq.-domain
         broadcastFlag = True
 
-    return broadcastFlag
+    return broadcastFlag, compressStarted
 
 
 def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
@@ -607,39 +605,6 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
         zBuffer[q][idxKforNeighbor] = zBufferCurr   # necessary for `np.concatenate()` afterwards
 
     return zBuffer
-
-
-# UNUSED AS OF 22/02/2022 @ 9:30 AM
-def broadcast_and_count(yink, wTilde_ki, zBuffer, k, lk, neighbourNodes, settings, nSampBC, nSampLocal, tVects, instant, lastSampIdx, startedCompression):
-    """Pre-DANSE processing function for simultaneous node-updating implementation.
-    Defines when nodes should broadcast their observations, fill in corresponding
-    buffers in neighbours nodes and count the number of new samples since the last update.
-    
-    Parameters
-    ----------
-
-    Returns
-    -------
-    
-    """
-
-    # Update sample counts at new instant `tMaster`
-    lastSampIdx, nSampBC, nSampLocal = count_samples(tVects, instant, k, lastSampIdx, nSampBC, nSampLocal)
-    
-    # Check whether flag for compressing + broadcasting should be raised
-    broadcastSignals = broadcast_flag_raising(startedCompression[k], nSampBC, settings.stftWinLength, settings.broadcastLength)
-
-    if broadcastSignals: 
-        # Extract current data chunk
-        yinCurr = yink[(lastSampIdx[k] - settings.stftWinLength + 1):(lastSampIdx[k] + 1), :]
-        # Compress it in the frequency domain
-        zLocal = danse_compression(yinCurr, wTilde_ki[:, :yinCurr.shape[-1]], settings.stftWin[:, np.newaxis])        # local compressed signals
-        # Loop over node `k`'s neighbours and fill in their buffers
-        zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, settings.broadcastLength)
-        nSampBC[k] = 0  # reset number of samples ready for broadcast
-        lk[k] += 1      # increment broadcast index
-
-    return zBuffer, lk, nSampBC, nSampLocal, lastSampIdx
 
 
 def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, timeInstants):
@@ -739,61 +704,35 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     t0 = time.perf_counter()    # global timing
     for idxt, tMaster in enumerate(masterClock):    # loop over master clock instants
 
-        broadcast_and_count()
-
-        for k in range(asc.numNodes):               # loop over nodes
-            # ============== Pre-DANSE time processing ============== 
-            if k == settings.referenceSensor:
-                # Special processing for reference sensor
-                nReadyForBroadcast[k] += 1
-                nNewLocalSamples[k] += 1
-                idxCurrSample = idxt                    # number of samples accumulated at master-time `t` at node `k`
-            else:
-                passedInstants = timeInstants[timeInstants[:, k] <= tMaster, k]     # list of passed time stamps at node `k`
-                idxCurrSample = len(passedInstants) - 1     # number of samples accumulated at master-time `t` at node `k`
-                if lastSampleIdx[k] < idxCurrSample:
-                    nReadyForBroadcast[k] += idxCurrSample - lastSampleIdx[k]       # can be more than 1 when SROs are present...
-                    nNewLocalSamples[k] += idxCurrSample - lastSampleIdx[k]         # can be more than 1 when SROs are present...
-                else:
-                    pass    # if there is no new sample at node `k`, don't increment the node-specific numbers of samples
-            lastSampleIdx[k] = idxCurrSample    # record current sample index at node `k`
+        for k in range(asc.numNodes):
+            # Update sample counts at new instant `instant`
+            lastSampleIdx[k], nReadyForBroadcast[k], nNewLocalSamples[k] = count_samples(
+                timeInstants[:, k],
+                tMaster,
+                lastSampleIdx[k],
+                nReadyForBroadcast[k],
+                nNewLocalSamples[k])
             
-            # Raise or do not raise flag for compressing + broadcasting
-            if not startedCompression[k]:   # first broadcast -- need `frameSize` sample to perform compression in freq.-domain
-                if nReadyForBroadcast[k] == frameSize:
-                    broadcastSignals[k] = True
-                    startedCompression[k] = True
-            elif nReadyForBroadcast[k] == settings.broadcastLength:     # not the first broadcast -- need `settings.broadcastLength` new samples to perform compression in freq.-domain
-                broadcastSignals[k] = True
-            else:   # not time to broadcast
-                broadcastSignals[k] = False
-        
-            if broadcastSignals[k]: 
-                if k == settings.referenceSensor and lk[k] % 100 == 0:
-                    print(f'tMaster = {np.round(tMaster, 4)}s(/{np.round(masterClock[-1], 2)}s): Ref. node {k+1}`s {lk[k]}^th broadcast to its neighbors')
-                idxBroadcasts[k].append(idxt)
-                # ~~~~~~~~~~~~~~ Time to broadcast! ~~~~~~~~~~~~~~
+            # Check whether flag for compressing + broadcasting should be raised
+            broadcastSignals, startedCompression[k] = broadcast_flag_raising(
+                startedCompression[k],
+                nReadyForBroadcast[k],
+                settings.stftWinLength,
+                settings.broadcastLength)
+
+            if broadcastSignals: 
+                # Inform user
+                if k == 0 and lk[k] % 1000 == 0:
+                    print(f'tMaster = {np.round(tMaster, 4)}s: Node 1`s {lk[k]}^th broadcast to its neighbors')
+
                 # Extract current data chunk
                 yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
-                zk = danse_compression(yinCurr, wTilde[k][:, i[k], :yinCurr.shape[-1]], win)        # local compressed signals
-                for idxq in range(len(neighbourNodes[k])):
-                    q = neighbourNodes[k][idxq]     # actual index of neighbor (from whole WASN perspective)
-                    idxKforNeighbor = [i for i, x in enumerate(neighbourNodes[q]) if x == k]
-                    idxKforNeighbor = idxKforNeighbor[0]
-                    # Fill in neighbors' buffers with the L = `settings.broadcastLength` last samples of local compressed signals
-                    if lk[k] == 0:
-                        # Broadcast the `nExpectedNewSamplesPerFrame` last samples of compressed signal (1st broadcast period, no "old" samples)
-                        zBufferCurr = np.concatenate((zBuffer[q][idxKforNeighbor], zk), axis=0)
-                    else:
-                        # Only broadcast the L = `settings.broadcastLength` last samples of local compressed signals
-                        zBufferCurr = np.concatenate((zBuffer[q][idxKforNeighbor], zk[-settings.broadcastLength:]), axis=0)
-                    zBuffer[q][idxKforNeighbor] = zBufferCurr   # necessary for `np.concatenate()` afterwards
-                nReadyForBroadcast[k] = 0               # reset number of samples ready for broadcast
-                lk[k] += 1                              # increment broadcast index
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            else:
-                pass    # no broadcast at this instant
-            # ========================================================
+                # Compress current data chunk in the frequency domain
+                zLocal = danse_compression(yinCurr, wTilde[k][:, i[k], :yinCurr.shape[-1]], settings.stftWin[:, np.newaxis])        # local compressed signals
+                # Loop over node `k`'s neighbours and fill in their buffers
+                zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, settings.broadcastLength)
+                nReadyForBroadcast[k] = 0  # reset number of samples ready for broadcast
+                lk[k] += 1      # increment broadcast index
 
         # Must reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast
         for k in range(asc.numNodes):               # loop over nodes
