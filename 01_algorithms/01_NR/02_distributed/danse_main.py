@@ -40,23 +40,19 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 3, 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=5,
+    signalDuration=10,
     baseSNR=-10,
-    plotAcousticScenario=False,
-    VADwinLength=40e-3,             # VAD window length [s]
-    VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
-    expAvgBeta=0.9945,              # lambda=exp(log(0.5)/(2*numFramesPerSecond))
-    initialWeightsAmplitude=1,
-    performGEVD=1,                  # set to True for GEVD-DANSE
-    SROsppm=[0, 6e3, 10e3],               # SRO
+    chunkSize=2**11,            # DANSE iteration processing chunk size [samples]
+    chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
+    SROsppm=[0, 4000, 6000],               # SRO
     # SROsppm=[0, 0, 0],               # SRO
     compensateSROs=True,            # if True, estimate + compensate SRO dynamically
-    broadcastLength=2**6,              # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=8,              # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     danseUpdating='simultaneous',    # node-updating scheme
     referenceSensor=0
     )
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
-experimentName = f'testings_SROs/{mySettings.danseUpdating}_{mySettings.SROsppm}ppm' # experiment reference label
+experimentName = f'testings_SROs/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
 if mySettings.compensateSROs:
     experimentName += '_comp'
 else:

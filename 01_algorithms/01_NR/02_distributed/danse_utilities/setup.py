@@ -46,22 +46,15 @@ def run_experiment(settings: classes.ProgramSettings):
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
 
+    # DANSE
+    print('Launching danse()...')
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = danse(mySignals, asc, settings)
+
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
     mySignals.get_all_stfts(asc.samplingFreq, settings)
 
-    # DANSE
-    print('Launching danse()...')
-    mySignals.desiredSigEst_STFT, mySignals.desiredSigEstLocal_STFT = danse(mySignals, asc, settings)
-
     # --------------- Post-process ---------------
-    # Back to time-domain
-    mySignals.desiredSigEst, mySignals.timeVector = get_istft(mySignals.desiredSigEst_STFT,
-                                                            asc.samplingFreq, settings)
-    mySignals.desiredSigEstLocal, _ = get_istft(mySignals.desiredSigEstLocal_STFT,
-                                                            asc.samplingFreq, settings)
-
-    np.amin(np.abs(mySignals.desiredSigEst_STFT))
     # Compute speech enhancement evaluation metrics
     enhancementEval = evaluate_enhancement_outcome(mySignals, settings)
     # Build output object
@@ -296,10 +289,11 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
 
     Returns
     -------
-    desiredSigEst_STFT : [Nf x Nt x Nn] np.ndarry (complex)
-        STFT representation of the desired signal at each of the Nn nodes -- using full-observations vectors (also data coming from neighbors).
-    desiredSigEstLocal_STFT : [Nf x Nt x Nn] np.ndarry (complex)
-        STFT representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
+    desiredSigEst : [Nt x Nn] np.ndarray of floats
+        Time-domain representation of the desired signal at each of the Nn nodes -- using full-observations vectors (also data coming from neighbors).
+    desiredSigEstLocal : [Nt x Nn] np.ndarray of floats
+        Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
+        -Note: if `settings.computeLocalEstimate == False`, then `desiredSigEstLocal` is output as an all-zeros array.
     """
     # --------- Prepare signals for Fourier transforms ---------
     frameSize = settings.stftWinLength
@@ -334,12 +328,17 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
+        raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst_STFT, desiredSigEstLocal_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
+        desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
+
+    # Discard pre-DANSE added samples (for Fourier transform processing, see first section of this function)
+    desiredSigEst = desiredSigEst[frameSize // 2:-(frameSize // 2 + nadd)]
+    desiredSigEstLocal = desiredSigEstLocal[frameSize // 2:-(frameSize // 2 + nadd)]
     
-    return desiredSigEst_STFT, desiredSigEstLocal_STFT
+    return desiredSigEst, desiredSigEstLocal
 
 
 def whiten(sig):
@@ -371,7 +370,7 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
     while len(rawSignal) < signalLength:
         rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
     if len(rawSignal) > signalLength:
-        rawSignal = rawSignal[:desiredDuration * originalFs]  # truncate too long signals
+        rawSignal = rawSignal[:int(desiredDuration * originalFs)]  # truncate too long signals
     # Resample signal so that its sampling frequency matches the target
     rawSignal = sig.resample(rawSignal, signalLength) 
     # Whiten signal 

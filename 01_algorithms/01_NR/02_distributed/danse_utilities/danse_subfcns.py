@@ -37,11 +37,11 @@ def danse_init(yin, settings, asc):
     rng = np.random.default_rng(settings.randSeed)
 
     # Adapt window array format
-    win = settings.stftWin[:, np.newaxis]
+    win = settings.danseWindow[:, np.newaxis]
 
     # Define useful quantities
-    frameSize = settings.stftWinLength
-    nNewSamplesPerFrame = settings.stftEffectiveFrameLen
+    frameSize = settings.chunkSize
+    nNewSamplesPerFrame = int(settings.chunkSize * (1 - settings.chunkOverlap))
     numIterations = int((yin.shape[0] - frameSize) / nNewSamplesPerFrame) + 1
     numBroadcasts = int(np.ceil(yin.shape[0] / settings.broadcastLength))
 
@@ -211,6 +211,29 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
     return w, Qmat
 
 
+def back_to_time_domain(x, n):
+    """Performs an IFFT after pre-processing of a frequency-domain
+    signal chunk.
+    
+    Parameters
+    ----------
+    x : np.ndarray of complex
+        Frequency-domain signal to be transferred back to time domain.
+
+    Returns
+    -------
+    xout : np.ndarray of floats
+        Time-domain version of signal.
+    """
+
+    x[0] = x[0].real      # Set DC to real value
+    x[-1] = x[-1].real    # Set Nyquist to real value
+    x = np.concatenate((x, np.flip(x[:-1].conj())[:-1]))
+    # Back to time-domain
+    xout = np.fft.ifft(x, n)
+
+    return xout
+
 
 def danse_compression(yq, w, win):
     """Performs local signals compression according to DANSE theory [1].
@@ -241,12 +264,7 @@ def danse_compression(yq, w, win):
     # Compress using filter coefficients
     zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
     # Format for IFFT 
-    zq_hat[0] = zq_hat[0].real      # Set DC to real value
-    zq_hat[-1] = zq_hat[-1].real    # Set Nyquist to real value
-    zq_hat = np.concatenate((zq_hat, np.flip(zq_hat[:-1].conj())[:-1]))
-    # Back to time-domain
-    zq = ifftscale * np.fft.ifft(zq_hat, len(win))
-    # zq = zq[:, np.newaxis]
+    zq = ifftscale * back_to_time_domain(zq_hat, len(win))
 
     return zq
 
@@ -317,7 +335,7 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
                 print(f'>>> Buffer overflow (current node`s B_{neighs[idxq]+1} buffer).')
                 bufferFlags[idxq] = 1       # raise positive flag
             else:
-                if Bq < N and (ik - lastExpectedIter) < 10:
+                if Bq < N and np.abs(ik - lastExpectedIter) < 10:
                     print('>>> This is the last iteration -- not enough data due to cumulated SROs effect, skip update.')
                     bufferFlags[idxq] = 2       # raise ultimate flag
                 else:
@@ -434,7 +452,7 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
         idxKforNeighbor = idxKforNeighbor[0]    # node `k` index from node `q`'s perspective
         # Fill in neighbors' buffers with the L = `settings.broadcastLength` last samples of local compressed signals
         if lk[k] == 0:
-            # Broadcast the `nExpectedNewSamplesPerFrame` last samples of compressed signal (1st broadcast period, no "old" samples)
+            # Broadcast the all compressed signal (1st broadcast period, no "old" samples)
             zBufferCurr = np.concatenate((zBuffer[q][idxKforNeighbor], zLocal), axis=0)
         else:
             # Only broadcast the `L` last samples of local compressed signals

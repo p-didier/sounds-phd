@@ -230,10 +230,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1)+ len(neighbourNodes[k])
         # wTilde.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k])) +\
         #     1j * rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k]))))
-        # wTilde.append(settings.initialWeightsAmplitude * np.ones((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex))   # ones
         wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
-        wtmp[:, :, 0] = 1
-        wTilde.append(wtmp)   # zeros
+        wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+        wTilde.append(wtmp)
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
@@ -408,20 +407,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # -----------------------------------------------------------------------
 
                     # -------------------- Transform back to time domain --------------------
-                    dhatCurr[0] = dhatCurr[0].real      # Set DC to real value
-                    dhatCurr[-1] = dhatCurr[-1].real    # Set Nyquist to real value
-                    dhatCurr = np.concatenate((dhatCurr, np.flip(dhatCurr[:-1].conj())[:-1]))
-                    # Back to time-domain
-                    dChunk = ifftscale * np.fft.ifft(dhatCurr, len(win))
+                    dChunk = ifftscale * subs.back_to_time_domain(dhatCurr, len(win))
                     d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
-
                     #
                     if settings.computeLocalEstimate:
-                        dhatLocalCurr[0] = dhatLocalCurr[0].real      # Set DC to real value
-                        dhatLocalCurr[-1] = dhatLocalCurr[-1].real    # Set Nyquist to real value
-                        dhatLocalCurr = np.concatenate((dhatLocalCurr, np.flip(dhatLocalCurr[:-1].conj())[:-1]))
-                        # Back to time-domain
-                        dLocalChunk = ifftscale * np.fft.ifft(dhatLocalCurr, len(win))
+                        dLocalChunk = ifftscale * subs.back_to_time_domain(dhatLocalCurr, len(win))
                         dLocal[idxStartChunk:idxEndChunk, k] += dLocalChunk   # overlap and add construction of output time-domain signal
                     # -----------------------------------------------------------------------
 

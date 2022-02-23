@@ -47,12 +47,15 @@ class ProgramSettings(object):
     stftWin: np.ndarray = np.hanning(stftWinLength)  # STFT window
     # VAD parameters
     VADwinLength: float = 40e-3             # VAD window length [s]
-    VADenergyFactor: float = 400            # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
+    VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
-    initialWeightsAmplitude: float = 1      # maximum amplitude of initial random filter coefficients
-    expAvgBeta: float = 0.99                # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
-    performGEVD: bool = False               # if True, perform GEVD in DANSE
+    chunkSize: int = 1024                   # processing chunk size
+    chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
+    danseWindow: np.ndarray = np.hanning(chunkSize)  # DANSE window for FFT/IFFT operations
+    initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
+    expAvgBeta: float = 0.9945              # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
+    performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only the local sensor observations
     # Broadcasting parameters
@@ -80,6 +83,12 @@ class ProgramSettings(object):
         # Check window constraints
         if not sig.check_NOLA(self.stftWin, self.stftWinLength, self.stftEffectiveFrameLen):
             raise ValueError('Window NOLA contrained is not respected.')
+        if len(self.stftWin) != self.stftWinLength:
+            print(f'!! The specified STFT window length does not match the actual window. Setting `stftWin` as a Hann window of length {self.stftWinLength}.')
+            self.stftWin = np.hanning(self.stftWinLength)
+        if len(self.danseWindow) != self.chunkSize:
+            print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.chunkSize}.')
+            self.danseWindow = np.hanning(self.chunkSize)
         # Check lengths consistency
         if self.broadcastLength > self.stftWinLength:
             raise ValueError(f'Broadcast length is too large ({self.broadcastLength}, with STFT frame size {self.stftWinLength}).')
@@ -242,11 +251,11 @@ class Signals(object):
         if len(self.desiredSigEst) > 0:
             self.desiredSigEst_STFT, _, _ = get_stft(self.desiredSigEst, fs, settings)
         else:
-            print("!! Desired signal (`desiredSigEst`) not computed -- Cannot compute its STFT.")
+            print("!! Desired signal (`desiredSigEst`) unavailable -- Cannot compute its STFT.")
         if len(self.desiredSigEstLocal) > 0:
             self.desiredSigEstLocal_STFT, _, _ = get_stft(self.desiredSigEstLocal, fs, settings)
         else:
-            print("!! Desired signal (`desiredSigEstLocal`) not computed -- Cannot compute its STFT.")
+            print("!! Desired signal (`desiredSigEstLocal`) unavailable -- Cannot compute its STFT.")
 
         self.stftComputed = True
 
@@ -287,6 +296,7 @@ class Signals(object):
             else:
                 deltaNextWaveform = 4*delta
             ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
+            
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
