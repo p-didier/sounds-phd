@@ -251,9 +251,9 @@ def danse_compression(yq, w, win):
     return zq
 
 
-def process_incoming_signals_buffers(zBufferk, zPreviousk, neighbourNodesk, ik, frameSize, nExpectedNewSamplesPerFrame, broadcastLength):
+def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, N, L, lastExpectedIter):
     """When called, processes the incoming data from other nodes, as stored in local node's buffers.
-    Called whenever a DANSE update can be performed (`nExpectedNewSamplesPerFrame` new local samples were captured).
+    Called whenever a DANSE update can be performed (`N` new local samples were captured).
     
     Parameters
     ----------
@@ -261,30 +261,33 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighbourNodesk, ik, 
         Buffers of node `k` at current iteration.
     zPreviousk : [Nneighbors x 1] list of np.ndarrays (float)
         Compressed signals used by node `k` at previous iteration (within $\\tilde{\mathbf{y}}_k$ in [1]'s notation)
-    neighbourNodesk : list of integers
+    neighs : list of integers
         List of indices corresponding to node `k`'s neighbours in the WASN.
     ik : int
         DANSE iteration index at node `k`.
     frameSize : int
         Size of FFT / DANSE update frame.
-    nExpectedNewSamplesPerFrame : int
+    N : int
         Expected number of new (never seen before) samples at every DANSE update.
-    
+    L: int
+        Number of samples expected to be transmitted per broadcast.
+    lastExpectedIter : int
+        Expected index of the last DANSE iteration. 
+        
     Returns
     -------
     zk : [Nneighbors x frameSize] np.ndarray of floats
         Compressed signal frames to be used at iteration `ik` by node `k`.
-    bufferFlags : [Nneighbors x 1] np.ndarray of ints (+1, -1, or 0)
-        Flags for buffer over- (+1) or under-flows (-1). Value 0: no over- or under-flow.
+    bufferFlags : [Nneighbors x 1] np.ndarray of ints (+1, -1, 0, or 2)
+        Flags for buffer over- (+1) or under-flows (-1).
+        Value 0: no over- or under-flow.
+        Value 2: last iteration, lack of samples due to cumulated SRO.
     """
 
     zk = np.empty((frameSize, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
-    bufferFlags = np.zeros(len(neighbourNodesk))    # flags (positive: +1; negative: -1; or none: 0) -- indicate buffer over- or under-flow
+    bufferFlags = np.zeros(len(neighs))    # flags (positive: +1; negative: -1; or none: 0) -- indicate buffer over- or under-flow
 
-    # Booleans
-    skipUpdate = False
-
-    for idxq in range(len(neighbourNodesk)):
+    for idxq in range(len(neighs)):
         Bq = len(zBufferk[idxq])  # buffer size for neighbour node `q`
         if ik == 0: # first DANSE iteration case
             if Bq == frameSize: 
@@ -303,26 +306,29 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighbourNodesk, ik, 
                 bufferFlags[idxq] = 1      # raise negative flag
                 zCurrBuffer = zBufferk[idxq][-frameSize:]
         else:
-            if Bq == nExpectedNewSamplesPerFrame:
+            if Bq == N:
                 # Case 1: no broadcast frame mismatch between node `k` and node `q`
                 # Build element of `z` with all the current buffer and a part of the previous `z` values
                 pass
-            elif Bq == nExpectedNewSamplesPerFrame - broadcastLength:     # case 2: negative broadcast frame mismatch between node `k` and node `q`
-                print(f'Buffer underflow (current node`s B_{neighbourNodesk[idxq]+1} buffer).')
+            elif Bq == N - L:     # case 2: negative broadcast frame mismatch between node `k` and node `q`
+                print(f'>>> Buffer underflow (current node`s B_{neighs[idxq]+1} buffer).')
                 bufferFlags[idxq] = -1      # raise negative flag
-            elif Bq == nExpectedNewSamplesPerFrame + broadcastLength:     # case 3: positive broadcast frame mismatch between node `k` and node `q`
-                print(f'Buffer overflow (current node`s B_{neighbourNodesk[idxq]+1} buffer).')
+            elif Bq == N + L:     # case 3: positive broadcast frame mismatch between node `k` and node `q`
+                print(f'>>> Buffer overflow (current node`s B_{neighs[idxq]+1} buffer).')
                 bufferFlags[idxq] = 1       # raise positive flag
             else:
-                if (nExpectedNewSamplesPerFrame - Bq) % broadcastLength == 0:
-                    raise ValueError(f'Not yet implemented buffer size for neighbor node q={neighbourNodesk[idxq]+1}.')
+                if Bq < N and (ik - lastExpectedIter) < 10:
+                    print('>>> This is the last iteration -- not enough data due to cumulated SROs effect, skip update.')
+                    bufferFlags[idxq] = 2       # raise ultimate flag
                 else:
-                    raise ValueError(f'Unexpected buffer size for neighbor node q={neighbourNodesk[idxq]+1}.')
+                    if (N - Bq) % L == 0:
+                        raise ValueError(f'NOT IMPLEMENTED YET: too large SRO, >1 broadcast length over- or under-flow.')
+                    else:
+                        raise ValueError(f'ERROR: Unexpected buffer size for neighbor node q={neighs[idxq]+1}.')
             # Build current buffer
             zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
-        if not skipUpdate:
-            # Stack compressed signals
-            zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
+        # Stack compressed signals
+        zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
 
     return zk, bufferFlags
 
@@ -388,10 +394,10 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
 
     broadcastFlag = False
     if not compressStarted:   # first broadcast -- need `settings.stftWinLength` sample to perform compression in freq.-domain
-        if nSampBC == N:
+        if nSampBC >= N:
             broadcastFlag = True
             compressStarted = True
-    elif nSampBC == L:     # not the first broadcast -- need `settings.broadcastLength` new samples to perform compression in freq.-domain
+    elif nSampBC >= L:     # not the first broadcast -- need `settings.broadcastLength` new samples to perform compression in freq.-domain
         broadcastFlag = True
 
     return broadcastFlag, compressStarted

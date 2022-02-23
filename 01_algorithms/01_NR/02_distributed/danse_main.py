@@ -34,23 +34,24 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 3, 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=10,
+    signalDuration=5,
     baseSNR=-10,
     plotAcousticScenario=False,
     VADwinLength=40e-3,             # VAD window length [s]
     VADenergyFactor=4000,           # VAD factor (threshold = max(energy signal)/VADenergyFactor)
-    expAvgBeta=0.98,
+    expAvgBeta=0.9945,              # lambda=exp(log(0.5)/(2*numFramesPerSecond))
     initialWeightsAmplitude=1,
     performGEVD=1,                  # set to True for GEVD-DANSE
-    SROsppm=[500, 0, 0],               # SRO
+    SROsppm=[0, 6e3, 10e3],               # SRO
+    # SROsppm=[0, 0, 0],               # SRO
     compensateSROs=True,            # if True, estimate + compensate SRO dynamically
-    broadcastLength=8,              # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=2**6,              # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     danseUpdating='simultaneous',    # node-updating scheme
     referenceSensor=0
     )
