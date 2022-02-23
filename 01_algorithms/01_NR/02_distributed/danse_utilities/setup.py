@@ -1,7 +1,4 @@
 import sys, time
-from tracemalloc import stop
-from turtle import st
-from xml.dom.expatbuilder import FragmentBuilderNS
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -332,18 +329,13 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
         if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
             raise ValueError('There is a problem with the zero-padding...')
     # ------------------------------------------------------
-    # 
-    # for k in range(asc.numNodes):
-    #     if len(np.unique(t[:, k])) != len(t[:, k]):
-    #         stop =1
-
 
     # DANSE it up
     desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst_STFT, desiredSigEstLocal_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t)
+        desiredSigEst_STFT, desiredSigEstLocal_STFT = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
     
@@ -464,6 +456,8 @@ def generate_signals(settings: classes.ProgramSettings):
     # --- Apply SROs ---
     wetNoise_norm, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
     wetSpeech_norm, timeStampsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    # Set reference node (for master clock) based on SRO values
+    masterClockNodeIdx = np.where(np.array(settings.SROsppm) == 0)[0][0]
     # ------------------
 
     # Build sensor signals
@@ -486,6 +480,7 @@ def generate_signals(settings: classes.ProgramSettings):
                                 fs=asc.samplingFreq,
                                 referenceSensor=settings.referenceSensor,
                                 timeStampsSROs=timeStampsSROs,
+                                masterClockNodeIdx=masterClockNodeIdx
                                 )
                                 
     # Check validity of chosen reference sensor

@@ -112,7 +112,6 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
         met.save(self, filename)
 
 
-
 @dataclass
 class AcousticScenario(object):
     """Class for keeping track of acoustic scenario parameters"""
@@ -199,6 +198,7 @@ class Signals(object):
     fs: int = 16e3                                      # Sampling frequency [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
     timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings)
+    masterClockNodeIdx: int = 0                         # Index of node to be used as "master clock" (0 ppm SRO)
 
     def __post_init__(self):
         """Defines useful fields for Signals object"""
@@ -336,8 +336,8 @@ class Signals(object):
         dataBest  = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx])))
         dataWorst = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx])))
         # Define plot limits
-        limLow  = np.amin(np.concatenate((dataBest, dataWorst), axis=-1))
-        limHigh = np.amax(np.concatenate((dataBest, dataWorst), axis=-1))
+        limLow  = np.amin(np.concatenate((dataBest[np.abs(dataBest) > 0], dataWorst[np.abs(dataWorst) > 0]), axis=-1))
+        limHigh = np.amax(np.concatenate((dataBest[np.abs(dataBest) > 0], dataWorst[np.abs(dataWorst) > 0]), axis=-1))
 
         fig = plt.figure(figsize=(10,4))
         # Best node
