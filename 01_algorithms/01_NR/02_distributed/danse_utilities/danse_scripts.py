@@ -1,11 +1,9 @@
 
 import numpy as np
-import scipy, time, datetime
-import scipy.signal
-from numba import njit
+import time, datetime
 from . import classes
 from . import danse_subfcns as subs
-import matplotlib.pyplot as plt
+from . import danse_plots as dplt
 
 """
 References:
@@ -172,30 +170,32 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     Parameters
     ----------
-    yin : [Nt x Ns] np.ndarray (real)
+    yin : [Nt x Ns] np.ndarray of floats
         The microphone signals in the time domain.
     asc : AcousticScenario object
         Processed data about acoustic scenario (RIRs, dimensions, etc.).
     settings : ProgramSettings object
         The settings for the current run.
-    oVAD : [Nt x 1] np.ndarray (binary/boolean)
+    oVAD : [Nt x 1] np.ndarray of booleans or binary ints
         Voice Activity Detector.
-    timeInstants : [Nt x Nn] np.ndarray 
+    timeInstants : [Nt x Nn] np.ndarray of floats
         Time instants corresponding to the samples of each of the Nn nodes in the network. 
     masterClockNodeIdx : int
         Index of node to be used as "master clock" (0 ppm SRO). 
 
     Returns
     -------
-    d : [Nf x Nt x Nn] np.ndarry (complex)
-        STFT representation of the desired signal at each of the Nn nodes -- using full-observations vectors (also data coming from neighbors).
-    dLocal : [Nf x Nt x Nn] np.ndarry (complex)
-        STFT representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
+    d : [Nt x Nn] np.ndarray of floats
+        Time-domain representation of the desired signal at each of the Nn nodes -- using full-observations vectors (also data coming from neighbors).
+    dLocal : [Nt x Nn] np.ndarray of floats
+        Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
+        -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
     
     # Initialization (extracting useful quantities)
     rng, win, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
     fftscale = 1 / win.sum()
+    ifftscale = win.sum()
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
@@ -208,46 +208,58 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     lastSampleIdx = np.full(shape=(asc.numNodes,), fill_value=-1)           # last sample index lined up for broadcast
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
-    wLocal = []                                     # filter coefficients - using only local observations (not data coming from neighbors)
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
-    Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
-    Ryylocal = []                                   # autocorrelation matrix when VAD=1 - using only local observations (not data coming from neighbors)
     ryd = []                                        # cross-correlation between observations and estimations
     ytilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
     z = []                                          # current-iteration compressed signals used in DANSE update
     zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
-    dimYLocal = np.zeros(asc.numNodes, dtype=int)   # dimension of y_k (== M_k)
+    bufferLengths = []                              # node-specific number of samples in each buffer
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
+    if settings.computeLocalEstimate:
+        wLocal = []                                     # filter coefficients - using only local observations (not data coming from neighbors)
+        Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
+        Ryylocal = []                                   # autocorrelation matrix when VAD=1 - using only local observations (not data coming from neighbors)
+        dimYLocal = np.zeros(asc.numNodes, dtype=int)   # dimension of y_k (== M_k)
+
     for k in range(asc.numNodes):
-        dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
-        dimYTilde[k] = dimYLocal[k] + len(neighbourNodes[k])
-        wLocal.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k])) +\
-            1j * rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k]))))
-        wTilde.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k])) +\
-            1j * rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k]))))
+        dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1)+ len(neighbourNodes[k])
+        # wTilde.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k])) +\
+        #     1j * rng.random(size=(numFreqLines, numIterations + 1, dimYTilde[k]))))
+        # wTilde.append(settings.initialWeightsAmplitude * np.ones((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex))   # ones
+        wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
+        wtmp[:, :, 0] = 1
+        wTilde.append(wtmp)   # zeros
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
         sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
-        sliceLocal = np.finfo(float).eps * np.eye(dimYLocal[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
         Ryytilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # speech + noise
-        Rnnlocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # noise only
-        Ryylocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # speech + noise
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
         #
-        bufferFlags.append(np.zeros(len(neighbourNodes[k])))    # init all buffer flags at 0 (assuming no over- or under-flow)
+        bufferFlags.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
+        bufferLengths.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))
         #
         z.append(np.empty((frameSize, 0), dtype=float))
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        #
+        if settings.computeLocalEstimate:
+            dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
+            sliceLocal = np.finfo(float).eps * np.eye(dimYLocal[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
+            wLocal.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k])) +\
+                1j * rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k]))))
+            Rnnlocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # noise only
+            Ryylocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # speech + noise
     # Desired signal estimate [frames x frequencies x nodes]
-    d = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)        # using full-observations vectors (also data coming from neighbors)
-    dLocal = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
+    dhat = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)        # using full-observations vectors (also data coming from neighbors)
+    d = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhat`
+    dhatLocal = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
+    dLocal = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
 
     # Autocorrelation matrices update counters
     numUpdatesRyy = np.zeros(asc.numNodes)
@@ -262,15 +274,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
     # ------------------------------------------------------------------
 
-    
-    # fig = plt.figure(figsize=(8,4))
-
-
     t0 = time.perf_counter()    # global timing
     for idxt, tMaster in enumerate(masterClock):    # loop over master clock instants
 
         for k in range(asc.numNodes):
-            # Update sample counts at new instant `instant`
+            # Update sample counts at new instant `tMaster`
             lastSampleIdx[k], nReadyForBroadcast[k], nNewLocalSamples[k] = subs.count_samples(
                 timeInstants[:, k],
                 tMaster,
@@ -282,30 +290,28 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             broadcastSignals, startedCompression[k] = subs.broadcast_flag_raising(
                 startedCompression[k],
                 nReadyForBroadcast[k],
-                settings.stftWinLength,
+                frameSize,
                 settings.broadcastLength)
 
             if broadcastSignals: 
-                # Inform user
-                if k == 0 and lk[k] % 1000 == 0:
-                    print(f'tMaster = {np.round(tMaster, 4)}s: Node 1`s {lk[k]}^th broadcast to its neighbors')
+                # # Inform user
+                # if k == 0 and lk[k] % 1000 == 0:
+                #     print(f'tMaster = {np.round(tMaster, 4)}s: Node 1`s {lk[k]}^th broadcast to its neighbors')
 
                 # Extract current data chunk
                 yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
                 # Compress current data chunk in the frequency domain
-                zLocal = subs.danse_compression(yinCurr, wTilde[k][:, i[k], :yinCurr.shape[-1]], settings.stftWin[:, np.newaxis])        # local compressed signals
+                zLocal = subs.danse_compression(yinCurr, wTilde[k][:, i[k], :yinCurr.shape[-1]], settings.danseWindow[:, np.newaxis])        # local compressed signals
                 # Loop over node `k`'s neighbours and fill their buffers
                 zBuffer = subs.fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, settings.broadcastLength)
                 nReadyForBroadcast[k] = 0       # reset number of samples ready for broadcast
                 idxBroadcasts[k].append(idxt)   # save master clock index where broadcast happened
                 lk[k] += 1                      # increment broadcast index
 
-
-        # # Plot buffer sizes
-        # for k in range(asc.numNodes):
-        #       ax = fig.add_subplot(asc.numNodes, 1, k+1)
-
-
+        # Reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast before counting buffered samples
+        for k in range(asc.numNodes):
+            # Record buffer lengths
+            bufferLengths[k][idxt, :] = np.array([len(buffer) for buffer in zBuffer[k]])
 
         # Reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast before further processing
         for k in range(asc.numNodes):  # loop over nodes
@@ -315,10 +321,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             enoughSamples = nNewLocalSamples[k] >= nExpectedNewSamplesPerFrame
 
             if enoughSamples and not emptyBuffer:
+
+                if nNewLocalSamples[k] > nExpectedNewSamplesPerFrame:
+                    stop = 1    # TODO deal with that case
                 
-                if lastSampleIdx[k] < frameSize - 1:
-                    nNewLocalSamples[k] = 0     # if there are not enough samples to perform the `frameSize`-points FFT, we reset the counter (first iteration, when the node has just arrived in the WASN)
-                else:
+                if lastSampleIdx[k] >= frameSize - 1:
                     # ~~~~~~~~~~~~~~ Time to update the filter coefficients! ~~~~~~~~~~~~~~
                     t0update = time.perf_counter()
                     idxUpdates[k].append(idxt)
@@ -329,20 +336,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]  # local sensor observations ("$\mathbf{y}_k$" in [1])
 
                     # Process buffers
-                    z[k], bufferFlags[k] = subs.process_incoming_signals_buffers(
+                    z[k], bufferFlags[k][idxt, :] = subs.process_incoming_signals_buffers(
                         zBuffer[k],
                         z[k],
                         neighbourNodes[k],
                         i[k],
                         frameSize,
-                        nExpectedNewSamplesPerFrame,
-                        settings.broadcastLength)
+                        N=nExpectedNewSamplesPerFrame,
+                        L=settings.broadcastLength,
+                        lastExpectedIter=numIterations - 1)
 
-                    if (bufferFlags[k] != 0).any():
-                        stop = 1
-
-                    # Reset local samples counter
-                    nNewLocalSamples[k] = 0
                     # Wipe local buffers
                     zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
                     
@@ -351,10 +354,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytilde[k][:, i[k], :] = yTildeCurr
                     # Go to frequency domain
                     ytildeHatCurr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
-                    # Local observations only
-                    yHat = ytildeHatCurr[:numFreqLines, :dimYLocal[k]]
                     # Keep only positive frequencies
                     ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]
+                    if settings.computeLocalEstimate:
+                        # Local observations only
+                        yHat = ytildeHatCurr[:numFreqLines, :dimYLocal[k]]
                     
                     # Compute VAD
                     VADinFrame = oVAD[idxStartChunk:idxEndChunk]
@@ -362,15 +366,19 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                     # Count autocorrelation matrices updates
                     yyHtilde = np.einsum('ij,ik->ijk', ytildeHat[k][:, i[k], :], ytildeHat[k][:, i[k], :].conj())
-                    yyHlocal = np.einsum('ij,ik->ijk', yHat, yHat.conj())
                     if oVADframes[i[k]]:
                         Ryytilde[k] = settings.expAvgBeta * Ryytilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE signal + noise matrix
-                        Ryylocal[k] = settings.expAvgBeta * Ryylocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL signal + noise matrix
                         numUpdatesRyy[k] += 1
                     else:     
                         Rnntilde[k] = settings.expAvgBeta * Rnntilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE noise-only matrix
-                        Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
                         numUpdatesRnn[k] += 1
+                        
+                    if settings.computeLocalEstimate:
+                        yyHlocal = np.einsum('ij,ik->ijk', yHat, yHat.conj())
+                        if oVADframes[i[k]]:
+                            Ryylocal[k] = settings.expAvgBeta * Ryylocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL signal + noise matrix
+                        else:     
+                            Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
 
                     # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                     if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
@@ -380,55 +388,57 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         # No `for`-loop versions
                         if settings.performGEVD:    # GEVD update
                             wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
-                            wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
+                            if settings.computeLocalEstimate:
+                                wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
                         else:                       # regular update (no GEVD)
                             raise ValueError('Not yet implemented')     # TODO
                     else:
                         # Do not update the filter coefficients
                         wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
-                        wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                        if settings.computeLocalEstimate:
+                            wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
                     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-                    # Compute desired signal estimate
-                    d[:, i[k], k] = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                    dLocal[:, i[k], k] = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                    # ----- Compute desired signal chunk estimate (in frequency domain) -----
+                    dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                    dhat[:, i[k], k] = dhatCurr
+                    if settings.computeLocalEstimate:
+                        dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                        dhatLocal[:, i[k], k] = dhatLocalCurr
+                    # -----------------------------------------------------------------------
+
+                    # -------------------- Transform back to time domain --------------------
+                    dhatCurr[0] = dhatCurr[0].real      # Set DC to real value
+                    dhatCurr[-1] = dhatCurr[-1].real    # Set Nyquist to real value
+                    dhatCurr = np.concatenate((dhatCurr, np.flip(dhatCurr[:-1].conj())[:-1]))
+                    # Back to time-domain
+                    dChunk = ifftscale * np.fft.ifft(dhatCurr, len(win))
+                    d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+
+                    #
+                    if settings.computeLocalEstimate:
+                        dhatLocalCurr[0] = dhatLocalCurr[0].real      # Set DC to real value
+                        dhatLocalCurr[-1] = dhatLocalCurr[-1].real    # Set Nyquist to real value
+                        dhatLocalCurr = np.concatenate((dhatLocalCurr, np.flip(dhatLocalCurr[:-1].conj())[:-1]))
+                        # Back to time-domain
+                        dLocalChunk = ifftscale * np.fft.ifft(dhatLocalCurr, len(win))
+                        dLocal[idxStartChunk:idxEndChunk, k] += dLocalChunk   # overlap and add construction of output time-domain signal
+                    # -----------------------------------------------------------------------
 
                     # Inform user
-                    print(f'tMaster = {np.round(tMaster, 4)}s(/{np.round(masterClock[-1], 2)}s): Node {k+1} DANSE iteration #{i[k]+1} (took {int(1e3 * (time.perf_counter() - t0update))}ms)')
+                    print(f'[{np.round(tMaster / masterClock[-1] * 100, 1)}%] Simult. DANSE - t={np.round(tMaster, 4)}s(/{np.round(masterClock[-1], 2)}s): Node {k+1}, i={i[k]+1} ({int(1e3 * (time.perf_counter() - t0update))}ms)')
                     # Increment DANSE iteration index
                     i[k] += 1
-                    
-            # elif enoughSamples and emptyBuffer:
-            #     t0update = time.perf_counter()
-            #     if lastSampleIdx[k] < frameSize - 1:
-            #         nNewLocalSamples[k] = 0     # if there are not enough samples to perform the `frameSize`-points FFT, we reset the counter (first iteration, when the node has just arrived in the WASN)
-            #     else:
-            #         # At least one of node `k`'s buffers is empty
-            #         # Build full available observation vector only using local observations
-            #         ytilde[k][:, i[k], :] = yLocalCurr  # case where z has not been computed due to buffer underflow
-            #         # Go to frequency domain
-            #         ytildeHatCurr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
-            #         # Keep only positive frequencies
-            #         ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]
-            #         # Local observations only
-            #         yHat = ytildeHatCurr[:numFreqLines, :dimYLocal[k]]
-            #         # Do not update the filter coefficients
-            #         wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
-            #         wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
 
-            #         # Compute desired signal estimate
-            #         d[:, i[k], k] = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-            #         dLocal[:, i[k], k] = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-
-            #         # Inform user
-            #         print(f'tMaster = {np.round(tMaster, 4)}s(/{np.round(masterClock[-1], 2)}s): Node {k+1} DANSE iteration #{i[k]+1} (took {int(1e3 * (time.perf_counter() - t0update))}ms)')
-            #         # Increment DANSE iteration index
-            #         i[k] += 1
-            #     pass
-
+                # Reset local samples counter
+                nNewLocalSamples[k] = 0
 
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
+
+
+    if 0:
+        dplt.buffer_sizes_evolution_plot(asc, bufferLengths, neighbourNodes, masterClock, nExpectedNewSamplesPerFrame, bufferFlags)
 
     stop = 1
 
