@@ -239,6 +239,14 @@ class Signals(object):
         self.wetNoise_STFT, self.freqBins, self.timeFrames = get_stft(self.wetNoise, fs, settings)
         self.wetSpeech_STFT, _, _ = get_stft(self.wetSpeech, fs, settings)
         self.sensorSignals_STFT, _, _ = get_stft(self.sensorSignals, fs, settings)
+        if len(self.desiredSigEst) > 0:
+            self.desiredSigEst_STFT, _, _ = get_stft(self.desiredSigEst, fs, settings)
+        else:
+            print("!! Desired signal (`desiredSigEst`) not computed -- Cannot compute its STFT.")
+        if len(self.desiredSigEstLocal) > 0:
+            self.desiredSigEstLocal_STFT, _, _ = get_stft(self.desiredSigEstLocal, fs, settings)
+        else:
+            print("!! Desired signal (`desiredSigEstLocal`) not computed -- Cannot compute its STFT.")
 
         self.stftComputed = True
 
@@ -305,10 +313,6 @@ class Signals(object):
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Desired')
             plt.xticks([])
-            # ax = fig.add_subplot(nRows,2,4)     # Wet noise only
-            # data = 20 * np.log10(np.abs(np.squeeze(self.wetNoise_STFT[:, :, effectiveSensorIdx])))
-            # stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noise-only')
-            # plt.xticks([])
             ax = fig.add_subplot(nRows,2,4)     # Sensor signals
             data = 20 * np.log10(np.abs(np.squeeze(self.sensorSignals_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noisy')
