@@ -54,6 +54,7 @@ class ProgramSettings(object):
     expAvgBeta: float = 0.99                # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
     performGEVD: bool = False               # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
+    computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only the local sensor observations
     # Broadcasting parameters
     broadcastLength: int = 8                # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
     # Speech enhancement metrics parameters
@@ -79,6 +80,10 @@ class ProgramSettings(object):
         # Check window constraints
         if not sig.check_NOLA(self.stftWin, self.stftWinLength, self.stftEffectiveFrameLen):
             raise ValueError('Window NOLA contrained is not respected.')
+        # Check lengths consistency
+        if self.broadcastLength > self.stftWinLength:
+            raise ValueError(f'Broadcast length is too large ({self.broadcastLength}, with STFT frame size {self.stftWinLength}).')
+
         return self
 
     def __repr__(self):
@@ -102,6 +107,8 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
                 string += f'\nSRO Node {idxNode + 1} = {self.SROsppm[idxNode]} ppm'
                 if self.SROsppm[idxNode] == 0:
                     string += ' (base sampling freq.)'
+        else:
+            string += f'\nPerfectly synchronized network, no SROs'
         string += '\n'
         return string
 
@@ -266,8 +273,12 @@ class Signals(object):
         # ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
         ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 2*delta, label='Noisy')
         if desiredSignalsAvailable:        
-            ax.plot(self.timeVector, self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
-            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - 6*delta, label='Enhanced (global)')
+            if settings.computeLocalEstimate:
+                ax.plot(self.timeVector, self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
+                deltaNextWaveform = 6*delta
+            else:
+                deltaNextWaveform = 4*delta
+            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
@@ -287,6 +298,8 @@ class Signals(object):
             nRows = 3
             if desiredSignalsAvailable:
                 nRows += 1
+            if not settings.computeLocalEstimate:
+                nRows -= 1
             # Plot
             ax = fig.add_subplot(nRows,2,2)     # Wet desired signal
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
@@ -301,15 +314,16 @@ class Signals(object):
             stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noisy')
             if desiredSignalsAvailable:
                 plt.xticks([])
-                ax = fig.add_subplot(nRows,2,6)     # Enhanced signals (local)
-                data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, nodeIdx])))
-                lab = 'Enhanced (local)'
-                if settings.performGEVD:
-                    lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
-                stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
-                ax.set(xlabel='$t$ [s]')
-                plt.xticks([])
-                ax = fig.add_subplot(nRows,2,8)     # Enhanced signals (global)
+                if settings.computeLocalEstimate:
+                    ax = fig.add_subplot(nRows,2,6)     # Enhanced signals (local)
+                    data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, nodeIdx])))
+                    lab = 'Enhanced (local)'
+                    if settings.performGEVD:
+                        lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
+                    stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
+                    ax.set(xlabel='$t$ [s]')
+                    plt.xticks([])
+                ax = fig.add_subplot(nRows,2,nRows*2)     # Enhanced signals (global)
                 data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, nodeIdx])))
                 lab = 'Enhanced (global)'
                 if settings.performGEVD:
@@ -333,21 +347,21 @@ class Signals(object):
             Signal enhancement evaluation metrics.
         """
         # Get data
-        dataBest  = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx])))
-        dataWorst = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx])))
+        dataBest = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx]))
+        dataWorst = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx]))
         # Define plot limits
-        limLow  = np.amin(np.concatenate((dataBest[np.abs(dataBest) > 0], dataWorst[np.abs(dataWorst) > 0]), axis=-1))
-        limHigh = np.amax(np.concatenate((dataBest[np.abs(dataBest) > 0], dataWorst[np.abs(dataWorst) > 0]), axis=-1))
+        limLow  = np.amin(np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]), 20*np.log10(dataWorst[np.abs(dataWorst) > 0])), axis=-1))
+        limHigh  = np.amax(np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]), 20*np.log10(dataWorst[np.abs(dataWorst) > 0])), axis=-1))
 
         fig = plt.figure(figsize=(10,4))
         # Best node
         ax = fig.add_subplot(121)
-        stft_subplot(ax, self.timeFrames, self.freqBins, dataBest, [limLow, limHigh])
+        stft_subplot(ax, self.timeFrames, self.freqBins, 20*np.log10(dataBest), [limLow, limHigh])
         plt.title(f'Best: N{bestNodeIdx + 1} ({np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(122)
-        colorb = stft_subplot(ax, self.timeFrames, self.freqBins, dataWorst, [limLow, limHigh])
+        colorb = stft_subplot(ax, self.timeFrames, self.freqBins, 20*np.log10(dataWorst), [limLow, limHigh])
         plt.title(f'Worst: N{worstNodeIdx + 1} ({np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
