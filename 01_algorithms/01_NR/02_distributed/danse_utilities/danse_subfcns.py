@@ -460,3 +460,115 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
 
     return zBuffer
 
+
+def get_events_matrix(timeInstants, Ns, L):
+    """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
+    For each event instant, the matrix contains the instant itself (in [s]),
+    the node indices concerned by this instant, and the corresponding event
+    flag: "0" for broadcast, "1" for update.
+    
+    Parameters
+    ----------
+    timeInstants : [Nt x Nn] np.ndarray of floats
+        Time instants corresponding to the samples of each of the Nn nodes in the network.
+    Ns : int
+        Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap).
+    L : int
+        Number of (compressed) signal samples to be broadcasted at a time to other nodes.
+    
+    Returns
+    -------
+    eventInstants : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
+        Event instants matrix. One column per event instant.
+    fs : [Nn x 1] list of floats
+        Sampling frequency of each node.
+    """
+
+    # Make sure time stamps matrix is indeed a matrix, correctly oriented
+    if timeInstants.ndim != 2:
+        if timeInstants.ndim == 1:
+            timeInstants = timeInstants[:, np.newaxis]
+        else:
+            raise ValueError('Unexpected number of dimensions for input `timeInstants`.')
+    if timeInstants.shape[0] < timeInstants.shape[1]:
+        timeInstants = timeInstants.T
+
+    # Number of nodes
+    nNodes = timeInstants.shape[1]
+    
+    # Check for clock jitter and save sampling frequencies
+    fs = np.zeros(nNodes)
+    for k in range(nNodes):
+        deltas = np.diff(timeInstants[:, k])
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
+        if len(np.unique(np.round(deltas, precision))) > 1:
+            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
+        fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
+
+    Ttot = timeInstants[-1, 0]      # total duration [s]
+    
+    # Get expected DANSE update instants
+    numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
+    updateInstants = [np.arange(int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    # Get expected broadcast instants
+    numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
+    broadcastInstants = [np.arange(int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+
+    # Number of unique update instants across the WASN
+    numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
+    # Number of unique broadcast instants across the WASN
+    numUniqueBroadcastInstants = sum([len(np.unique(broadcastInstants[k])) for k in range(nNodes)])
+    # Number of unique update _or_ broadcast instants across the WASN
+    numEventInstants = numUniqueBroadcastInstants + numUniqueUpdateInstants
+
+    # Arrange into matrix
+    flattenedUpdateInstants = np.zeros((numUniqueUpdateInstants, 3))
+    flattenedBroadcastInstants = np.zeros((numUniqueBroadcastInstants, 3))
+    for k in range(nNodes):
+        idxStart_u = sum([len(updateInstants[q]) for q in range(k)])
+        idxEnd_u = idxStart_u + len(updateInstants[k])
+        flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = updateInstants[k]
+        flattenedUpdateInstants[idxStart_u:idxEnd_u, 1] = k
+        flattenedUpdateInstants[:, 2] = 1    # event reference "1" for updates
+
+        idxStart_b = sum([len(broadcastInstants[q]) for q in range(k)])
+        idxEnd_b = idxStart_b + len(broadcastInstants[k])
+        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = broadcastInstants[k]
+        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 1] = k
+        flattenedBroadcastInstants[:, 2] = 0    # event reference "0" for broadcasts
+    # Combine
+    eventInstants = np.concatenate((flattenedUpdateInstants, flattenedBroadcastInstants), axis=0)
+    # Sort
+    idxSort = np.argsort(eventInstants[:, 0], axis=0)
+    eventInstants = eventInstants[idxSort, :]
+    # Group
+    eventInstantsFormatted = []
+    eventIdx = 0    # init while-loop
+    nodesConcerned = []             # init
+    eventTypesConcerned = []        # init
+    while eventIdx < numEventInstants:
+
+        currInstant = eventInstants[eventIdx, 0]
+        nodesConcerned.append(eventInstants[eventIdx, 1])
+        eventTypesConcerned.append(eventInstants[eventIdx, 2])
+
+        if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
+            nextInstant = eventInstants[eventIdx + 1, 0]
+            while currInstant == nextInstant:
+                eventIdx += 1
+                currInstant = eventInstants[eventIdx, 0]
+                nodesConcerned.append(eventInstants[eventIdx, 1])
+                eventTypesConcerned.append(eventInstants[eventIdx, 2])
+                if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
+                    nextInstant = eventInstants[eventIdx + 1, 0]
+                else:
+                    eventIdx += 1
+                    break
+            else:
+                eventIdx += 1
+        
+        eventInstantsFormatted.append(np.array([currInstant, nodesConcerned, eventTypesConcerned], dtype=object))
+        nodesConcerned = []         # reset
+        eventTypesConcerned = []    # reset
+
+    return eventInstantsFormatted, fs
