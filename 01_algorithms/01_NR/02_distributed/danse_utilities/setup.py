@@ -5,6 +5,7 @@ import soundfile as sf
 import scipy.signal as sig
 from pathlib import Path, PurePath
 from scipy.signal._arraytools import zero_ext
+import resampy
 
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
@@ -52,7 +53,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
-    mySignals.get_all_stfts(asc.samplingFreq, settings)
+    mySignals.get_all_stfts(mySignals.fs, settings)
 
     # --------------- Post-process ---------------
     # Compute speech enhancement evaluation metrics
@@ -75,7 +76,7 @@ def resample_for_sro(x, baseFs, SROppm):
         Signal to be resampled.
     baseFs : float or int
         Base sampling frequency [samples/s].
-    SROppm : float [TODO: AS OF 21/01/2022, IMPLEMENTED ONLY FOR SROppm >= 0]
+    SROppm : float
         SRO [ppm].
 
     Returns
@@ -84,14 +85,20 @@ def resample_for_sro(x, baseFs, SROppm):
         Resampled signal
     t : [N x 1] np.ndarray
         Corresponding resampled time stamp vector.
+    fsSRO : float
+        Re-sampled signal's sampling frequency [Hz].
     """
     tOriginal = np.arange(len(x)) / baseFs
     fsSRO = baseFs * (1 + SROppm / 1e6)
-    numSamplesPostResamp = int(fsSRO / baseFs * len(x))
+    numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
     xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
+
+    # TODO
+    xResamp2 = resampy.core.resample(x, baseFs, fsSRO)
 
     if len(xResamp) >= len(x):
         xResamp = xResamp[:len(x)]
+        xResamp2 = xResamp2[:len(x)]    # TODO
         t = t[:len(x)]
     else:
         # Append zeros
@@ -101,7 +108,9 @@ def resample_for_sro(x, baseFs, SROppm):
         tadd = np.linspace(t[-1]+dt, t[-1]+dt*(len(x) - len(xResamp)), len(x) - len(xResamp))
         t = np.concatenate((t, tadd))
 
-    return xResamp, t
+    stop = 1
+
+    return xResamp, t, fsSRO
 
 
 def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
@@ -122,10 +131,12 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
 
     Returns
     -------
-    sigsOut : [N x Ns] np.ndarray
+    sigsOut : [N x Ns] np.ndarray of floats
         Signals after SROs application.
-    timeVectorOut : [N x Nn] np.ndarray
+    timeVectorOut : [N x Nn] np.ndarray of floats
         Corresponding sensor-specific time stamps vectors.
+    fs : [Ns x 1] np.ndarray of floats
+        Sensor-specific sampling frequency, after SRO application. 
     """
     # Extract useful variables
     numSamples = sigs.shape[0]
@@ -141,10 +152,11 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
     timeVector = np.arange(sigs.shape[0]) / baseFs
     sigsOut       = np.zeros((numSamples, numSensors))
     timeVectorOut = np.zeros((numSamples, numNodes))
+    fs = np.zeros(numSensors)
     for idxSensor in range(numSensors):
         idxNode = sensorToNodeTags[idxSensor] - 1
         if SROsppm[idxNode] != 0:
-            sigsOut[:, idxSensor], timeVectorOut[:, idxNode] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
+            sigsOut[:, idxSensor], timeVectorOut[:, idxNode], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
         else:
             sigsOut[:, idxSensor] = sigs[:, idxSensor]
             timeVectorOut[:, idxNode] = timeVector
@@ -172,8 +184,7 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
         plt.tight_layout()
         plt.show()
 
-
-    return sigsOut, timeVectorOut
+    return sigsOut, timeVectorOut, fs
 
 
 def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, minNumDANSEupdates=10):
@@ -222,7 +233,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
-                                    sigs.fs,
+                                    sigs.fs[trueIdxSensor],
                                     sigs.VAD[startIdx:],
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg
@@ -248,8 +259,8 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     ----------
     X : [Nf x Nt x C] np.ndarray (complex)
         STFT-domain signal(s).
-    fs : int
-        Sampling frequency [samples/s].
+    fs : [C x 1] np.ndarray of floats
+        Sampling frequencies [samples/s].
     settings : ProgramSettings
 
     Returns
@@ -262,7 +273,7 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     
     for channel in range(X.shape[-1]):
         _, tmp = sig.istft(X[:, :, channel], 
-                                    fs=fs,
+                                    fs=fs[channel],
                                     window=settings.stftWin, 
                                     nperseg=settings.stftWinLength, 
                                     noverlap=int(settings.stftFrameOvlp * settings.stftWinLength),
@@ -489,8 +500,8 @@ def generate_signals(settings: classes.ProgramSettings):
     wetSpeech_norm = wetSpeech / np.amax(wetNoise + wetSpeech)  # Normalize
 
     # --- Apply SROs ---
-    wetNoise_norm, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
-    wetSpeech_norm, timeStampsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    wetNoise_norm, _, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    wetSpeech_norm, timeStampsSROs, fsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
     # Set reference node (for master clock) based on SRO values
     masterClockNodeIdx = np.where(np.array(settings.SROsppm) == 0)[0][0]
     # ------------------
@@ -512,7 +523,7 @@ def generate_signals(settings: classes.ProgramSettings):
                                 VAD=oVAD,
                                 timeVector=timeVector,
                                 sensorToNodeTags=asc.sensorToNodeTags,
-                                fs=asc.samplingFreq,
+                                fs=fsSROs,
                                 referenceSensor=settings.referenceSensor,
                                 timeStampsSROs=timeStampsSROs,
                                 masterClockNodeIdx=masterClockNodeIdx

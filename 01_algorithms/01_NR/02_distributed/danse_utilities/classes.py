@@ -214,7 +214,7 @@ class Signals(object):
     desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using only local observations (not data coming from neighbors)
     stftComputed: bool = False                          # Set to true when the STFTs are computed
-    fs: int = 16e3                                      # Sampling frequency [samples/s]
+    fs: np.ndarray = np.array([])                       # Sensor-specific sampling frequencies [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
     timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings for SRO values)
     masterClockNodeIdx: int = 0                         # Index of node to be used as "master clock" (0 ppm SRO)
@@ -324,11 +324,11 @@ class Signals(object):
             # Plot
             ax = fig.add_subplot(nRows,2,2)     # Wet desired signal
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
-            stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Desired')
+            stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], 'Desired')
             plt.xticks([])
             ax = fig.add_subplot(nRows,2,4)     # Sensor signals
             data = 20 * np.log10(np.abs(np.squeeze(self.sensorSignals_STFT[:, :, effectiveSensorIdx])))
-            stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], 'Noisy')
+            stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], 'Noisy')
             if desiredSignalsAvailable:
                 plt.xticks([])
                 if settings.computeLocalEstimate:
@@ -337,7 +337,7 @@ class Signals(object):
                     lab = 'Enhanced (local)'
                     if settings.performGEVD:
                         lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
-                    stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
+                    stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], lab)
                     ax.set(xlabel='$t$ [s]')
                     plt.xticks([])
                 ax = fig.add_subplot(nRows,2,nRows*2)     # Enhanced signals (global)
@@ -345,7 +345,7 @@ class Signals(object):
                 lab = 'Enhanced (global)'
                 if settings.performGEVD:
                     lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
-                stft_subplot(ax, self.timeFrames, self.freqBins, data, [limLow, limHigh], lab)
+                stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], lab)
                 ax.set(xlabel='$t$ [s]')
             else:
                 ax.set(xlabel='$t$ [s]')
@@ -363,6 +363,10 @@ class Signals(object):
         perf : EnhancementMeasures object
             Signal enhancement evaluation metrics.
         """
+        # Get corresponding sensor indices (for selecting the correct frequency vector)
+        bestNodeSensorIdx = np.argwhere(self.sensorToNodeTags == bestNodeIdx + 1)[0]
+        worstNodeSensorIdx = np.argwhere(self.sensorToNodeTags == worstNodeIdx + 1)[0]
+        
         # Get data
         dataBest = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx]))
         dataWorst = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx]))
@@ -373,12 +377,12 @@ class Signals(object):
         fig = plt.figure(figsize=(10,4))
         # Best node
         ax = fig.add_subplot(121)
-        stft_subplot(ax, self.timeFrames, self.freqBins, 20*np.log10(dataBest), [limLow, limHigh])
+        stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(dataBest), [limLow, limHigh])
         plt.title(f'Best: N{bestNodeIdx + 1} ({np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(122)
-        colorb = stft_subplot(ax, self.timeFrames, self.freqBins, 20*np.log10(dataWorst), [limLow, limHigh])
+        colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(dataWorst), [limLow, limHigh])
         plt.title(f'Worst: N{worstNodeIdx + 1} ({np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
@@ -508,21 +512,23 @@ def get_stft(x, fs, settings: ProgramSettings):
     -------
     out : [Nf x Nt x C] np.ndarray (complex)
         STFT-domain signal(s).
-    f : [Nf x 1] np.ndarray (real)
-        STFT frequency bins.
+    f : [Nf x C] np.ndarray (real)
+        STFT frequency bins, per channel (because of different sampling rates).
     t : [Nt x 1] np.ndarray (real)
         STFT time frames.
     """
     for channel in range(x.shape[-1]):
-        f, t, tmp = sig.stft(x[:, channel],
-                            fs=fs,
+        fcurr, t, tmp = sig.stft(x[:, channel],
+                            fs=fs[channel],
                             window=settings.stftWin,
                             nperseg=settings.stftWinLength,
                             noverlap=int(settings.stftFrameOvlp * settings.stftWinLength),
                             return_onesided=True)
         if channel == 0:
             out = np.zeros((tmp.shape[0], tmp.shape[1], x.shape[-1]), dtype=complex)
+            f = np.zeros((tmp.shape[0], x.shape[-1]))
         out[:, :, channel] = tmp
+        f[:, channel] = fcurr
     return out, f, t
 
 

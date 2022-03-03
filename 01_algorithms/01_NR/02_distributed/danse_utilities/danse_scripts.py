@@ -391,6 +391,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                 # -----------------------------------------------------------------------
 
+                # import matplotlib.pyplot as plt
+                # fig = plt.figure(figsize=(8,4))
+                # ax = fig.add_subplot(111)
+                # # ax.plot(20*np.log10(np.abs(dhatCurr)))
+                # ax.plot(20*np.log10(np.abs(ytildeHat[k][:, i[k], 0])))
+                # ax.grid()
+                # plt.tight_layout()	
+                # plt.show()
+
                 # -------------------- Transform back to time domain --------------------
                 dChunk = ifftscale * subs.back_to_time_domain(dhatCurr, len(win))
                 d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal

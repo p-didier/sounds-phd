@@ -34,20 +34,21 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 3, 1]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=10,
+    signalDuration=3,
     baseSNR=-10,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],               # SRO
     # SROsppm=[0, 400, 600],               # SRO
-    SROsppm=[0, 0, 0],                  # SRO
+    SROsppm=[0, 32000],                  # SRO
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     danseUpdating='simultaneous',       # node-updating scheme

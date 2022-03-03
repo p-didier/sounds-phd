@@ -465,7 +465,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
-    flag: "0" for broadcast, "1" for update.
+    flag: "0" for broadcast, "1" for update, "2" for end of signal. 
     
     Parameters
     ----------
@@ -507,16 +507,22 @@ def get_events_matrix(timeInstants, N, Ns, L):
             raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
         fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
 
-    Ttot = timeInstants[-1, 0]      # total duration [s]
+    # Total signal duration [s] per node (after truncation during signal generation)
+    Ttot = timeInstants[-1, :]      
     
     # Get expected DANSE update instants
     numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
     updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
-    #                            ^ note that we only start updating when we have enough samples
+    #                               ^ note that we only start updating when we have enough samples
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
     broadcastInstants = [np.arange(N / L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
     #                               ^ note that we only start broadcasting when we have enough samples to perform compression
+    # Ensure that all nodes have broadcasted at least once before performing any update
+    minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
+    for k in range(nNodes):
+        updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
+    
 
     # Number of unique update instants across the WASN
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
@@ -570,6 +576,8 @@ def get_events_matrix(timeInstants, N, Ns, L):
                     break
             else:
                 eventIdx += 1
+        else:
+            eventIdx += 1
 
         # Sort events at current instant
         nodesConcerned = np.array(nodesConcerned)
@@ -632,15 +640,16 @@ def broadcast(t, k, fs, L, yk, w, win, neighbourNodes, lk, zBuffer):
     if np.round(t * fs) != np.round(t * fs, 10):
         raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
 
-    # Interpret variables
-    Nchunk = len(win)     # number of samples per compression chunk
+    if len(yk) < len(win):
+        print('Cannot perform compression: not enough local signals samples.')
 
-    # Compress current data chunk in the frequency domain
-    zLocal = danse_compression(yk, w[:, :yk.shape[-1]], win)        # local compressed signals
+    else:
+        # Compress current data chunk in the frequency domain
+        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], win)        # local compressed signals
 
-    # Loop over node `k`'s neighbours and fill their buffers
-    zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
-    
-    lk[k] += 1  # increment local broadcast index
+        # Loop over node `k`'s neighbours and fill their buffers
+        zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+        
+        lk[k] += 1  # increment local broadcast index
 
     return zBuffer
