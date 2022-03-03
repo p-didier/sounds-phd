@@ -89,11 +89,26 @@ def resample_for_sro(x, baseFs, SROppm):
     fsSRO = baseFs * (1 + SROppm / 1e6)
     numSamplesPostResamp = int(fsSRO / baseFs * len(x))
     xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
+
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(x)
+    # ax.plot(xResamp)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
     if len(xResamp) >= len(x):
         xResamp = xResamp[:len(x)]
         t = t[:len(x)]
     else:
-        raise ValueError('SRO < 0 NOT YET IMPLEMENTED.')
+        # Append zeros
+        xResamp = np.concatenate((xResamp, np.zeros(len(x) - len(xResamp))))
+        # Extend time stamps vector
+        dt = t[1] - t[0]
+        tadd = np.linspace(t[-1]+dt, t[-1]+dt*(len(x) - len(xResamp)), len(x) - len(xResamp))
+        t = np.concatenate((t, tadd))
+
     return xResamp, t
 
 
@@ -161,7 +176,7 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
             markerline.set_markerfacecolor('none')
         ax.set(xlabel='$t$ [s]', title='SROs visualization')
         ax.grid()
-        plt.legend(loc='upper right')
+        # plt.legend(loc='upper right')
         plt.tight_layout()
         plt.show()
 

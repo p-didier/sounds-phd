@@ -1,13 +1,27 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-def plot_room2D(ax, rd):
-    # Plots the edges of a rectangle in 2D on the axes <ax>.
+def plot_room2D(ax, rd, dotted=False):
+    """Plots the edges of a rectangle in 2D on the axes <ax>
     
-    ax.plot([rd[0],0], [0,0], 'k')
-    ax.plot([0,0], [0,rd[1]], 'k')
-    ax.plot([rd[0],rd[0]], [0,rd[1]], 'k')
-    ax.plot([0,rd[0]], [rd[1],rd[1]], 'k')
+    Parameters
+    ----------
+    ax : matplotlib Axes object
+        Axes object onto which the rectangle should be plotted.
+    rd : [3 x 1] (or [1 x 3], or [2 x 1], or [1 x 2]) np.ndarray or list of float
+        Room dimensions [m].
+    dotted : bool
+        If true, use dotted lines. Else, use solid lines (default).
+    """
+
+    fmt = 'k'
+    if dotted:
+        fmt += '--'
+    
+    ax.plot([rd[0],0], [0,0], fmt)
+    ax.plot([0,0], [0,rd[1]], fmt)
+    ax.plot([rd[0],rd[0]], [0,rd[1]], fmt)
+    ax.plot([0,rd[0]], [rd[1],rd[1]], fmt)
 
     return None
 
@@ -25,7 +39,7 @@ def plotSTFT(data):
     return None
     
 
-def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20):
+def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20, dotted=False):
     """Plots a 2-D room side, showing the positions of
     sources and nodes inside of it.
     Parameters
@@ -44,12 +58,14 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20):
         Tags relating each sensor to a node number (>=1).
     scatsize : float
         Scatter plot marker size.
+    dotted : bool
+        If true, use dotted lines. Else, use solid lines (default).
     """
 
     numNodes = len(np.unique(sensorToNodeTags))
     numSensors = len(sensorToNodeTags)
     
-    plot_room2D(ax, rd2D)
+    plot_room2D(ax, rd2D, dotted)
     # Desired sources
     for idxSensor in range(rs.shape[0]):
         ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=scatsize,c='blue',marker='d')

@@ -75,7 +75,10 @@ class ProgramSettings(object):
         # Checks on class attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         if 0. not in self.SROsppm:
-            raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+            if self.SROsppm == []:
+                print('Empty SROppm parameter: setting SROppm = [0.]')
+            else:
+                raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
         if not isinstance(self.noiseSignalFile, list):
@@ -121,8 +124,8 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
         string += '\n'
         return string
 
-    def load(self, filename: str):
-        return met.load(self, filename)
+    def load(self, filename: str, silent=False):
+        return met.load(self, filename, silent)
 
     def save(self, filename: str):
         met.save(self, filename)
@@ -449,19 +452,24 @@ class Results:
     enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
     acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
 
-    def load(self, filename: str):
-        return met.load(self, filename)
+    def load(self, foldername: str, silent=False):
+        return met.load(self, foldername, silent)
 
-    def save(self, filename: str, light=False):
+        
+    def __repr__(self):
+        string = f'<Results> object:'
+        return string
+
+    def save(self, foldername: str, light=False):
         """Exports results as pickle archive
         If `light` is True, export a lighter version (not all results, just the minimum)
         """
         if light:
             mycls = copy.copy(self)
             delattr(mycls, 'signals')
-            met.save(mycls, filename)
+            met.save(mycls, foldername)
         else:
-            met.save(self, filename)
+            met.save(self, foldername)
 
     def plot_enhancement_metrics(self):
         """Creates a visual representation of DANSE performance results."""

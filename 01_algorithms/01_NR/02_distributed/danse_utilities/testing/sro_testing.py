@@ -33,6 +33,7 @@ class DanseTestingParameters():
     sigDur: float = 1.      # signals duration [s]
     baseSNR: float = 0.     # # SNR between dry desired signals and dry noise [dB]
     nodeUpdating: str = 'simultaneous'  # node-updating strategy
+    broadcastLength: int = 8    # length of broadcast chunk [samples]
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
 
@@ -85,7 +86,7 @@ def asc_path_selection(danseParams: DanseTestingParameters):
         speechFiles = [Path(i) for i in danseParams.specificDesiredSignalFiles]
     
     # Select noise signal files
-    if danseParams.specificNoiseSignalFiles != ['']:
+    if danseParams.specificNoiseSignalFiles == ['']:
         print(f'Selecting all noise signal files contained in "{danseParams.signalsPath}/noise/"')
         noiseFiles = [f for f in Path(f'{danseParams.signalsPath}/noise').glob('**/*') if f.is_file()]
     else:
@@ -139,7 +140,8 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     expAvgBeta=0.98,
                     performGEVD=1,
                     SROsppm=sros[ii][jj],
-                    danseUpdating=danseParams.nodeUpdating
+                    danseUpdating=danseParams.nodeUpdating,
+                    broadcastLength=danseParams.broadcastLength
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}_{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
             experiments.append(dict([('sets', sets), ('path', exportPath)]))

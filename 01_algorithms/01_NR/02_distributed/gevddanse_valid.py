@@ -47,7 +47,6 @@ for i1, asc in enumerate(acousticScenarios):
                 VADwinLength=40e-3,
                 VADenergyFactor=4000,
                 expAvgBeta=0.98,
-                minNumAutocorrUpdates=10,
                 performGEVD=1,
                 SROsppm=[0],
                 )

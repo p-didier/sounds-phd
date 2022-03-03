@@ -265,6 +265,7 @@ def danse_compression(yq, w, win):
     zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
     # Format for IFFT 
     zq = ifftscale * back_to_time_domain(zq_hat, len(win))
+    zq = np.real_if_close(zq)
 
     return zq
 
@@ -296,10 +297,10 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
     -------
     zk : [Nneighbors x frameSize] np.ndarray of floats
         Compressed signal frames to be used at iteration `ik` by node `k`.
-    bufferFlags : [Nneighbors x 1] np.ndarray of ints (+1, -1, 0, or 2)
-        Flags for buffer over- (+1) or under-flows (-1).
+    bufferFlags : [Nneighbors x 1] np.ndarray of ints
+        Flags for buffer over- (positive value) or under-flows (negative value).
         Value 0: no over- or under-flow.
-        Value 2: last iteration, lack of samples due to cumulated SRO.
+        Value NaN: last iteration, lack of samples due to cumulated SRO.
     """
 
     zk = np.empty((frameSize, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
@@ -307,37 +308,35 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
 
     for idxq in range(len(neighs)):
         Bq = len(zBufferk[idxq])  # buffer size for neighbour node `q`
-        if ik == 0: # first DANSE iteration case
+        if ik == 0: # first DANSE iteration case -- we are expecting an abnormally full buffer, with an entire DANSE chunk size inside of it
             if Bq == frameSize: 
                 # There is no significant SRO between node `k` and `q`.
                 # Response: node `k` uses all samples in the `q`^th buffer.
                 zCurrBuffer = zBufferk[idxq]
-            elif Bq < frameSize:
+            elif (frameSize - Bq) % L == 0 and Bq < frameSize:
                 # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                 # Interpretation: Node `q` samples slower than node `k`. 
                 # Response: ...
-                raise ValueError('NOT YET IMPLEMENTED CASE: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
-            elif Bq > frameSize:
+                raise ValueError('NOT IMPLEMENTED YET: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
+            elif (frameSize - Bq) % L == 0 and Bq > frameSize:
                 # Node `q` has already transmitted too much data to node `k`.
                 # Interpretation: Node `q` samples faster than node `k`.
                 # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
-                bufferFlags[idxq] = 1      # raise negative flag
+                bufferFlags[idxq] = +1 * int((frameSize - Bq) / L)      # raise negative flag
                 zCurrBuffer = zBufferk[idxq][-frameSize:]
-        else:
-            if Bq == N:
-                # Case 1: no broadcast frame mismatch between node `k` and node `q`
-                # Build element of `z` with all the current buffer and a part of the previous `z` values
+        else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
+            if Bq == N:             # case 1: no broadcast frame mismatch between node `k` and node `q`
                 pass
-            elif Bq == N - L:     # case 2: negative broadcast frame mismatch between node `k` and node `q`
-                print(f'>>> Buffer underflow (current node`s B_{neighs[idxq]+1} buffer).')
-                bufferFlags[idxq] = -1      # raise negative flag
-            elif Bq == N + L:     # case 3: positive broadcast frame mismatch between node `k` and node `q`
-                print(f'>>> Buffer overflow (current node`s B_{neighs[idxq]+1} buffer).')
-                bufferFlags[idxq] = 1       # raise positive flag
+            elif (N - Bq) % L == 0 and Bq < N:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
+                print(f'[-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{int(np.abs((N - Bq) / L))} broadcast(s)')
+                bufferFlags[idxq] = -1 * int(np.abs((N - Bq) / L))      # raise negative flag
+            elif (N - Bq) % L == 0 and Bq > N:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
+                print(f'[+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{int(np.abs((N - Bq) / L))} broadcasts(s)')
+                bufferFlags[idxq] = +1 * int(np.abs((N - Bq) / L))       # raise positive flag
             else:
-                if Bq < N and np.abs(ik - lastExpectedIter) < 10:
-                    print('>>> This is the last iteration -- not enough data due to cumulated SROs effect, skip update.')
-                    bufferFlags[idxq] = 2       # raise ultimate flag
+                if (N - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
+                    print('[!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
+                    bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
                 else:
                     if (N - Bq) % L == 0:
                         raise ValueError(f'NOT IMPLEMENTED YET: too large SRO, >1 broadcast length over- or under-flow.')

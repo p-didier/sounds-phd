@@ -56,14 +56,17 @@ class AcousticScenario():
         plot_side_room(a0[0], self.roomDimensions[0:2], 
                     self.desiredSourceCoords[:, [0,1]], 
                     self.noiseSourceCoords[:, [0,1]], 
-                    self.sensorCoords[:, [0,1]], self.sensorToNodeTags)
+                    self.sensorCoords[:, [0,1]],
+                    self.sensorToNodeTags,
+                    dotted=self.absCoeff==1)
         a0[0].set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
         #
         plot_side_room(a0[1], self.roomDimensions[1:], 
                     self.desiredSourceCoords[:, [1,2]], 
                     self.noiseSourceCoords[:, [1,2]],
                     self.sensorCoords[:, [1,2]],
-                    self.sensorToNodeTags)
+                    self.sensorToNodeTags,
+                    dotted=self.absCoeff==1)
         a0[1].set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
         # Add info
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)

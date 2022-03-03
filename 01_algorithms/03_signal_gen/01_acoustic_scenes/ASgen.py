@@ -27,8 +27,11 @@ sets = ASCProgramSettings(
     roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
     numSpeechSources = 1,               # nr. of speech sources
     numNoiseSources = 1,                # nr. of noise sources
-    numNodes = 3,                       # nr. of nodes
-    numSensorPerNode = [1,3,1],               # nr. of sensor per node,
+    numNodes = 2,                       # nr. of nodes
+    # numSensorPerNode = [3,3],               # nr. of sensor per node,
+    # numSensorPerNode = [2,2],               # nr. of sensor per node,
+    numSensorPerNode = [2,1],               # nr. of sensor per node,
+    # numSensorPerNode = [1,1],               # nr. of sensor per node,
     # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
@@ -37,7 +40,7 @@ sets = ASCProgramSettings(
 )
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
 plotit = True  
-exportit = False
+exportit = True    # If True, export the ASC, settings, and figures.
 globalSeed = 12345
 
 def main(sets, basepath, globalSeed, plotit=True, exportit=True):
@@ -91,7 +94,9 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
             if exportit:
                 fig.savefig(f'{foldername}/schematic.pdf')
                 fig.savefig(f'{foldername}/schematic.png')
-            fig.show()
+                print('Acoustic scenario plotted and figure exported.')
+            else:
+                fig.show()
         counter += 1
 
     print('All done.')
