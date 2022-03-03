@@ -90,14 +90,6 @@ def resample_for_sro(x, baseFs, SROppm):
     numSamplesPostResamp = int(fsSRO / baseFs * len(x))
     xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
 
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(x)
-    # ax.plot(xResamp)
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-
     if len(xResamp) >= len(x):
         xResamp = xResamp[:len(x)]
         t = t[:len(x)]
@@ -290,6 +282,61 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     return x, t
 
 
+def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
+    """Zero-padding and signals length adaptation to ensure correct FFT/IFFT operation.
+    Based on FFT implementation by `scipy.signal` module.
+
+    Parameters
+    ----------
+    signals : Signals object
+        The microphone signals and their relevant attributes.
+    asc : AcousticScenario object
+        Processed data about acoustic scenario (RIRs, dimensions, etc.).
+    settings : ProgramSettings object
+        The settings for the current run.
+
+    Returns
+    -------
+    y : np.ndarray of floats
+        Prepped signals.
+    t : np.ndarray of floats
+        Corresponding time stamps.
+    nadd : int
+        Number of zeros added at the of signal after frame-extension (step 2) below).
+    """
+
+    frameSize = settings.stftWinLength
+    nNewSamplesPerFrame = settings.stftEffectiveFrameLen
+    y = signals.sensorSignals
+
+    # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 -- see <scipy.signal.stft>'s `boundary` argument (default: `zeros`)
+    y = zero_ext(y, frameSize // 2, axis=0)
+    # --- Also adapt timeInstants vector
+    t = signals.timeStampsSROs
+    dt = np.diff(t, axis=0)[0, :]   # delta t between each time instant for each node
+    tpre = np.zeros((frameSize // 2, asc.numNodes))
+    tpost = np.zeros((frameSize // 2, asc.numNodes))
+    for k in range(asc.numNodes):
+        tpre[:, k] = np.linspace(start= - dt[k] * (frameSize // 2), stop=-dt[k], num=frameSize // 2)
+        tpost[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * (frameSize // 2), num=frameSize // 2)
+    t = np.concatenate((tpre, t, tpost), axis=0)
+
+    # 2) Zero-pad signal if necessary
+    if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
+        nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
+        print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
+        y = np.concatenate((y, np.zeros([nadd, y.shape[-1]])), axis=0)
+        # Adapt time vector too
+        tzp = np.zeros((nadd, asc.numNodes))
+        for k in range(asc.numNodes):
+            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)
+        t = np.concatenate((t, tzp), axis=0)
+        if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
+            raise ValueError('There is a problem with the zero-padding...')
+
+    return y, t, nadd
+
+
 def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
     """Main wrapper for DANSE computations.
 
@@ -310,34 +357,8 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `desiredSigEstLocal` is output as an all-zeros array.
     """
-    # --------- Prepare signals for Fourier transforms ---------
-    frameSize = settings.stftWinLength
-    nNewSamplesPerFrame = settings.stftEffectiveFrameLen
-    y = signals.sensorSignals
-    # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 -- see <scipy.signal.stft>'s `boundary` argument (default: `zeros`)
-    y = zero_ext(y, frameSize // 2, axis=0)
-    # --- Also adapt timeInstants vector
-    t = signals.timeStampsSROs
-    dt = np.diff(t, axis=0)[0, :]   # delta t between each time instant for each node
-    tpre = np.zeros((frameSize // 2, asc.numNodes))
-    tpost = np.zeros((frameSize // 2, asc.numNodes))
-    for k in range(asc.numNodes):
-        tpre[:, k] = np.linspace(start= - dt[k] * (frameSize // 2), stop=-dt[k], num=frameSize // 2)
-        tpost[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * (frameSize // 2), num=frameSize // 2)
-    t = np.concatenate((tpre, t, tpost), axis=0)
-    # 2) Zero-pad signal if necessary
-    if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
-        nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
-        print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
-        y = np.concatenate((y, np.zeros([nadd, y.shape[-1]])), axis=0)
-        # Adapt time vector too
-        tzp = np.zeros((nadd, asc.numNodes))
-        for k in range(asc.numNodes):
-            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)
-        t = np.concatenate((t, tzp), axis=0)
-        if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
-            raise ValueError('There is a problem with the zero-padding...')
-    # ------------------------------------------------------
+    # Prepare signals for Fourier transforms
+    y, t, nadd = prep_for_ffts(signals, asc, settings)
 
     # DANSE it up
     desiredSigEstLocal_STFT = None
@@ -350,8 +371,8 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
     # Discard pre-DANSE added samples (for Fourier transform processing, see first section of this function)
-    desiredSigEst = desiredSigEst[frameSize // 2:-(frameSize // 2 + nadd)]
-    desiredSigEstLocal = desiredSigEstLocal[frameSize // 2:-(frameSize // 2 + nadd)]
+    desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
+    desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
     return desiredSigEst, desiredSigEstLocal
 

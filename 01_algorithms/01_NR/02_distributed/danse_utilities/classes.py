@@ -216,7 +216,7 @@ class Signals(object):
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: int = 16e3                                      # Sampling frequency [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
-    timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings)
+    timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings for SRO values)
     masterClockNodeIdx: int = 0                         # Index of node to be used as "master clock" (0 ppm SRO)
 
     def __post_init__(self):

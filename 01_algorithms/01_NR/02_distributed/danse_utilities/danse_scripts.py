@@ -192,10 +192,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
     
-    # Initialization (extracting useful quantities)
+    # Initialization (extracting/defining useful quantities)
     rng, win, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
     fftscale = 1 / win.sum()
     ifftscale = win.sum()
+
+    # Prepare main for-loop
+    eventsMatrix, fs = subs.get_events_matrix(timeInstants, frameSize, nExpectedNewSamplesPerFrame, settings.broadcastLength)
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
@@ -203,9 +206,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # ---------------------- Arrays initialization ----------------------
     lk = np.zeros(asc.numNodes, dtype=int)                      # node-specific broadcast index
     i = np.zeros(asc.numNodes, dtype=int)                       # !node-specific! DANSE iteration index
-    nReadyForBroadcast = np.zeros(asc.numNodes, dtype=int)      # node-specific number of samples lined up for broadcast 
-    nNewLocalSamples = np.zeros(asc.numNodes, dtype=int)        # node-specific number of new local samples since the last DANSE iteration 
-    lastSampleIdx = np.full(shape=(asc.numNodes,), fill_value=-1)           # last sample index lined up for broadcast
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
@@ -267,169 +267,147 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
     minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
-    # Important instants
-    idxBroadcasts = [[] for _ in range(asc.numNodes)]
-    idxUpdates = [[] for _ in range(asc.numNodes)]
     # Booleans
-    startedCompression = np.full(shape=(asc.numNodes,), fill_value=False)   # when True, indicates that the compression of local observations has started
-    broadcastSignals = np.full(shape=(asc.numNodes,), fill_value=False)     # when True, broadcast signals to neighbor nodes
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
     # ------------------------------------------------------------------
 
-    t0 = time.perf_counter()    # global timing
-    for idxt, tMaster in enumerate(masterClock):    # loop over master clock instants
+    t0 = time.perf_counter()    # loop timing
+    for events in eventsMatrix:
 
-        for k in range(asc.numNodes):
-            # Update sample counts at new instant `tMaster`
-            lastSampleIdx[k], nReadyForBroadcast[k], nNewLocalSamples[k] = subs.count_samples(
-                timeInstants[:, k],
-                tMaster,
-                lastSampleIdx[k],
-                nReadyForBroadcast[k],
-                nNewLocalSamples[k])
-            
-            # Check whether flag for compressing + broadcasting should be raised
-            broadcastSignals, startedCompression[k] = subs.broadcast_flag_raising(
-                startedCompression[k],
-                nReadyForBroadcast[k],
-                frameSize,
-                settings.broadcastLength)
+        # Parse events
+        t = events[0]
+        nodesConcerned = events[1]
+        eventTypes = ['update'if val==1 else 'broadcast' for val in events[2]]
 
-            if broadcastSignals: 
-                # Extract current data chunk
-                yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
-                # Compress current data chunk in the frequency domain
-                zLocal = subs.danse_compression(yinCurr, wTilde[k][:, i[k], :yinCurr.shape[-1]], settings.danseWindow[:, np.newaxis])        # local compressed signals
-                # Loop over node `k`'s neighbours and fill their buffers
-                zBuffer = subs.fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, settings.broadcastLength)
-                nReadyForBroadcast[k] = 0       # reset number of samples ready for broadcast
-                idxBroadcasts[k].append(idxt)   # save master clock index where broadcast happened
-                lk[k] += 1                      # increment broadcast index
+        # Inform user
+        if 'update' in eventTypes:
+            txt = f't={np.round(t, 3)}s:'
+            for idxEvent in range(len(eventTypes)):
+                if idxEvent > 0:
+                    txt += ';'
+                txt += f' Node {int(nodesConcerned[idxEvent]) + 1} {eventTypes[idxEvent]}s'
+            print(txt)
 
-        # Reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast before counting buffered samples
-        for k in range(asc.numNodes):
-            # Record buffer lengths
-            bufferLengths[k][idxt, :] = np.array([len(buffer) for buffer in zBuffer[k]])
-            if (bufferLengths[k][idxt, :] > frameSize).any():
+        for idxEvent in range(len(eventTypes)):
+
+            # Node index
+            k = int(nodesConcerned[idxEvent])
+            event = eventTypes[idxEvent]
+
+            # Extract current local data chunk
+            idxEndChunk = int(t * fs[k])
+            idxStartChunk = idxEndChunk - frameSize
+            yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+
+            if event == 'broadcast':
+                # Perform broadcast -- update all buffers in network
+                zBuffer = subs.broadcast(
+                            t,
+                            k,
+                            fs[k],
+                            settings.broadcastLength,
+                            yLocalCurr,
+                            wTilde[k][:, i[k], :],
+                            settings.danseWindow[:, np.newaxis],
+                            neighbourNodes,
+                            lk,
+                            zBuffer
+                        )
                 stop = 1
-
-        # Reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast before further processing
-        for k in range(asc.numNodes):  # loop over nodes
-
-            # Checks: can we update?
-            emptyBuffer = any([len(buff) == 0 for buff in zBuffer[k]])   # check whether local buffers are full
-            enoughSamples = nNewLocalSamples[k] >= nExpectedNewSamplesPerFrame
-
-            if enoughSamples and not emptyBuffer:
-
-                if nNewLocalSamples[k] > nExpectedNewSamplesPerFrame:
-                    stop = 1    # TODO deal with that case
                 
-                if lastSampleIdx[k] >= frameSize - 1:
-                    # ~~~~~~~~~~~~~~ Time to update the filter coefficients! ~~~~~~~~~~~~~~
-                    t0update = time.perf_counter()
-                    idxUpdates[k].append(idxt)
-                    
-                    # Gather local observation vector
-                    idxStartChunk = np.amax([0, lastSampleIdx[k] - frameSize + 1])
-                    idxEndChunk = lastSampleIdx[k] + 1
-                    yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]  # local sensor observations ("$\mathbf{y}_k$" in [1])
+            elif event == 'update':
+                # Perform DANSE update
+                t0update = time.perf_counter()
 
-                    # Process buffers
-                    z[k], bufferFlags[k][idxt, :] = subs.process_incoming_signals_buffers(
-                        zBuffer[k],
-                        z[k],
-                        neighbourNodes[k],
-                        i[k],
-                        frameSize,
-                        N=nExpectedNewSamplesPerFrame,
-                        L=settings.broadcastLength,
-                        lastExpectedIter=numIterations - 1)
+                # Process buffers
+                z[k], _ = subs.process_incoming_signals_buffers(
+                    zBuffer[k],
+                    z[k],
+                    neighbourNodes[k],
+                    i[k],
+                    frameSize,
+                    N=nExpectedNewSamplesPerFrame,
+                    L=settings.broadcastLength,
+                    lastExpectedIter=numIterations - 1)
 
-                    # Wipe local buffers
-                    zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
-                    
-                    # Build full available observation vector
-                    yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
-                    ytilde[k][:, i[k], :] = yTildeCurr
-                    # Go to frequency domain
-                    ytildeHatCurr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
-                    # Keep only positive frequencies
-                    ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]
-                    if settings.computeLocalEstimate:
-                        # Local observations only
-                        yHat = ytildeHatCurr[:numFreqLines, :dimYLocal[k]]
-                    
-                    # Compute VAD
-                    VADinFrame = oVAD[idxStartChunk:idxEndChunk]
-                    oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
+                # Wipe local buffers
+                zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
+                
+                # Build full available observation vector
+                yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
+                ytilde[k][:, i[k], :] = yTildeCurr
+                # Go to frequency domain
+                ytildeHatCurr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
+                # Keep only positive frequencies
+                ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]
+                if settings.computeLocalEstimate:
+                    # Local observations only
+                    yHat = ytildeHatCurr[:numFreqLines, :dimYLocal[k]]
+                
+                # Compute VAD
+                VADinFrame = oVAD[idxStartChunk:idxEndChunk]
+                oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
 
-                    # Count autocorrelation matrices updates
-                    yyHtilde = np.einsum('ij,ik->ijk', ytildeHat[k][:, i[k], :], ytildeHat[k][:, i[k], :].conj())
+                # Count autocorrelation matrices updates
+                yyHtilde = np.einsum('ij,ik->ijk', ytildeHat[k][:, i[k], :], ytildeHat[k][:, i[k], :].conj())
+                if oVADframes[i[k]]:
+                    Ryytilde[k] = settings.expAvgBeta * Ryytilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE signal + noise matrix
+                    numUpdatesRyy[k] += 1
+                else:     
+                    Rnntilde[k] = settings.expAvgBeta * Rnntilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE noise-only matrix
+                    numUpdatesRnn[k] += 1
+                    
+                if settings.computeLocalEstimate:
+                    yyHlocal = np.einsum('ij,ik->ijk', yHat, yHat.conj())
                     if oVADframes[i[k]]:
-                        Ryytilde[k] = settings.expAvgBeta * Ryytilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE signal + noise matrix
-                        numUpdatesRyy[k] += 1
+                        Ryylocal[k] = settings.expAvgBeta * Ryylocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL signal + noise matrix
                     else:     
-                        Rnntilde[k] = settings.expAvgBeta * Rnntilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE noise-only matrix
-                        numUpdatesRnn[k] += 1
-                        
-                    if settings.computeLocalEstimate:
-                        yyHlocal = np.einsum('ij,ik->ijk', yHat, yHat.conj())
-                        if oVADframes[i[k]]:
-                            Ryylocal[k] = settings.expAvgBeta * Ryylocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL signal + noise matrix
-                        else:     
-                            Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
+                        Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
 
-                    # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
-                    if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
-                        startUpdates[k] = True
+                # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
+                if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
+                    startUpdates[k] = True
 
-                    if startUpdates[k]:
-                        # No `for`-loop versions
-                        if settings.performGEVD:    # GEVD update
-                            wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
-                            if settings.computeLocalEstimate:
-                                wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
-                        else:                       # regular update (no GEVD)
-                            raise ValueError('Not yet implemented')     # TODO
-                    else:
-                        # Do not update the filter coefficients
-                        wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
+                if startUpdates[k]:
+                    # No `for`-loop versions
+                    if settings.performGEVD:    # GEVD update
+                        wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                         if settings.computeLocalEstimate:
-                            wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
-                    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-                    # ----- Compute desired signal chunk estimate (in frequency domain) -----
-                    dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                    dhat[:, i[k], k] = dhatCurr
+                            wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
+                    else:                       # regular update (no GEVD)
+                        raise ValueError('Not yet implemented')     # TODO
+                else:
+                    # Do not update the filter coefficients
+                    wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
                     if settings.computeLocalEstimate:
-                        dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                        dhatLocal[:, i[k], k] = dhatLocalCurr
-                    # -----------------------------------------------------------------------
+                        wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-                    # -------------------- Transform back to time domain --------------------
-                    dChunk = ifftscale * subs.back_to_time_domain(dhatCurr, len(win))
-                    d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
-                    #
-                    if settings.computeLocalEstimate:
-                        dLocalChunk = ifftscale * subs.back_to_time_domain(dhatLocalCurr, len(win))
-                        dLocal[idxStartChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
-                    # -----------------------------------------------------------------------
+                # ----- Compute desired signal chunk estimate (in frequency domain) -----
+                dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dhat[:, i[k], k] = dhatCurr
+                if settings.computeLocalEstimate:
+                    dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                    dhatLocal[:, i[k], k] = dhatLocalCurr
+                # -----------------------------------------------------------------------
 
-                    # Inform user
-                    print(f'[{np.round(tMaster / masterClock[-1] * 100, 1)}%] Simult. DANSE - t={np.round(tMaster, 4)}s(/{np.round(masterClock[-1], 2)}s): Node {k+1}, i={i[k]+1} ({int(1e3 * (time.perf_counter() - t0update))}ms)')
-                    # Increment DANSE iteration index
-                    i[k] += 1
+                # -------------------- Transform back to time domain --------------------
+                dChunk = ifftscale * subs.back_to_time_domain(dhatCurr, len(win))
+                d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+                #
+                if settings.computeLocalEstimate:
+                    dLocalChunk = ifftscale * subs.back_to_time_domain(dhatLocalCurr, len(win))
+                    dLocal[idxStartChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
+                # -----------------------------------------------------------------------
+                
+                # Increment DANSE iteration index
+                i[k] += 1
 
-                    # Reset local samples counter
-                    nNewLocalSamples[k] = 0
+                # Inform user
+                print(f'DANSE update performed for node {k + 1} in {np.round((time.perf_counter() - t0update) * 1e3)} ms.')
 
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
-
-
-    if 0:
-        dplt.buffer_sizes_evolution_plot(asc, bufferLengths, neighbourNodes, masterClock, nExpectedNewSamplesPerFrame, bufferFlags)
 
     stop = 1
 

@@ -1,6 +1,6 @@
 import numpy as np
 from numba import njit
-import scipy
+import scipy, time
 
 
 def danse_init(yin, settings, asc):
@@ -192,7 +192,7 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
     sigma = np.zeros((nKappas, n))
     Xmat = np.zeros((nKappas, n, n), dtype=complex)
     for kappa in range(nKappas):
-        # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted
+        # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted / vectorized
         sigmacurr, Xmatcurr = scipy.linalg.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
         # Flip Xmat to sort eigenvalues in descending order
         idx = np.flip(np.argsort(sigmacurr))
@@ -461,7 +461,7 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
     return zBuffer
 
 
-def get_events_matrix(timeInstants, Ns, L):
+def get_events_matrix(timeInstants, N, Ns, L):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -471,8 +471,10 @@ def get_events_matrix(timeInstants, Ns, L):
     ----------
     timeInstants : [Nt x Nn] np.ndarray of floats
         Time instants corresponding to the samples of each of the Nn nodes in the network.
+    N : int
+        Number of samples used for compression / for updating the DANSE filters.
     Ns : int
-        Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap).
+        Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap) (Ns < N).
     L : int
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
     
@@ -509,10 +511,12 @@ def get_events_matrix(timeInstants, Ns, L):
     
     # Get expected DANSE update instants
     numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
-    updateInstants = [np.arange(int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    #                            ^ note that we only start updating when we have enough samples
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
-    broadcastInstants = [np.arange(int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    broadcastInstants = [np.arange(N / L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    #                               ^ note that we only start broadcasting when we have enough samples to perform compression
 
     # Number of unique update instants across the WASN
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
@@ -566,9 +570,77 @@ def get_events_matrix(timeInstants, Ns, L):
                     break
             else:
                 eventIdx += 1
-        
+
+        # Sort events at current instant
+        nodesConcerned = np.array(nodesConcerned)
+        eventTypesConcerned = np.array(eventTypesConcerned)
+        # 1) First broadcasts, then updates
+        originalIndices = np.arange(len(nodesConcerned))
+        idxUpdateEvent = originalIndices[eventTypesConcerned == 1]
+        idxBroadcastEvent = originalIndices[eventTypesConcerned == 0]
+        # 2) Order by node index
+        if len(idxUpdateEvent) > 0:
+            idxUpdateEvent = idxUpdateEvent[np.argsort(nodesConcerned[idxUpdateEvent])]
+        if len(idxBroadcastEvent) > 0:
+            idxBroadcastEvent = idxBroadcastEvent[np.argsort(nodesConcerned[idxBroadcastEvent])]
+        # 3) Re-combine
+        indices = np.concatenate((idxBroadcastEvent, idxUpdateEvent))
+        # 4) Sort
+        nodesConcerned = nodesConcerned[indices]
+        eventTypesConcerned = eventTypesConcerned[indices]
+
+        # Build events matrix
         eventInstantsFormatted.append(np.array([currInstant, nodesConcerned, eventTypesConcerned], dtype=object))
         nodesConcerned = []         # reset
         eventTypesConcerned = []    # reset
 
     return eventInstantsFormatted, fs
+
+
+def broadcast(t, k, fs, L, yk, w, win, neighbourNodes, lk, zBuffer):
+    """Performs the broadcast of data from node `k` to its neighbours.
+    
+    Parameters
+    ----------
+    t : float
+        Time instant [s].
+    k : int
+        Node index in WASN.
+    fs : float
+        Node `k`'s sampling frequency [samples/s].
+    L : int
+        Number of samples to broadcast.
+    yk : np.ndarray of floats
+        Local sensor data from node `k`.
+    w : np.ndarray of complex
+        Filter coefficients used for compression.
+    win : np.ndarray of floats
+        Window used for passage from time- to freq.-domain and vice-versa.
+    neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists of ints
+        Network indices of neighbours, per node.
+    lk : [numNodes x 1] list of ints
+        Broadcast index per node.
+    zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float)
+        For each node, buffers at previous iteration.
+    
+    Returns
+    -------
+    zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float)
+        For each node, buffers at current iteration.
+    """
+    # Check inputs
+    if np.round(t * fs) != np.round(t * fs, 10):
+        raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
+
+    # Interpret variables
+    Nchunk = len(win)     # number of samples per compression chunk
+
+    # Compress current data chunk in the frequency domain
+    zLocal = danse_compression(yk, w[:, :yk.shape[-1]], win)        # local compressed signals
+
+    # Loop over node `k`'s neighbours and fill their buffers
+    zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+    
+    lk[k] += 1  # increment local broadcast index
+
+    return zBuffer
