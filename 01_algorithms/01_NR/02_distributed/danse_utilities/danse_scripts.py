@@ -249,9 +249,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
+            wtmp = np.zeros((numFreqLines, numIterations + 1, dimYLocal[k]), dtype=complex)
+            wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+            wLocal.append(wtmp)
+            # wLocal.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k])) +\
+            #     1j * rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k]))))
             sliceLocal = np.finfo(float).eps * np.eye(dimYLocal[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
-            wLocal.append(settings.initialWeightsAmplitude * (rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k])) +\
-                1j * rng.random(size=(numFreqLines, numIterations + 1, dimYLocal[k]))))
             Rnnlocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # noise only
             Ryylocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # speech + noise
     # Desired signal estimate [frames x frequencies x nodes]
@@ -293,10 +296,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 settings.broadcastLength)
 
             if broadcastSignals: 
-                # # Inform user
-                # if k == 0 and lk[k] % 1000 == 0:
-                #     print(f'tMaster = {np.round(tMaster, 4)}s: Node 1`s {lk[k]}^th broadcast to its neighbors')
-
                 # Extract current data chunk
                 yinCurr = yin[(lastSampleIdx[k] - frameSize + 1):(lastSampleIdx[k] + 1), asc.sensorToNodeTags == k+1]
                 # Compress current data chunk in the frequency domain
@@ -311,6 +310,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         for k in range(asc.numNodes):
             # Record buffer lengths
             bufferLengths[k][idxt, :] = np.array([len(buffer) for buffer in zBuffer[k]])
+            if (bufferLengths[k][idxt, :] > frameSize).any():
+                stop = 1
 
         # Reset the `k`-loop here to ensure that all nodes have broadcasted what they had to broadcast before further processing
         for k in range(asc.numNodes):  # loop over nodes
@@ -412,7 +413,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     #
                     if settings.computeLocalEstimate:
                         dLocalChunk = ifftscale * subs.back_to_time_domain(dhatLocalCurr, len(win))
-                        dLocal[idxStartChunk:idxEndChunk, k] += dLocalChunk   # overlap and add construction of output time-domain signal
+                        dLocal[idxStartChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
                     # -----------------------------------------------------------------------
 
                     # Inform user
@@ -420,8 +421,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Increment DANSE iteration index
                     i[k] += 1
 
-                # Reset local samples counter
-                nNewLocalSamples[k] = 0
+                    # Reset local samples counter
+                    nNewLocalSamples[k] = 0
 
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
