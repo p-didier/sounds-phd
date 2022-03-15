@@ -21,17 +21,17 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios = 1,                   # Number of AS to generate
+    numScenarios = 3,                   # Number of AS to generate
     samplingFrequency = 16e3,           # Sampling frequency [samples/s]
     rirLength = 2**12,                  # RIR length [samples]
     roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
     numSpeechSources = 1,               # nr. of speech sources
     numNoiseSources = 1,                # nr. of noise sources
-    numNodes = 2,                       # nr. of nodes
+    numNodes = 1,                       # nr. of nodes
     # numSensorPerNode = [3,3],               # nr. of sensor per node,
     # numSensorPerNode = [2,2],               # nr. of sensor per node,
-    numSensorPerNode = [3,1],               # nr. of sensor per node,
     # numSensorPerNode = [1,1],               # nr. of sensor per node,
+    numSensorPerNode = 4,               # nr. of sensor per node,
     # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)

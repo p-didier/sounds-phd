@@ -74,7 +74,12 @@ class ProgramSettings(object):
     def __post_init__(self) -> None:
         # Checks on class attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
-        if 0. not in self.SROsppm:
+        if isinstance(self.SROsppm, int) or isinstance(self.SROsppm, float):
+            if self.SROsppm == 0:
+                self.SROsppm = [self.SROsppm]
+            else:
+                raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+        elif 0 not in self.SROsppm:
             if self.SROsppm == []:
                 print('Empty SROppm parameter: setting SROppm = [0.]')
             else:
@@ -363,6 +368,11 @@ class Signals(object):
         perf : EnhancementMeasures object
             Signal enhancement evaluation metrics.
         """
+        plotLocalEstimate = len(self.desiredSigEstLocal) > 0
+        nSubplotsRows = 1
+        if plotLocalEstimate:
+            nSubplotsRows = 2
+
         # Get corresponding sensor indices (for selecting the correct frequency vector)
         bestNodeSensorIdx = np.argwhere(self.sensorToNodeTags == bestNodeIdx + 1)[0]
         worstNodeSensorIdx = np.argwhere(self.sensorToNodeTags == worstNodeIdx + 1)[0]
@@ -370,22 +380,60 @@ class Signals(object):
         # Get data
         dataBest = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, bestNodeIdx]))
         dataWorst = np.abs(np.squeeze(self.desiredSigEst_STFT[:, :, worstNodeIdx]))
-        # Define plot limits
-        limLow  = np.amin(np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]), 20*np.log10(dataWorst[np.abs(dataWorst) > 0])), axis=-1))
-        limHigh  = np.amax(np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]), 20*np.log10(dataWorst[np.abs(dataWorst) > 0])), axis=-1))
+        if plotLocalEstimate:
+            dataBestLocal = np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, bestNodeIdx]))
+            dataWorstLocal = np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, worstNodeIdx]))
 
-        fig = plt.figure(figsize=(10,4))
+        # Define color axis limits
+        fullData = np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]),\
+                20*np.log10(dataWorst[np.abs(dataWorst) > 0])
+                ), axis=-1)
+        if plotLocalEstimate:
+            fullData = np.concatenate((fullData,\
+                20*np.log10(dataBestLocal[np.abs(dataBestLocal) > 0]),\
+                20*np.log10(dataWorstLocal[np.abs(dataWorstLocal) > 0])), axis=-1)
+
+        climLow  = np.amin(fullData)
+        climHigh = np.amax(fullData)
+        # Define frequency (y-) axis limits
+        ylimLow  = 0
+        ylimHigh  = np.amax(self.freqBins, axis=0)[self.masterClockNodeIdx]
+
+        # Fix 0's before dB operation
+        dataBest[np.abs(dataBest) == 0] = np.finfo(float).eps
+        dataWorst[np.abs(dataWorst) == 0] = np.finfo(float).eps
+        if plotLocalEstimate:
+            dataBestLocal[np.abs(dataBestLocal) == 0] = np.finfo(float).eps
+            dataWorstLocal[np.abs(dataWorstLocal) == 0] = np.finfo(float).eps
+
+        fig = plt.figure(figsize=(11,5))
         # Best node
-        ax = fig.add_subplot(121)
-        stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(dataBest), [limLow, limHigh])
+        ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
+        stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
+        ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Best: N{bestNodeIdx + 1} ({np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         # Worst node
-        ax = fig.add_subplot(122)
-        colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(dataWorst), [limLow, limHigh])
+        ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
+        colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
+        ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Worst: N{worstNodeIdx + 1} ({np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][0] * 100, 2)}% STOI)')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
+        if plotLocalEstimate:
+            ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
+            stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
+            ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
+            plt.title(f'Local estimate: N{bestNodeIdx + 1}')
+            plt.xlabel('$t$ [s]')
+            # Worst node
+            ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
+            colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
+            ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
+            plt.title(f'Local estimate: N{worstNodeIdx + 1}')
+            plt.xlabel('$t$ [s]')
+            colorb.set_label('[dB]')
+
         return fig
 
     def export_wav(self, folder):
@@ -416,16 +464,21 @@ class Signals(object):
             #
             fname_noisy.append(f'{folder}/wav/noisy_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
             data = normalize_toint16(self.sensorSignals[:, idxSensor])
-            wavfile.write(fname_noisy[-1], int(self.fs), data)
+            wavfile.write(fname_noisy[-1], int(self.fs[idxSensor]), data)
             #
             fname_desired.append(f'{folder}/wav/desired_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
             data = normalize_toint16(self.wetSpeech[:, idxSensor])
-            wavfile.write(fname_desired[-1], int(self.fs), data)
+            wavfile.write(fname_desired[-1], int(self.fs[idxSensor]), data)
             #
             if len(self.desiredSigEst) > 0:  # if enhancement has been performed
                 fname_enhanced.append(f'{folder}/wav/enhanced_N{idxNode + 1}.wav')
                 data = normalize_toint16(self.desiredSigEst[:, idxNode])
-                wavfile.write(fname_enhanced[-1], int(self.fs), data)
+                wavfile.write(fname_enhanced[-1], int(self.fs[idxSensor]), data)
+            #
+            if len(self.desiredSigEstLocal) > 0:  # if enhancement has been performed and local estimate computed
+                fname_enhanced.append(f'{folder}/wav/enhancedLocal_N{idxNode + 1}.wav')
+                data = normalize_toint16(self.desiredSigEstLocal[:, idxNode])
+                wavfile.write(fname_enhanced[-1], int(self.fs[idxSensor]), data)
         print(f'Signals exported in folder "{folder}/wav/".')
         # WAV files names dictionary
         fnames = dict([('Noisy', fname_noisy), ('Desired', fname_desired), ('Enhanced', fname_enhanced)])

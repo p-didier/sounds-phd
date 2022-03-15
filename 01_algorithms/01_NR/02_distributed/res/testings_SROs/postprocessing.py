@@ -18,14 +18,16 @@ import utilsASC
 # resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_3sensorseach'
 # resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_2sensorseach'
 # resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_1sensoreach'
-resultsBaseFolder = f'{Path(__file__).parent}/automated'
+resultsBaseFolder = f'{Path(__file__).parent}/automated/J2Mk[3, 1]_Ns1_Nn1_anechoic'
 exportFileName = f'{resultsBaseFolder}/postProcessed'  # + ".png" & ".pdf"
 
 resSubDirs = list(Path(resultsBaseFolder).iterdir())
-resSubDirs = [f for f in resSubDirs if f.name[0] == 'J']
+resSubDirs = [f for f in resSubDirs if f.name[-1] == ']']
 
-# Extract data
-nNodes = int(resSubDirs[0].name[1])
+# Find number of nodes from number of SRO values
+idxStart = resSubDirs[0].name.rfind('[')
+nNodes = len([int(s) for s in resSubDirs[0].name[idxStart+1:-1].split(', ') if s.isdigit()])
+
 meanStois = np.zeros((nNodes, len(resSubDirs)))
 stdStois = np.zeros((nNodes, len(resSubDirs)))
 meanfwSNRseg = np.zeros((nNodes, len(resSubDirs)))
@@ -65,7 +67,7 @@ meanfwSNRseg = meanfwSNRseg[:, idxSorting]
 fig = plt.figure(figsize=(8,4))
 ax = fig.add_subplot(121)
 for idxNode in range(nNodes):
-    ax.plot(srosMean, meanStois[idxNode, :] * 100, f'C{idxNode}-o', label=f'Node {idxNode+1}')
+    ax.semilogx(srosMean, meanStois[idxNode, :] * 100, f'C{idxNode}-o', label=f'Node {idxNode+1}')
 ax.grid()
 ax.set_ylim([0, 100])
 ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
@@ -73,9 +75,9 @@ ax.set_ylabel('Sensors-averaged STOI [%]')
 #
 ax = fig.add_subplot(122)
 for idxNode in range(nNodes):
-    ax.plot(srosMean, meanfwSNRseg[idxNode, :] , f'C{idxNode}-o', label=f'Node {idxNode+1}')
+    ax.semilogx(srosMean, meanfwSNRseg[idxNode, :] , f'C{idxNode}-o', label=f'Node {idxNode+1}')
 ax.grid()
-ax.set_ylim([-5, 3])
+# ax.set_ylim([-5, 3])
 ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
 ax.set_ylabel('Sensors-averaged $\\Delta$fwSNRseg [dB]')
 plt.tight_layout()

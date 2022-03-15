@@ -1,3 +1,4 @@
+from cProfile import label
 import numpy as np
 from numba import njit
 import scipy, time
@@ -19,8 +20,10 @@ def danse_init(yin, settings, asc):
     ----------
     rng : np.random generator
         Random generator to be used in DANSE algorithm for matrices initialization.
-    win : N x 1 np.ndarray
-        Window
+    winWOLAanalysis : N x 1 np.ndarray
+        WOLA analysis window (time domain to freq. domain).
+    winWOLAsynthesis : N x 1 np.ndarray
+        WOLA synthesis window (freq. domain to time domain).
     frameSize : int
         Number of samples used within one DANSE iteration.
     nNewSamplesPerFrame : int
@@ -37,7 +40,9 @@ def danse_init(yin, settings, asc):
     rng = np.random.default_rng(settings.randSeed)
 
     # Adapt window array format
-    win = settings.danseWindow[:, np.newaxis]
+    win = settings.danseWindow
+    winWOLAanalysis = np.sqrt(win)      # WOLA analysis window
+    winWOLAsynthesis = np.sqrt(win)     # WOLA synthesis window
 
     # Define useful quantities
     frameSize = settings.chunkSize
@@ -51,7 +56,7 @@ def danse_init(yin, settings, asc):
     for k in range(asc.numNodes):
         neighbourNodes.append(np.delete(allNodeIdx, k))   # Option 1) - FULLY-CONNECTED WASN
 
-    return rng, win, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
+    return rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
 
 
 def check_autocorr_est(Ryy, Rnn, nUpRyy=0, nUpRnn=0, min_nUp=0):
@@ -184,31 +189,65 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
     """
     # ------------ for-loop-free estimate ------------
     n = Ryy.shape[-1]
-    nKappas = Ryy.shape[0]
+    nFreqs = Ryy.shape[0]
     # Reference sensor selection vector 
     Evect = np.zeros((n,))
     Evect[refSensorIdx] = 1
 
-    sigma = np.zeros((nKappas, n))
-    Xmat = np.zeros((nKappas, n, n), dtype=complex)
-    for kappa in range(nKappas):
+    sigma = np.zeros((nFreqs, n))
+    Xmat = np.zeros((nFreqs, n, n), dtype=complex)
+
+    # t0 = time.perf_counter()
+    for kappa in range(nFreqs):
         # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted / vectorized
         sigmacurr, Xmatcurr = scipy.linalg.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
         # Flip Xmat to sort eigenvalues in descending order
         idx = np.flip(np.argsort(sigmacurr))
         sigma[kappa, :] = sigmacurr[idx]
         Xmat[kappa, :, :] = Xmatcurr[:, idx]
+    # print(f'GEVD done in {np.round((time.perf_counter() - t0) * 1e3)} ms')
 
     Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0,2,1]))
     # GEVLs tensor
-    Dmat = np.zeros((nKappas, n, n))
-    Dmat[:, 0, 0] = np.squeeze(1 - 1/sigma[:, :rank])
+    Dmat = np.zeros((nFreqs, n, n))
+    for ii in range(rank):
+        Dmat[:, ii, ii] = np.squeeze(1 - 1/sigma[:, ii:(ii+1)])
     # LMMSE weights
     Qhermitian = np.transpose(Qmat.conj(), axes=[0,2,1])
-    QmH = np.linalg.inv(Qhermitian)
-    w = np.matmul(np.matmul(np.matmul(QmH, Dmat), Qhermitian), Evect)
+    w = np.matmul(np.matmul(np.matmul(Xmat, Dmat), Qhermitian), Evect)
 
     return w, Qmat
+
+
+def perform_update_noforloop(Ryy, Rnn, refSensorIdx=0):
+    """Regular DANSE update computations, `for`-loop free.
+    No GEVD involved here.
+    
+    Parameters
+    ----------
+    Ryy : [M x N x N] np.ndarray (complex)
+        Autocorrelation matrix between the sensor signals.
+    Rnn : [M x N x N] np.ndarray (complex)
+        Autocorrelation matrix between the noise signals.
+    refSensorIdx : int
+        Index of the reference sensor (>=0).
+
+    Returns
+    -------
+    w : [M x N] np.ndarray (complex)
+        Regular DANSE filter coefficients.
+    """
+    # Reference sensor selection vector
+    Evect = np.zeros((Ryy.shape[-1],))
+    Evect[refSensorIdx] = 1
+
+    # Cross-correlation matrix update 
+    ryd = np.matmul(Ryy - Rnn, Evect)
+    # Update node-specific parameters of node k
+    Ryyinv = np.linalg.inv(Ryy)
+    w = np.matmul(Ryyinv, ryd[:,:,np.newaxis])
+    w = w[:, :, 0]  # get rid of singleton dimension
+    return w
 
 
 def back_to_time_domain(x, n):
@@ -235,7 +274,10 @@ def back_to_time_domain(x, n):
     return xout
 
 
-def danse_compression(yq, w, win):
+
+
+
+def danse_compression(yq, w, n):
     """Performs local signals compression according to DANSE theory [1].
     
     Parameters
@@ -244,8 +286,8 @@ def danse_compression(yq, w, win):
         Local sensor signals.
     w : [Ns x 1] np.ndarray (complex)
         Local filter estimated (from previous DANSE iteration).
-    win : [N x 1] np.ndarray (real)
-        Time window.
+    n : int
+        FFT order.
         
     Returns
     -------
@@ -253,18 +295,15 @@ def danse_compression(yq, w, win):
         Compress local sensor signals (1-D).
     """
 
-    # (I)FFT scalings
-    fftscale = 1.0 / win.sum()
-    ifftscale = win.sum()
-
     # Go to frequency domain
-    yq_hat = fftscale * np.fft.fft(yq * win, len(win), axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
+    yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
     # Keep only positive frequencies
-    yq_hat = yq_hat[:int(len(win) / 2 + 1)]
+    yq_hat = yq_hat[:int(n / 2 + 1)]
     # Compress using filter coefficients
     zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+
     # Format for IFFT 
-    zq = ifftscale * back_to_time_domain(zq_hat, len(win))
+    zq = back_to_time_domain(zq_hat, n)
     zq = np.real_if_close(zq)
 
     return zq
@@ -344,6 +383,17 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
                         raise ValueError(f'ERROR: Unexpected buffer size for neighbor node q={neighs[idxq]+1}.')
             # Build current buffer
             zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
+
+            # import matplotlib.pyplot as plt
+            # fig = plt.figure(figsize=(8,4))
+            # ax = fig.add_subplot(111)
+            # ax.plot(zBufferk[idxq])
+            # ax.grid()
+            # plt.tight_layout()	
+            # plt.show()
+
+
+            stop = 1
         # Stack compressed signals
         zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
 
@@ -516,8 +566,8 @@ def get_events_matrix(timeInstants, N, Ns, L):
     #                               ^ note that we only start updating when we have enough samples
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
-    broadcastInstants = [np.arange(N / L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
-    #                               ^ note that we only start broadcasting when we have enough samples to perform compression
+    broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    #                              ^ note that we only start broadcasting when we have enough samples to perform compression
     # Ensure that all nodes have broadcasted at least once before performing any update
     minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
     for k in range(nNodes):
@@ -605,7 +655,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
     return eventInstantsFormatted, fs
 
 
-def broadcast(t, k, fs, L, yk, w, win, neighbourNodes, lk, zBuffer):
+def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
     """Performs the broadcast of data from node `k` to its neighbours.
     
     Parameters
@@ -622,8 +672,8 @@ def broadcast(t, k, fs, L, yk, w, win, neighbourNodes, lk, zBuffer):
         Local sensor data from node `k`.
     w : np.ndarray of complex
         Filter coefficients used for compression.
-    win : np.ndarray of floats
-        Window used for passage from time- to freq.-domain and vice-versa.
+    n : int
+        FFT length.
     neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists of ints
         Network indices of neighbours, per node.
     lk : [numNodes x 1] list of ints
@@ -640,16 +690,16 @@ def broadcast(t, k, fs, L, yk, w, win, neighbourNodes, lk, zBuffer):
     if np.round(t * fs) != np.round(t * fs, 10):
         raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
 
-    if len(yk) < len(win):
+    if len(yk) < n:
         print('Cannot perform compression: not enough local signals samples.')
 
     else:
         # Compress current data chunk in the frequency domain
-        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], win)        # local compressed signals
+        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
 
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
-        
+
         lk[k] += 1  # increment local broadcast index
 
     return zBuffer

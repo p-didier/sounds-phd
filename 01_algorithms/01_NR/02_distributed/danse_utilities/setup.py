@@ -155,11 +155,12 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
     fs = np.zeros(numSensors)
     for idxSensor in range(numSensors):
         idxNode = sensorToNodeTags[idxSensor] - 1
-        if SROsppm[idxNode] != 0:
-            sigsOut[:, idxSensor], timeVectorOut[:, idxNode], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
-        else:
-            sigsOut[:, idxSensor] = sigs[:, idxSensor]
-            timeVectorOut[:, idxNode] = timeVector
+        # if SROsppm[idxNode] != 0:
+        sigsOut[:, idxSensor], timeVectorOut[:, idxNode], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
+        # else:
+        #     sigsOut[:, idxSensor] = sigs[:, idxSensor]
+        #     timeVectorOut[:, idxNode] = timeVector
+        #     fs[idxSensor] = baseFs
 
     # Plot
     if showSRO:

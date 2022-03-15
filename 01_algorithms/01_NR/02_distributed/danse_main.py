@@ -24,6 +24,7 @@ if not any("_general_fcts" in s for s in sys.path):
 if not any("_third_parties" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_third_parties')
 from playsounds.playsounds import playwavfile
+from general.osutils import wipe_folder
 print(f'Custom (non-DANSE) packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 print(f'Total packages loading time: {round(time.perf_counter() - t00, 2)}s\n')
 # ------------------------
@@ -33,27 +34,26 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    # acousticScenarioPath=f'{ascBasePath}/validations/J6Mk[2 5 2 2 3 2]_Ns1_Nn1_anechoic/AS6',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS1',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=3,
-    baseSNR=-10,
+    signalDuration=10,
+    baseSNR=0,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],               # SRO
     # SROsppm=[0, 400, 600],               # SRO
-    SROsppm=[0, 32000],                  # SRO
+    # SROsppm=[0, 32000],                  # SRO
+    SROsppm=0,                  # SRO
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
+    performGEVD=False
     )
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
@@ -63,10 +63,11 @@ if mySettings.compensateSROs:
 else:
     experimentName += '_nocomp'
 
-exportPath = f'{Path(__file__).parent}/res/{experimentName}'
+exportPath = f'{Path(__file__).parent}/res/single_sensor_nodes/{experimentName}'
+lightExport = True          # <-- set to True to not export whole signals
 # ------------------------
 
-def main(mySettings, exportPath, showPlots=1, lightExport=False):
+def main(mySettings, exportPath, showPlots=1, lightExport=True):
     """Main function for DANSE runs.
 
     Parameters
@@ -77,6 +78,8 @@ def main(mySettings, exportPath, showPlots=1, lightExport=False):
         Path to export directory, containing label of experiment.
     showPlots : bool
         If True, shows plots in Python interpreter window.
+    lightExport : bool
+        If True, export a lighter version (not all results, just the minimum).
     """
     # Check if experiment has already been run
     runExpFlag = False
@@ -97,6 +100,7 @@ def main(mySettings, exportPath, showPlots=1, lightExport=False):
         results = run_experiment(mySettings)
         # ================================================
         # Export
+        wipe_folder(exportPath)     # wipe export folder    
         results.save(exportPath, lightExport)        # save results
         mySettings.save(exportPath)     # save settings
 
@@ -125,8 +129,6 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
         Maximal playback duration (only used if <listen> is True).
     """
 
-    # Import results
-    # results = Results().load(pathToResults)
     # Export as WAV
     wavFilenames = results.signals.export_wav(pathToResults)
 
@@ -185,5 +187,5 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(mySettings, exportPath))
+    sys.exit(main(mySettings, exportPath, lightExport))
 # ------------------------------------------------------------------------------------

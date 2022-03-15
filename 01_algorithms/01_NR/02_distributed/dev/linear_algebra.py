@@ -131,7 +131,7 @@ print(test.shape)
 print((test == truth).all())
 
 
-# %%
+# %% DEVELOPING A FOR-LOOP FREE VERSION OF THE REGULAR DANSE UPDATE
 
 import numpy as np
 import time
@@ -162,14 +162,15 @@ for kappa in range(nKappas):
     # Update node-specific parameters of node k
     w[kappa, :] = np.linalg.inv(Ryy[kappa, :, :]) @ ryd[kappa, :]
 truth = w
+rydtrue = ryd
 
 # Cross-correlation matrix update 
 ryd = np.matmul(Ryy - Rnn, Evect)
 # Update node-specific parameters of node k
 Ryyinv = np.linalg.inv(Ryy)
-test = np.matmul(Ryyinv, ryd)  # TODO -- 
+test = np.matmul(Ryyinv, ryd[:,:,np.newaxis])
 
 print('done')
 print(truth.shape)
 print(test.shape)
-print((test == truth).all())
+print((np.squeeze(test) == truth).all())

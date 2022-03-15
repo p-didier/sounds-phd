@@ -3,7 +3,6 @@ import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
-from . import danse_plots as dplt
 
 """
 References:
@@ -193,9 +192,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     """
     
     # Initialization (extracting/defining useful quantities)
-    rng, win, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
-    fftscale = 1 / win.sum()
-    ifftscale = win.sum()
+    rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
 
     # Prepare main for-loop
     eventsMatrix, fs = subs.get_events_matrix(timeInstants, frameSize, nExpectedNewSamplesPerFrame, settings.broadcastLength)
@@ -237,6 +234,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
         sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
+        # sliceTilde = np.zeros(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
         Ryytilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # speech + noise
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
@@ -283,9 +281,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         if 'update' in eventTypes:
             txt = f't={np.round(t, 3)}s:'
             for idxEvent in range(len(eventTypes)):
-                if idxEvent > 0:
-                    txt += ';'
-                txt += f' Node {int(nodesConcerned[idxEvent]) + 1} {eventTypes[idxEvent]}s'
+                k = int(nodesConcerned[idxEvent])   # node index
+                if eventTypes[idxEvent] == 'broadcast':
+                    if idxEvent > 0:
+                        txt += ';'
+                    txt += f' Node {k + 1} {eventTypes[idxEvent]}s'
+                elif eventTypes[idxEvent] == 'update':
+                    if startUpdates[k]:  # only print if the node actually has started updating (i.e. there has been sufficiently many autocorrelation matrices updates since the start of recording)
+                        if idxEvent > 0:
+                            txt += ';'
+                        txt += f' Node {k + 1} {eventTypes[idxEvent]}s'
             print(txt)
 
         for idxEvent in range(len(eventTypes)):
@@ -308,17 +313,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             settings.broadcastLength,
                             yLocalCurr,
                             wTilde[k][:, i[k], :],
-                            settings.danseWindow[:, np.newaxis],
+                            frameSize,
                             neighbourNodes,
                             lk,
                             zBuffer
                         )
-                stop = 1
                 
-            elif event == 'update':
-                # Perform DANSE update
-                t0update = time.perf_counter()
-
+            if event == 'update':
+                t0 = time.perf_counter()
+                
                 # Process buffers
                 z[k], _ = subs.process_incoming_signals_buffers(
                     zBuffer[k],
@@ -332,12 +335,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
-                
+
                 # Build full available observation vector
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                 ytilde[k][:, i[k], :] = yTildeCurr
+
                 # Go to frequency domain
-                ytildeHatCurr = fftscale * np.fft.fft(ytilde[k][:, i[k], :] * win, frameSize, axis=0)
+                ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 # Keep only positive frequencies
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]
                 if settings.computeLocalEstimate:
@@ -356,7 +360,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 else:     
                     Rnntilde[k] = settings.expAvgBeta * Rnntilde[k] + (1 - settings.expAvgBeta) * yyHtilde  # update WIDE noise-only matrix
                     numUpdatesRnn[k] += 1
-                    
+                
+                # Local autocorrelation matrices
                 if settings.computeLocalEstimate:
                     yyHlocal = np.einsum('ij,ik->ijk', yHat, yHat.conj())
                     if oVADframes[i[k]]:
@@ -369,13 +374,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     startUpdates[k] = True
 
                 if startUpdates[k]:
+
                     # No `for`-loop versions
                     if settings.performGEVD:    # GEVD update
                         wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                         if settings.computeLocalEstimate:
                             wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
+
                     else:                       # regular update (no GEVD)
-                        raise ValueError('Not yet implemented')     # TODO
+                        wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], settings.referenceSensor)
+                        if settings.computeLocalEstimate:
+                            wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
+
                 else:
                     # Do not update the filter coefficients
                     wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
@@ -391,29 +401,29 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                 # -----------------------------------------------------------------------
 
-                # import matplotlib.pyplot as plt
-                # fig = plt.figure(figsize=(8,4))
-                # ax = fig.add_subplot(111)
-                # # ax.plot(20*np.log10(np.abs(dhatCurr)))
-                # ax.plot(20*np.log10(np.abs(ytildeHat[k][:, i[k], 0])))
-                # ax.grid()
-                # plt.tight_layout()	
-                # plt.show()
-
-                # -------------------- Transform back to time domain --------------------
-                dChunk = ifftscale * subs.back_to_time_domain(dhatCurr, len(win))
+                # -------------------- Transform back to time domain (WOLA processing) --------------------
+                dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
                 d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
-                #
+                
                 if settings.computeLocalEstimate:
-                    dLocalChunk = ifftscale * subs.back_to_time_domain(dhatLocalCurr, len(win))
+                    dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
                     dLocal[idxStartChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
                 # -----------------------------------------------------------------------
                 
                 # Increment DANSE iteration index
                 i[k] += 1
 
-                # Inform user
-                print(f'DANSE update performed for node {k + 1} in {np.round((time.perf_counter() - t0update) * 1e3)} ms.')
+                # print(f'DANSE updated in {np.round((time.perf_counter() - t0) * 1e3)} ms')
+    
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(8,4))
+    for ii in range(wTilde[0].shape[-1]):
+        ax = fig.add_subplot(wTilde[0].shape[-1], 1, ii+1)
+        ax.semilogy(np.abs(wTilde[0][:, :, ii]).T)
+        ax.grid()
+    plt.tight_layout()	
+    plt.show()
+    fig.savefig('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/single_sensor_nodes/simultaneous_[0]ppm_comp/filtercoeffs.png')    # TMPTMPTMPTMPTMPTMPTMPTMP
 
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
