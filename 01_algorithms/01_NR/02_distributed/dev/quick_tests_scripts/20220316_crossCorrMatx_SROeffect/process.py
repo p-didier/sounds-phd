@@ -8,11 +8,11 @@ import sys
 datafolder = Path('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/quick_exports/20220316_crossCorrMatx_SROeffect')
 asc = 'J3Mk[2, 3, 1]'
 asc = 'J5Mk[1, 1, 1, 1, 1]'
-exportPath = 'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/quick_tests_scripts/20220316_crossCorrMatx_SROeffect/output'
-plotFrequencyIdx = 20
+plotFrequencyIdx = 100
 
+exportPath = f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/quick_tests_scripts/20220316_crossCorrMatx_SROeffect/output/kappa{plotFrequencyIdx}'
 
-def saveitup(fig, path, name):
+def saveitup(fig, path, name, nopdf=False):
     if path[-1] != '/':
         path += '/'
 
@@ -21,7 +21,9 @@ def saveitup(fig, path, name):
         print(f'Created directory\n"{path}"\nfor figures export')
 
     fig.savefig(path + name + '.png')
-    fig.savefig(path + name + '.pdf')
+    if not nopdf:
+        fig.savefig(path + name + '.pdf')
+
     return 0
 
 
@@ -115,7 +117,8 @@ def main():
                 axs[jj].set_yticks([])
             fig.suptitle(f'$R_{{yy}}$ - {subdirs[ii].name} (Node {k+1}, $\kappa$={plotFrequencyIdx})')
             fig.tight_layout()
-            saveitup(fig, exportPath + '/' + asc, f'RyyN{k+1}_{subdirs[ii].name}')
+            saveitup(fig, exportPath + '/' + asc, f'RyyN{k+1}_{subdirs[ii].name}', nopdf=True)
+            plt.close(fig)
 
             # Rnn
             currDictEntry = bigdictRnn[subdirs[ii].name][k]     # SRO-conditions- and node-specific
@@ -131,7 +134,8 @@ def main():
                 axs[jj].set_yticks([])
             fig.suptitle(f'$R_{{nn}}$ - {subdirs[ii].name} (Node {k+1}, $\kappa$={plotFrequencyIdx})')
             fig.tight_layout()
-            saveitup(fig, exportPath + '/' + asc, f'RnnN{k+1}_{subdirs[ii].name}')
+            saveitup(fig, exportPath + '/' + asc, f'RnnN{k+1}_{subdirs[ii].name}', nopdf=True)
+            plt.close(fig)
 
 
 # ------------------------------------ RUN SCRIPT ------------------------------------

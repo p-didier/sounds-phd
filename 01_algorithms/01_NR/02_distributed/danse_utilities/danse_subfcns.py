@@ -212,6 +212,8 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
     Dmat = np.zeros((nFreqs, n, n))
     for ii in range(rank):
         Dmat[:, ii, ii] = np.squeeze(1 - 1/sigma[:, ii:(ii+1)])
+    # Dmat = np.zeros((nFreqs, n, n))
+    # Dmat[:, 0, 0] = np.squeeze(1 - 1/sigma[:, :rank])
     # LMMSE weights
     Qhermitian = np.transpose(Qmat.conj(), axes=[0,2,1])
     w = np.matmul(np.matmul(np.matmul(Xmat, Dmat), Qhermitian), Evect)
@@ -274,9 +276,6 @@ def back_to_time_domain(x, n):
     return xout
 
 
-
-
-
 def danse_compression(yq, w, n):
     """Performs local signals compression according to DANSE theory [1].
     
@@ -295,7 +294,11 @@ def danse_compression(yq, w, n):
         Compress local sensor signals (1-D).
     """
 
+    # win = np.hanning(n)
+    # win = win[:, np.newaxis]
+    
     # Go to frequency domain
+    # yq_hat = 1 / win.sum() * np.fft.fft(yq * win, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
     yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
     # Keep only positive frequencies
     yq_hat = yq_hat[:int(n / 2 + 1)]
@@ -303,10 +306,25 @@ def danse_compression(yq, w, n):
     zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
 
     # Format for IFFT 
+    # zq = win.sum() * back_to_time_domain(zq_hat, n)
     zq = back_to_time_domain(zq_hat, n)
+    # back_to_time_domain(zq_hat, n)
     zq = np.real_if_close(zq)
 
-    return zq
+    
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(20*np.log10(np.abs(yq_hat)), label='y')
+    # ax.plot(20*np.log10(np.abs(w)), label='w')
+    # ax.plot(20*np.log10(np.abs(zq_hat)), label='z')
+    # ax.grid()
+    # plt.legend()
+    # plt.tight_layout()	
+    # plt.show()
+
+
+    return zq, zq_hat
 
 
 def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, N, L, lastExpectedIter):
@@ -363,6 +381,7 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
                 # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
                 bufferFlags[idxq] = +1 * int((frameSize - Bq) / L)      # raise negative flag
                 zCurrBuffer = zBufferk[idxq][-frameSize:]
+
         else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
             if Bq == N:             # case 1: no broadcast frame mismatch between node `k` and node `q`
                 pass
@@ -384,16 +403,6 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
             # Build current buffer
             zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
 
-            # import matplotlib.pyplot as plt
-            # fig = plt.figure(figsize=(8,4))
-            # ax = fig.add_subplot(111)
-            # ax.plot(zBufferk[idxq])
-            # ax.grid()
-            # plt.tight_layout()	
-            # plt.show()
-
-
-            stop = 1
         # Stack compressed signals
         zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
 
@@ -470,7 +479,7 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
     return broadcastFlag, compressStarted
 
 
-def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
+def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocalK, L):
     """Fill in buffers -- simulating broadcast of compressed signals
     from one node (`k`) to its neighbours.
     
@@ -495,19 +504,19 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L):
         Updated compressed signals buffers for each node and its neighbours.
     """
 
+    # Loop over neighbors of `k`
     for idxq in range(len(neighbourNodes[k])):
-        q = neighbourNodes[k][idxq]             # network index of node `q`
-        idxKforNeighbor = [i for i, x in enumerate(neighbourNodes[q]) if x == k]
-        idxKforNeighbor = idxKforNeighbor[0]    # node `k` index from node `q`'s perspective
-        # Fill in neighbors' buffers with the L = `settings.broadcastLength` last samples of local compressed signals
+        q = neighbourNodes[k][idxq]                 # network-wide index of node `q` (one of node `k`'s neighbors)
+        idxKforNeighborQ = [i for i, x in enumerate(neighbourNodes[q]) if x == k]
+        idxKforNeighborQ = idxKforNeighborQ[0]      # node `k`'s "neighbor index", from node `q`'s perspective
+        # Fill in neighbor's buffer
         if lk[k] == 0:
             # Broadcast the all compressed signal (1st broadcast period, no "old" samples)
-            zBufferCurr = np.concatenate((zBuffer[q][idxKforNeighbor], zLocal), axis=0)
+            zBuffer[q][idxKforNeighborQ] = np.concatenate((zBuffer[q][idxKforNeighborQ], zLocalK), axis=0)
         else:
             # Only broadcast the `L` last samples of local compressed signals
-            zBufferCurr = np.concatenate((zBuffer[q][idxKforNeighbor], zLocal[-L:]), axis=0)
-        zBuffer[q][idxKforNeighbor] = zBufferCurr   # necessary for `np.concatenate()` afterwards
-
+            zBuffer[q][idxKforNeighborQ] = np.concatenate((zBuffer[q][idxKforNeighborQ], zLocalK[-L:]), axis=0)
+        
     return zBuffer
 
 
@@ -695,10 +704,41 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
 
     else:
         # Compress current data chunk in the frequency domain
-        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
+        zLocal, zLocal_hat = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
+
+        
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure(figsize=(8,4))
+        # ax = fig.add_subplot(211)
+        # ax.plot(20*np.log10(np.abs(zLocal_hat)))
+        # ax = fig.add_subplot(212)
+        # ax.plot(yk)
+        # ax.plot(zLocal)
+
+        if k == 1 and 20*np.log10(np.abs(zLocal_hat[-1])) > -15:
+            stop = 1
+
+        # if k == 0 and lk[k] > 9500:
+        #     stop = 1
+        #     import matplotlib.pyplot as plt
+        #     # STFTs
+        #     fig = plt.figure(figsize=(8,4))
+        #     ax = fig.add_subplot(111)
+        #     ax.plot(20*np.log10(np.abs(w[:, :yk.shape[-1]])))
+        #     plt.tight_layout()	
+        #     plt.show()
 
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure(figsize=(8,4))
+        # ax = fig.add_subplot(111)
+        # for ii in range(len(zBuffer[1])):
+        #     ax.plot(zBuffer[1][ii])
+        # ax.grid()
+        # plt.tight_layout()	
+        # plt.show()
 
         lk[k] += 1  # increment local broadcast index
 

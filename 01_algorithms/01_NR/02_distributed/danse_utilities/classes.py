@@ -50,6 +50,7 @@ class ProgramSettings(object):
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
+    filterDomain: str = 'f'                 # domain in which to compute the DANSE local node filters ("t" for time-domain, "f" for frequency- (i.e., STFT-) domain)
     chunkSize: int = 1024                   # processing chunk size
     chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
     danseWindow: np.ndarray = np.hanning(chunkSize)  # DANSE window for FFT/IFFT operations
@@ -58,6 +59,7 @@ class ProgramSettings(object):
     performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only the local sensor observations
+    bypassFilterUpdates: bool = False        # if True, only update the covariance matrices, but do not update the filter coefficients (no adaptive filtering)
     # Broadcasting parameters
     broadcastLength: int = 8                # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
     # Speech enhancement metrics parameters
@@ -498,7 +500,7 @@ def normalize_toint16(nparray):
         Normalized array.
     """
     amplitude = np.iinfo(np.int16).max
-    nparrayNormalized = (amplitude*nparray/np.amax(nparray)).astype(np.int16)
+    nparrayNormalized = (amplitude*nparray/np.amax(nparray) * 0.99).astype(np.int16)  # 0.99 to avoid clipping
     return nparrayNormalized
 
 
@@ -570,6 +572,10 @@ def get_stft(x, fs, settings: ProgramSettings):
     t : [Nt x 1] np.ndarray (real)
         STFT time frames.
     """
+
+    if x.ndim == 1:
+        x = x[:, np.newaxis]
+
     for channel in range(x.shape[-1]):
         fcurr, t, tmp = sig.stft(x[:, channel],
                             fs=fs[channel],
@@ -582,6 +588,11 @@ def get_stft(x, fs, settings: ProgramSettings):
             f = np.zeros((tmp.shape[0], x.shape[-1]))
         out[:, :, channel] = tmp
         f[:, channel] = fcurr
+
+    # Flatten array in case of single-channel data
+    if x.shape[-1] == 1:
+        f = np.array([i[0] for i in f])
+
     return out, f, t
 
 

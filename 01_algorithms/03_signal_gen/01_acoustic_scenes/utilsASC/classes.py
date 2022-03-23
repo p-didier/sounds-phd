@@ -123,6 +123,8 @@ class ASCProgramSettings:
     arrayGeometry: str = 'linear'                   # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation: float = 0.05                  # separation between sensor in array (only used if numSensorPerNode > 1)
     seed: int = 12345                               # seed for random generator
+    specialCase: str = ''                           # flag for special cases: '' or 'none' --> no special case;
+                                                    # 'allNodesInSamePosition': all nodes and sensors are placed at the same position in space.
     
     @classmethod
     def load(cls, filename: str):

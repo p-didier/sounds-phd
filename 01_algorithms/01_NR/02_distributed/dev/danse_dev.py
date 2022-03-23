@@ -1,9 +1,10 @@
 """Quick script to ensure correct matrices dimensions in DANSE
 algorithm implementation"""
-#%%
+#%% IMPORT EXPORTS USING PICKLE
 
 from dataclasses import dataclass
 import numpy as np
+import pickle, gzip
 
 sigDuration = 10
 samplingFreq = 16e3
@@ -14,10 +15,6 @@ rng = np.random.default_rng(seed)
 
 # signal matrix at node k
 yk = rng.random((numSamples, numSensors))
-
-# %%
-
-import pickle, gzip
 
 @dataclass
 class TestClass:
@@ -31,6 +28,5 @@ myObject = TestClass2(mydata2=TestClass(mydata=yk))
 
 pickle.dump(myObject, gzip.open(f'.testExportPickle.pkl.gz', 'wb'))
 
-#%%
-
 reloaded = pickle.load(gzip.open(f'.testExportPickle.pkl.gz', 'r'))
+

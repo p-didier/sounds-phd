@@ -21,27 +21,30 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios = 3,                   # Number of AS to generate
-    samplingFrequency = 16e3,           # Sampling frequency [samples/s]
-    rirLength = 2**12,                  # RIR length [samples]
-    roomDimBounds = [3,7],              # [Smallest, largest] room dimension possible [m]
-    numSpeechSources = 1,               # nr. of speech sources
-    numNoiseSources = 1,                # nr. of noise sources
-    numNodes = 1,                       # nr. of nodes
-    # numSensorPerNode = [3,3],               # nr. of sensor per node,
-    # numSensorPerNode = [2,2],               # nr. of sensor per node,
-    # numSensorPerNode = [1,1],               # nr. of sensor per node,
-    numSensorPerNode = 4,               # nr. of sensor per node,
-    # arrayGeometry = 'linear',           # microphone array geometry (only used if numSensorPerNode > 1)
-    arrayGeometry = 'radius',           # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation = 0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime = 0.0,                      # reverberation time [s]
-    seed = 12345                        # seed for random generator
+    numScenarios=1,                   # Number of AS to generate
+    samplingFrequency=16e3,           # Sampling frequency [samples/s]
+    rirLength=2**12,                  # RIR length [samples]
+    roomDimBounds=[3,4],              # [Smallest, largest] room dimension possible [m]
+    numSpeechSources=1,               # nr. of speech sources
+    numNoiseSources=1,                # nr. of noise sources
+    numNodes=5,                       # nr. of nodes
+    # numSensorPerNode=[3,1],               # nr. of sensor per node,
+    # numSensorPerNode=[2,2],               # nr. of sensor per node,
+    # numSensorPerNode=[1,1],               # nr. of sensor per node,
+    numSensorPerNode=1,               # nr. of sensor per node,
+    # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
+    arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
+    sensorSeparation=0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
+    revTime=0.0,                      # reverberation time [s]
+    seed=12345,                       # seed for random generator
+    # specialCase='allNodesInSamePosition'    # special cases 
 )
+
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
-plotit = True  
-exportit = True    # If True, export the ASC, settings, and figures.
+plotit = 1  
+exportit = 1    # If True, export the ASC, settings, and figures.
 globalSeed = 12345
+
 
 def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     """Main wrapper for acoustic scenarios generation.
@@ -84,6 +87,8 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
         # Folder name
         nas = len(next(os.walk(expFolder))[1])   # count only files in export dir
         foldername = f"{expFolder}/AS{nas + 1}"  # file name
+        if sets.specialCase not in ['', 'none']:
+            foldername += f'_{sets.specialCase}'
         # Export
         if exportit:
             asc.save(foldername)
@@ -96,7 +101,7 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
                 fig.savefig(f'{foldername}/schematic.png')
                 print('Acoustic scenario plotted and figure exported.')
             else:
-                fig.show()
+                plt.show()
         counter += 1
 
     print('All done.')
@@ -137,8 +142,14 @@ def genAS(sets: ASCProgramSettings):
     
     # Random element positioning in 3-D space
     speechSourceCoords = np.multiply(rng.uniform(0, 1, (sets.numSpeechSources, 3)), roomDimensions)
-    nodesCoords        = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions)
     noiseSourceCoords  = np.multiply(rng.uniform(0, 1, (sets.numNoiseSources, 3)), roomDimensions)
+    if sets.specialCase == 'allNodesInSamePosition':
+        # Special case: put all nodes and sensors at the same position
+        nodesCoords = np.multiply(rng.uniform(0, 1, (1, 3)), roomDimensions)
+        nodesCoords = np.repeat(nodesCoords, sets.numNodes, axis=0)
+        sets.sensorSeparation = 0.0
+    else:
+        nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions)
     
     # Generate sensor arrays
     totalNumSensors = np.sum(sets.numSensorPerNode, dtype=int)
@@ -252,5 +263,6 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(sets, basepath, plotit, exportit))
+    sys.exit(main(sets, basepath, globalSeed, plotit, exportit))
 # ------------------------------------------------------------------------------------
+# %%

@@ -54,4 +54,63 @@ plt.plot(Z3.imag, 'g')
 ax = fig.add_subplot(212)
 plt.plot(z3.imag, 'k')
 
+#%% FILTERING IN THE FREQUENCY DOMAIN VS. FILTERING IN THE TIME DOMAIN
+import soundfile as sf
+import scipy.signal as sig
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 
+RIRfilename = 'myRIR.wav'
+soundFilename = 'test_sound.wav'
+
+# Load and pre-process files
+x, fs = sf.read(soundFilename)
+if x.ndim == 2:
+    x = x[:,0]  # make mono
+h, fsRIR = sf.read(RIRfilename)
+if h.ndim == 2:
+    h = h[:,0]  # make mono
+if fsRIR != fs:
+    # Resample sound
+    x = sig.resample(x, int(len(x) * fsRIR / fs))
+
+# Time-domain filtering (convolution)
+xh_td = sig.convolve(x, h)
+
+# FFT parameters
+n = len(x)   # FFT size [bins]
+# Transfer function
+H = np.fft.fft(h, n)
+# Compute sound spectrum
+X = np.fft.fft(x, n)
+# Convolution in freq. domain == multiplication
+XH_fd = X * H
+# Back to time-domain
+xh_fd = np.fft.ifft(XH_fd, n)
+xh_fd = np.real_if_close(xh_fd)
+
+# Plot
+fig = plt.figure(figsize=(8,4))
+ax = fig.add_subplot(411)
+ax.plot(x)
+ax.grid()
+ax.set_title('Dry signal $x$')
+ax = fig.add_subplot(412)
+ax.plot(h)
+ax.grid()
+ax.set_title('RIR')
+ax = fig.add_subplot(413)
+ax.plot(xh_td)
+ax.grid()
+ax.set_title('Time-domain filtered version of $x$')
+ax = fig.add_subplot(414)
+ax.plot(xh_fd)
+ax.grid()
+ax.set_title('Frequency-domain filtered version of $x$')
+plt.tight_layout()	
+plt.show()
+
+# Print
+# print(f'Difference btw. time- and freq.- domain filtered versions of x: {np.mean(np.abs(xh_fd - xh_td[:len(xh_fd)])/np.amax(np.abs(x)))}')

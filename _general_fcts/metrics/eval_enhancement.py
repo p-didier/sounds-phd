@@ -43,7 +43,6 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     """
     # Init output arrays
     snr = np.zeros(3)
-    sisnr = np.zeros(3)
     # Unweighted SNR
     snr[0] = get_snr(noisySignal, VAD)
     snr[1] = get_snr(enhancedSignal, VAD)
@@ -51,8 +50,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     # Frequency-weight segmental SNR
     fwSNRseg = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
     # Short-Time Objective Intelligibility (STOI)
-    stoi = stoi_fcn(cleanSignal, enhancedSignal, int(fs))
-    return snr, fwSNRseg, stoi
+    stoii = stoi_fcn(cleanSignal, enhancedSignal, int(fs))
+    return snr, fwSNRseg, stoii
 
 
 def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):

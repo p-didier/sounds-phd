@@ -1,8 +1,11 @@
 
+from random import sample
 import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
+
+import pickle, gzip
 
 """
 References:
@@ -192,10 +195,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     """
     
     # Initialization (extracting/defining useful quantities)
-    rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
-
-    # Prepare main for-loop
-    eventsMatrix, fs = subs.get_events_matrix(timeInstants, frameSize, nExpectedNewSamplesPerFrame, settings.broadcastLength)
+    _, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
@@ -269,6 +269,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
     # ------------------------------------------------------------------
 
+    # Prepare main for-loop
+    eventsMatrix, fs = subs.get_events_matrix(timeInstants, frameSize, nExpectedNewSamplesPerFrame, settings.broadcastLength)
+
     t0 = time.perf_counter()    # loop timing
     for events in eventsMatrix:
 
@@ -279,19 +282,24 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
         # Inform user
         if 'update' in eventTypes:
-            txt = f't={np.round(t, 3)}s:'
+            txt = f't={np.round(t, 3)}s -- '
+            updatesTxt = 'Updating nodes: '
+            broadcastsTxt = 'Broadcasting nodes: '
+            flagCommaUpdating = False    # little flag to add a comma (`,`) at the right spot
             for idxEvent in range(len(eventTypes)):
                 k = int(nodesConcerned[idxEvent])   # node index
                 if eventTypes[idxEvent] == 'broadcast':
                     if idxEvent > 0:
-                        txt += ';'
-                    txt += f' Node {k + 1} {eventTypes[idxEvent]}s'
+                        broadcastsTxt += ','
+                    broadcastsTxt += f'{k + 1}'
                 elif eventTypes[idxEvent] == 'update':
                     if startUpdates[k]:  # only print if the node actually has started updating (i.e. there has been sufficiently many autocorrelation matrices updates since the start of recording)
-                        if idxEvent > 0:
-                            txt += ';'
-                        txt += f' Node {k + 1} {eventTypes[idxEvent]}s'
-            print(txt)
+                        if not flagCommaUpdating:
+                            flagCommaUpdating = True
+                        else:
+                            updatesTxt += ','
+                        updatesTxt += f'{k + 1}'
+            print(txt + broadcastsTxt + '; ' + updatesTxt)
 
         for idxEvent in range(len(eventTypes)):
 
@@ -300,7 +308,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             event = eventTypes[idxEvent]
 
             # Extract current local data chunk
-            idxEndChunk = int(t * fs[k])
+            idxEndChunk = int(np.floor(t * fs[k]))
             idxStartChunk = idxEndChunk - frameSize
             yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
 
@@ -319,8 +327,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             zBuffer
                         )
                 
-            if event == 'update':
-                t0 = time.perf_counter()
+            elif event == 'update':
+                t0Local = time.perf_counter()
                 
                 # Process buffers
                 z[k], _ = subs.process_incoming_signals_buffers(
@@ -332,6 +340,62 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     N=nExpectedNewSamplesPerFrame,
                     L=settings.broadcastLength,
                     lastExpectedIter=numIterations - 1)
+
+                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
+                # Save up buffer
+                if k == 0:
+                    if i[k] == 0:
+                        zBufferAll = np.array([])
+                    zBufferAll = np.concatenate((zBufferAll, zBuffer[k][0]))
+
+                
+
+                # if 0:
+                if len(zBufferAll) / 16000 > 5:
+                    stop = 1
+
+                    import matplotlib.pyplot as plt
+                    fig = plt.figure(figsize=(8,4))
+                    ax = fig.add_subplot(111)
+                    ax.plot(zBufferAll)
+                    ax.plot(yin[:len(zBufferAll), 0] + 1.2 * np.amax(zBufferAll))
+                    ax.grid()
+                    plt.tight_layout()	
+                    plt.show()
+
+                    # STFTs
+                    vlimMin = -100
+                    vlimMax = -30
+                    fig = plt.figure(figsize=(8,4))
+                    ax = fig.add_subplot(121)
+                    out, f, t = classes.get_stft(yin[:len(zBufferAll), 0], fs, settings)
+                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
+                    ax.set_title('yin')
+                    plt.colorbar(mappable)
+                    ax = fig.add_subplot(122)
+                    out, f, t = classes.get_stft(zBufferAll, fs, settings)
+                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
+                    ax.set_title('zBuffer')
+                    plt.colorbar(mappable)
+                    plt.tight_layout()	
+                    plt.show()
+
+                    # fig = plt.figure(figsize=(8,4))
+                    # ax = fig.add_subplot(111)
+                    # plt.plot(20*np.log10(np.abs(wTilde[0][:, i[0], 0])))
+                    
+
+                    import simpleaudio as sa
+                    audio_array = zBufferAll
+                    audio_array *= 32767 / max(abs(audio_array))
+                    audio_array = audio_array.astype(np.int16)
+                    sa.play_buffer(audio_array,1,2,16000)
+
+                    audio_array = yin[:len(zBufferAll), 0]
+                    audio_array *= 32767 / max(abs(audio_array))
+                    audio_array = audio_array.astype(np.int16)
+                    sa.play_buffer(audio_array,1,2,16000)
+                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -369,14 +433,27 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     else:     
                         Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
 
+
+                # TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS 
+                # iterationsOfInterest = np.logspace(base=10, start=np.log10(1), stop=np.log10(300), num=16, dtype=int)
+                # if i[k] in iterationsOfInterest:
+                #     print('EXPORTING Ryy AND Rnn FOR FURTHER STUDY')
+                #     basePath = 'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/quick_exports/'
+                #     pickle.dump(Ryytilde[k], gzip.open(f'{basePath}/RyyNode{k+1}_i{i[k]}.pkl.gz', 'wb'))
+                #     pickle.dump(Rnntilde[k], gzip.open(f'{basePath}/RnnNode{k+1}_i{i[k]}.pkl.gz', 'wb'))
+                # TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS 
+                
+
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                 if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
                     startUpdates[k] = True
 
-                if startUpdates[k]:
-
+                if startUpdates[k] and not settings.bypassFilterUpdates:
                     # No `for`-loop versions
                     if settings.performGEVD:    # GEVD update
+                        # for iii in range(Ryytilde[k].shape[0]):
+                            # wTilde[k][iii, i[k] + 1, :], _ = subs.perform_gevd(Ryytilde[k][iii, :, :], Rnntilde[k][iii, :, :],\
+                            #     rank=settings.GEVDrank, refSensorIdx=settings.referenceSensor, jitted=False)
                         wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                         if settings.computeLocalEstimate:
                             wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
@@ -391,6 +468,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
                     if settings.computeLocalEstimate:
                         wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                if settings.bypassFilterUpdates:
+                    print('!! User-forced bypass of filter coefficients updates !!')
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
                 # ----- Compute desired signal chunk estimate (in frequency domain) -----
@@ -400,6 +479,17 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), yHat)   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                 # -----------------------------------------------------------------------
+
+                # import matplotlib.pyplot as plt
+                # fig = plt.figure(figsize=(8,4))
+                # ax = fig.add_subplot(211)
+                # ax.plot(20*np.log10(np.abs(ytildeHat[k][:, i[k], :])))
+                # ax.grid()
+                # ax = fig.add_subplot(212)
+                # ax.plot(20*np.log10(np.abs(dhatCurr)))
+                # ax.grid()
+                # plt.tight_layout()	
+                # plt.show()
 
                 # -------------------- Transform back to time domain (WOLA processing) --------------------
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
@@ -415,19 +505,21 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # print(f'DANSE updated in {np.round((time.perf_counter() - t0) * 1e3)} ms')
     
-    import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(8,4))
-    for ii in range(wTilde[0].shape[-1]):
-        ax = fig.add_subplot(wTilde[0].shape[-1], 1, ii+1)
-        ax.semilogy(np.abs(wTilde[0][:, :, ii]).T)
-        ax.grid()
-    plt.tight_layout()	
-    plt.show()
-    fig.savefig('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/single_sensor_nodes/simultaneous_[0]ppm_comp/filtercoeffs.png')    # TMPTMPTMPTMPTMPTMPTMPTMP
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # for ii in range(wTilde[0].shape[-1]):
+    #     ax = fig.add_subplot(wTilde[0].shape[-1], 1, ii+1)
+    #     ax.semilogy(np.abs(wTilde[0][:, :, ii]).T)
+    #     ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+    # fig.savefig('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/single_sensor_nodes/simultaneous_[0]ppm_comp/filtercoeffs.png')    # TMPTMPTMPTMPTMPTMPTMPTMP
 
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
 
-    stop = 1
+    # Export empty array if local desired signal estimate was not computed
+    if (dLocal == 0).all():
+        dLocal = np.array([])
 
     return d, dLocal

@@ -91,14 +91,12 @@ def resample_for_sro(x, baseFs, SROppm):
     tOriginal = np.arange(len(x)) / baseFs
     fsSRO = baseFs * (1 + SROppm / 1e6)
     numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
-    xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
-
-    # TODO
-    xResamp2 = resampy.core.resample(x, baseFs, fsSRO)
+    # xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
+    xResamp = resampy.core.resample(x, baseFs, fsSRO)
+    t = np.arange(0, numSamplesPostResamp) * (tOriginal[1] - tOriginal[0]) * x.shape[0] / float(numSamplesPostResamp) + tOriginal[0]    # based on line 3116 in `scipy.signal.resample`
 
     if len(xResamp) >= len(x):
         xResamp = xResamp[:len(x)]
-        xResamp2 = xResamp2[:len(x)]    # TODO
         t = t[:len(x)]
     else:
         # Append zeros
@@ -107,8 +105,6 @@ def resample_for_sro(x, baseFs, SROppm):
         dt = t[1] - t[0]
         tadd = np.linspace(t[-1]+dt, t[-1]+dt*(len(x) - len(xResamp)), len(x) - len(xResamp))
         t = np.concatenate((t, tadd))
-
-    stop = 1
 
     return xResamp, t, fsSRO
 
@@ -149,18 +145,12 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
             raise ValueError('Number of sensors does not match number of given non-zero SRO values.')
 
     # Base time stamps
-    timeVector = np.arange(sigs.shape[0]) / baseFs
     sigsOut       = np.zeros((numSamples, numSensors))
     timeVectorOut = np.zeros((numSamples, numNodes))
     fs = np.zeros(numSensors)
     for idxSensor in range(numSensors):
         idxNode = sensorToNodeTags[idxSensor] - 1
-        # if SROsppm[idxNode] != 0:
         sigsOut[:, idxSensor], timeVectorOut[:, idxNode], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
-        # else:
-        #     sigsOut[:, idxSensor] = sigs[:, idxSensor]
-        #     timeVectorOut[:, idxNode] = timeVector
-        #     fs[idxSensor] = baseFs
 
     # Plot
     if showSRO:
@@ -229,12 +219,13 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     for idxNode in range(numNodes):
         for idxSensor in range(numSensorsPerNode[idxNode]):
             trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + idxSensor
+            
             print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {idxSensor + 1}/{numSensorsPerNode[idxNode]})...')
             out0, out1, out2 = eval_enhancement.get_metrics(
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
-                                    sigs.fs[trueIdxSensor],
+                                    sigs.fs[settings.referenceSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
                                     sigs.VAD[startIdx:],
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg
@@ -334,6 +325,7 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
     t = np.concatenate((tpre, t, tpost), axis=0)
 
     # 2) Zero-pad signal if necessary
+    nadd = 0
     if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
         nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
         print(f'Padding {nadd} zeros to the signals in order to fit FFT size')

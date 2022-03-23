@@ -34,27 +34,37 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS6_allNodesInSamePosition',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS2_allNodesInSamePosition',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     signalDuration=10,
-    baseSNR=0,
+    baseSNR=50,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     # SROsppm=[0, 10000, 20000],               # SRO
-    # SROsppm=[0, 4000, 6000],               # SRO
-    # SROsppm=[0, 400, 600],               # SRO
-    # SROsppm=[0, 32000],                  # SRO
-    SROsppm=0,                  # SRO
+    # SROsppm=[0, 4000, 6000],
+    # SROsppm=[0, 400, 600],
+    # SROsppm=[0, 32000, 32000, 32000, 32000],
+    SROsppm=0,
+    # SROsppm=[0,20,40,60,80],
+    # SROsppm=[0,100,40,60,80],
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
-    broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=4,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    # broadcastLength=2**9,
+    expAvgBeta=0.9945,
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
-    performGEVD=False
+    performGEVD=1,
+    bypassFilterUpdates=True,
+    filterDomain='t',           # domain in which to compute the local node DANSE filter coefficients
     )
+
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
 experimentName = f'{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
@@ -99,13 +109,19 @@ def main(mySettings, exportPath, showPlots=1, lightExport=True):
         # ================ Run experiment ================
         results = run_experiment(mySettings)
         # ================================================
-        # Export
-        wipe_folder(exportPath)     # wipe export folder    
-        results.save(exportPath, lightExport)        # save results
-        mySettings.save(exportPath)     # save settings
-
-        # Post-process
-        get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
+        if not mySettings.bypassFilterUpdates:
+            # Export
+            if not Path(exportPath).is_dir():
+                Path(exportPath).mkdir(parents=True)
+                print(f'Created output directory "{exportPath}".')
+            else:
+                wipe_folder(exportPath)     # wipe export folder    
+            results.save(exportPath, lightExport)        # save results
+            mySettings.save(exportPath)     # save settings
+            # Post-process
+            get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
+        else:
+            print('FILTER UPDATES WERE BYPASSED. NO EXPORT, NO RESULTS VISUALIZATION.')
 
     return None
 
