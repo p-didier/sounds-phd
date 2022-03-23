@@ -311,20 +311,7 @@ def danse_compression(yq, w, n):
     # back_to_time_domain(zq_hat, n)
     zq = np.real_if_close(zq)
 
-    
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(20*np.log10(np.abs(yq_hat)), label='y')
-    # ax.plot(20*np.log10(np.abs(w)), label='w')
-    # ax.plot(20*np.log10(np.abs(zq_hat)), label='z')
-    # ax.grid()
-    # plt.legend()
-    # plt.tight_layout()	
-    # plt.show()
-
-
-    return zq, zq_hat
+    return zq
 
 
 def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, N, L, lastExpectedIter):
@@ -704,41 +691,10 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
 
     else:
         # Compress current data chunk in the frequency domain
-        zLocal, zLocal_hat = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
-
-        
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure(figsize=(8,4))
-        # ax = fig.add_subplot(211)
-        # ax.plot(20*np.log10(np.abs(zLocal_hat)))
-        # ax = fig.add_subplot(212)
-        # ax.plot(yk)
-        # ax.plot(zLocal)
-
-        if k == 1 and 20*np.log10(np.abs(zLocal_hat[-1])) > -15:
-            stop = 1
-
-        # if k == 0 and lk[k] > 9500:
-        #     stop = 1
-        #     import matplotlib.pyplot as plt
-        #     # STFTs
-        #     fig = plt.figure(figsize=(8,4))
-        #     ax = fig.add_subplot(111)
-        #     ax.plot(20*np.log10(np.abs(w[:, :yk.shape[-1]])))
-        #     plt.tight_layout()	
-        #     plt.show()
+        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
 
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
-
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure(figsize=(8,4))
-        # ax = fig.add_subplot(111)
-        # for ii in range(len(zBuffer[1])):
-        #     ax.plot(zBuffer[1][ii])
-        # ax.grid()
-        # plt.tight_layout()	
-        # plt.show()
 
         lk[k] += 1  # increment local broadcast index
 

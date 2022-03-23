@@ -341,62 +341,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     L=settings.broadcastLength,
                     lastExpectedIter=numIterations - 1)
 
-                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
-                # Save up buffer
-                if k == 0:
-                    if i[k] == 0:
-                        zBufferAll = np.array([])
-                    zBufferAll = np.concatenate((zBufferAll, zBuffer[k][0]))
-
-                
-
-                # if 0:
-                if len(zBufferAll) / 16000 > 5:
-                    stop = 1
-
-                    import matplotlib.pyplot as plt
-                    fig = plt.figure(figsize=(8,4))
-                    ax = fig.add_subplot(111)
-                    ax.plot(zBufferAll)
-                    ax.plot(yin[:len(zBufferAll), 0] + 1.2 * np.amax(zBufferAll))
-                    ax.grid()
-                    plt.tight_layout()	
-                    plt.show()
-
-                    # STFTs
-                    vlimMin = -100
-                    vlimMax = -30
-                    fig = plt.figure(figsize=(8,4))
-                    ax = fig.add_subplot(121)
-                    out, f, t = classes.get_stft(yin[:len(zBufferAll), 0], fs, settings)
-                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
-                    ax.set_title('yin')
-                    plt.colorbar(mappable)
-                    ax = fig.add_subplot(122)
-                    out, f, t = classes.get_stft(zBufferAll, fs, settings)
-                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
-                    ax.set_title('zBuffer')
-                    plt.colorbar(mappable)
-                    plt.tight_layout()	
-                    plt.show()
-
-                    # fig = plt.figure(figsize=(8,4))
-                    # ax = fig.add_subplot(111)
-                    # plt.plot(20*np.log10(np.abs(wTilde[0][:, i[0], 0])))
-                    
-
-                    import simpleaudio as sa
-                    audio_array = zBufferAll
-                    audio_array *= 32767 / max(abs(audio_array))
-                    audio_array = audio_array.astype(np.int16)
-                    sa.play_buffer(audio_array,1,2,16000)
-
-                    audio_array = yin[:len(zBufferAll), 0]
-                    audio_array *= 32767 / max(abs(audio_array))
-                    audio_array = audio_array.astype(np.int16)
-                    sa.play_buffer(audio_array,1,2,16000)
-                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
-
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
 
@@ -432,17 +376,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         Ryylocal[k] = settings.expAvgBeta * Ryylocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL signal + noise matrix
                     else:     
                         Rnnlocal[k] = settings.expAvgBeta * Rnnlocal[k] + (1 - settings.expAvgBeta) * yyHlocal  # update LOCAL noise-only matrix
-
-
-                # TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS 
-                # iterationsOfInterest = np.logspace(base=10, start=np.log10(1), stop=np.log10(300), num=16, dtype=int)
-                # if i[k] in iterationsOfInterest:
-                #     print('EXPORTING Ryy AND Rnn FOR FURTHER STUDY')
-                #     basePath = 'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/quick_exports/'
-                #     pickle.dump(Ryytilde[k], gzip.open(f'{basePath}/RyyNode{k+1}_i{i[k]}.pkl.gz', 'wb'))
-                #     pickle.dump(Rnntilde[k], gzip.open(f'{basePath}/RnnNode{k+1}_i{i[k]}.pkl.gz', 'wb'))
-                # TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS TEMPORARY FOR TESTS 
-                
 
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                 if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
@@ -480,17 +413,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                 # -----------------------------------------------------------------------
 
-                # import matplotlib.pyplot as plt
-                # fig = plt.figure(figsize=(8,4))
-                # ax = fig.add_subplot(211)
-                # ax.plot(20*np.log10(np.abs(ytildeHat[k][:, i[k], :])))
-                # ax.grid()
-                # ax = fig.add_subplot(212)
-                # ax.plot(20*np.log10(np.abs(dhatCurr)))
-                # ax.grid()
-                # plt.tight_layout()	
-                # plt.show()
-
                 # -------------------- Transform back to time domain (WOLA processing) --------------------
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
                 d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
@@ -505,16 +427,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # print(f'DANSE updated in {np.round((time.perf_counter() - t0) * 1e3)} ms')
     
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # for ii in range(wTilde[0].shape[-1]):
-    #     ax = fig.add_subplot(wTilde[0].shape[-1], 1, ii+1)
-    #     ax.semilogy(np.abs(wTilde[0][:, :, ii]).T)
-    #     ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-    # fig.savefig('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/single_sensor_nodes/simultaneous_[0]ppm_comp/filtercoeffs.png')    # TMPTMPTMPTMPTMPTMPTMPTMP
-
     print('\nSimultaneous DANSE processing all done.')
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
 
