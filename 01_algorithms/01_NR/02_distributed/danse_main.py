@@ -36,8 +36,8 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
+    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS6_allNodesInSamePosition',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS2_allNodesInSamePosition',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
@@ -54,14 +54,14 @@ mySettings = ProgramSettings(
     # SROsppm=[0,20,40,60,80],
     # SROsppm=[0,100,40,60,80],
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
-    broadcastLength=4,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     # broadcastLength=2**9,
     expAvgBeta=0.9945,
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
-    bypassFilterUpdates=True,
+    # bypassFilterUpdates=True,
     filterDomain='t',           # domain in which to compute the local node DANSE filter coefficients
     )
 
