@@ -1,11 +1,10 @@
 
-from random import sample
 import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
-
-import pickle, gzip
+import copy
+import matplotlib.pyplot as plt
 
 """
 References:
@@ -281,14 +280,38 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             k = int(nodesConcerned[idxEvent])
             event = eventTypes[idxEvent]
 
-            # Extract current local data chunk
-            idxEndChunk = int(np.floor(t * fs[k]))
-            idxStartChunk = idxEndChunk - frameSize
-            yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
 
             if event == 'broadcast':
+                
+                # Extract current local data chunk
+                idxEndChunk = int(np.floor(t * fs[k]))
+                idxStartChunk = np.amax([idxEndChunk - 2 * frameSize, 0])   # don't go into negative sample indices!
+                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                # Pad zeros at beginning if needed
+                if idxEndChunk - idxStartChunk < 2 * frameSize:
+                    yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
+
+                # if lk[k] == 0:  # first ever broadcast case
+                #     idxStartChunk = idxEndChunk - frameSize
+                #     yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                #     # Pad with preceding zeros to reach the correct chunk length (OLS processing)
+                #     # yLocalCurr = np.concatenate((yLocalCurr, np.zeros((frameSize + settings.broadcastLength - 1 - yLocalCurr.shape[0], yLocalCurr.shape[1]))))
+                #     yLocalCurr = np.concatenate((yLocalCurr, np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1]))))
+                # else:
+                #     # <2N> samples long chunk (for OLS processing during compression)
+                #     idxStartChunk = idxEndChunk - 2 * frameSize
+                #     yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+
+                if lk[k] > 0:
+                    stop = 1
+
+                # # Extract current local data chunk
+                # idxEndChunk = int(np.floor(t * fs[k]))
+                # idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
+                # yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+
                 # Perform broadcast -- update all buffers in network
-                zBuffer = subs.broadcast(
+                zBuffer, zLocal = subs.broadcast(
                             t,
                             k,
                             fs[k],
@@ -303,6 +326,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 
             elif event == 'update':
                 t0Local = time.perf_counter()
+
+                # Extract current local data chunk
+                idxEndChunk = int(np.floor(t * fs[k]))
+                idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
+                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
                 
                 # Compute VAD
                 VADinFrame = oVAD[idxStartChunk:idxEndChunk]
@@ -324,6 +352,91 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     N=nExpectedNewSamplesPerFrame,
                     L=settings.broadcastLength,
                     lastExpectedIter=numIterations - 1)
+
+
+                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
+                # Save up buffer
+                if k == 0:
+                    if i[k] == 0:
+                        zBufferAll = np.array([])
+                    zBufferAll = np.concatenate((zBufferAll, zBuffer[k][0]))
+
+
+                if k == 0:
+                    
+                    if i[k] == 0:
+                        fig = plt.figure(figsize=(8,4))
+                        ax1 = fig.add_subplot(311)
+                        ax2 = fig.add_subplot(312)
+                        ax3 = fig.add_subplot(313)
+                    ax1.plot(20 * np.log10(np.abs(np.fft.fft(yin[idxStartChunk:idxEndChunk,1])[:int(len(yin[idxStartChunk:idxEndChunk,1])/2)])), 'b')
+                    ax1.set_title(f'Local data captured at node 1 (not compressed, 1st sensor)')
+                    ax2.plot(20 * np.log10(np.abs(np.fft.fft(z[k][:,0])[:int(len(z[k][:,0])/2)])), 'k')
+                    ax2.set_title(f'zBuffer(Node {k+1}, neighbor 1) [dB], i={i[k]}')
+                    ax3.plot(20 * np.log10(np.abs(wTilde[k][:, i[k], 1])), 'b')
+                    ax3.set_title(f'Filter coefficients (FD), i={i[k]}')
+                    # draw the plot
+                    plt.tight_layout()
+                    plt.draw() 
+                    plt.pause(0.01)
+
+                    # start removing points if you don't want all shown
+                    if lk[k] >= 1:
+                        ax1.lines[0].remove()
+                        ax2.lines[0].remove()
+                        ax3.lines[0].remove()
+
+                # if 0:
+                if len(zBufferAll) / 16000 > 5:
+                    stop = 1
+
+                    # import matplotlib.pyplot as plt
+                    fig = plt.figure(figsize=(8,4))
+                    ax = fig.add_subplot(211)
+                    ax.plot(zBufferAll)
+                    ax.plot(yin[:len(zBufferAll), 0] + 1.2 * np.amax(zBufferAll))
+                    ax.grid()
+                    ax = fig.add_subplot(212)
+                    zfft = 20*np.log10(np.abs(np.fft.fft(zBufferAll)))
+                    ax.plot(zfft)
+                    ax.plot(20*np.log10(np.abs(np.fft.fft(yin[:len(zBufferAll), 0]))) + 1.2 * np.amax(zfft))
+                    ax.grid()
+                    plt.tight_layout()	
+                    plt.show()
+
+                    # STFTs
+                    vlimMin = -100
+                    vlimMax = -30
+                    fig = plt.figure(figsize=(8,4))
+                    ax = fig.add_subplot(121)
+                    out, f, t = classes.get_stft(yin[:len(zBufferAll), 0], fs, settings)
+                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
+                    ax.set_title('yin')
+                    plt.colorbar(mappable)
+                    ax = fig.add_subplot(122)
+                    out2, f2, t2 = classes.get_stft(zBufferAll, fs, settings)
+                    mappable = plt.pcolormesh(t2, f2 / 1e3, np.squeeze(20*np.log10(np.abs(out2))), vmin=vlimMin, vmax=vlimMax)
+                    ax.set_title('zBuffer')
+                    plt.colorbar(mappable)
+                    plt.tight_layout()	
+                    plt.show()
+
+                    # fig = plt.figure(figsize=(8,4))
+                    # ax = fig.add_subplot(111)
+                    # plt.plot(20*np.log10(np.abs(wTilde[0][:, i[0], 0])))
+
+
+                    import simpleaudio as sa
+                    audio_array = copy.copy(zBufferAll)
+                    audio_array *= 32767 / max(abs(audio_array))
+                    audio_array = audio_array.astype(np.int16)
+                    sa.play_buffer(audio_array,1,2,16000)
+
+                    audio_array = copy.copy(yin[:len(zBufferAll), 0])
+                    audio_array *= 32767 / max(abs(audio_array))
+                    audio_array = audio_array.astype(np.int16)
+                    sa.play_buffer(audio_array,1,2,16000)
+                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -370,7 +483,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     print('!! User-forced bypass of filter coefficients updates !!')
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-                # ----- Compute desired signal chunk estimate (in frequency domain) -----
+                # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)

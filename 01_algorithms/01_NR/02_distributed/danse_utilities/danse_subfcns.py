@@ -1,4 +1,5 @@
-from cProfile import label
+from socket import ntohl
+from matplotlib.pyplot import flag
 import numpy as np
 from numba import njit
 import scipy, time
@@ -252,7 +253,7 @@ def perform_update_noforloop(Ryy, Rnn, refSensorIdx=0):
     return w
 
 
-def back_to_time_domain(x, n):
+def back_to_time_domain(x, n, axis=0):
     """Performs an IFFT after pre-processing of a frequency-domain
     signal chunk.
     
@@ -260,6 +261,10 @@ def back_to_time_domain(x, n):
     ----------
     x : np.ndarray of complex
         Frequency-domain signal to be transferred back to time domain.
+    n : int
+        IFFT order.
+    axis : int (0 or 1)
+        Array axis where to perform IFFT -- not implemented for more than 2-D arrays.
 
     Returns
     -------
@@ -267,24 +272,47 @@ def back_to_time_domain(x, n):
         Time-domain version of signal.
     """
 
-    x[0] = x[0].real      # Set DC to real value
-    x[-1] = x[-1].real    # Set Nyquist to real value
-    x = np.concatenate((x, np.flip(x[:-1].conj())[:-1]))
+    # Interpret `axis` parameter
+    flagSqueeze = False
+    if x.ndim == 1:
+        x = x[:, np.newaxis]
+        flagSqueeze = True
+    elif x.ndim > 2:
+        raise np.AxisError(f'{x.ndim}-D arrays not permitted.')
+    if axis not in [0,1]:
+        raise np.AxisError(f'`axis={axis}` is not permitted.')
+
+    if axis == 1:
+        x = x.T
+
+    # Check dimension
+    if x.shape[0] != n/2 + 1:
+        raise ValueError('`x` should be (n/2 + 1)-dimensioned along the IFFT axis.')
+
+    x[0, :] = x[0, :].real      # Set DC to real value
+    x[-1, :] = x[-1, :].real    # Set Nyquist to real value
+    x = np.concatenate((x, np.flip(x[:-1, :].conj(), axis=0)[:-1, :]), axis=0)
     # Back to time-domain
-    xout = np.fft.ifft(x, n)
+    xout = np.fft.ifft(x, n, axis=0)
+
+    if axis == 1:
+        xout = xout.T
+    
+    if flagSqueeze: # important to go back to original input dimensionality
+        xout = np.squeeze(xout)
 
     return xout
 
 
-def danse_compression(yq, w, n):
+def danse_compression(yq, wHat, n):
     """Performs local signals compression according to DANSE theory [1].
     
     Parameters
     ----------
-    yq : [N x Ns] np.ndarray (real)
+    yq : [Ntotal x nSensors] np.ndarray (real)
         Local sensor signals.
-    w : [Ns x 1] np.ndarray (real or complex)
-        Local filter estimated (from previous DANSE iteration).
+    wHat : [N/2 x nSensors] np.ndarray (real or complex)
+        Frequency-domain local filter estimate (from latest DANSE iteration).
     n : int
         FFT order.
         
@@ -293,24 +321,75 @@ def danse_compression(yq, w, n):
     zq : [N x 1] np.ndarray (real)
         Compress local sensor signals (1-D).
     """
-    # 2022/03/23: CURRENTLY WRONG -- Does not work since we cannot properly apply OLS/OLA, as we only have N/2 filter taps
-    # (already computed in the frequency domain during DANSE updates) and we cannot compute the 2*N FFT correctly
-    # -- see WED notes in Word journal week12_2022.
-    # raise ValueError('"Frequency domain" compression not correctly implemented yet -- see WED notes in Word journal week12_2022.')
-
     
+    # Transform frequency domain filter to time domain impulse response
+    wIR = back_to_time_domain(wHat, n, axis=0)
+    wIR = np.real_if_close(wIR)
 
-    # Go to frequency domain
-    yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
+    # # Ensure causality
+    # wIR = np.fft.fftshift(wIR)
+
+    # Append zeros for OLS processing
+    nTotal = yq.shape[0]
+    wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
+
+    # Go (back) to frequency domain
+    wHatFull = np.fft.fft(wIRzp, nTotal, axis=0)
+    yqHat = np.fft.fft(yq, nTotal, axis=0)
+
     # Keep only positive frequencies
-    yq_hat = yq_hat[:int(n / 2 + 1)]
-    # Compress using filter coefficients
-    zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+    wHatFull = wHatFull[:int(nTotal/2 + 1), :]
+    yqHat = yqHat[:int(nTotal/2 + 1), :]
 
-    # Format for IFFT 
-    zq = back_to_time_domain(zq_hat, n)
-    # back_to_time_domain(zq_hat, n)
-    zq = np.real_if_close(zq)
+    # Apply linear combination to form compressed signal
+    zqHat = np.einsum('ij,ij->i', wHatFull.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+
+    # Go back to time domain 
+    zq = back_to_time_domain(zqHat, nTotal)
+    zq = np.squeeze(np.real_if_close(zq))
+
+    # Discard oldest (incorrect) samples
+    zq = zq[n:]
+
+    stop = 1
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(yq)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(311)
+    # ax.plot(20 * np.log10(np.abs(yqHat)))
+    # ax.plot(20 * np.log10(np.abs(wHatFull)), 'r')
+    # ax.plot(20 * np.log10(np.abs(zqHat)), 'k--')
+    # ax.grid()
+    # ax = fig.add_subplot(312)
+    # ax.plot(yq)
+    # ax.plot(zq, 'k')
+    # ax.grid()
+    # ax = fig.add_subplot(313)
+    # ax.plot(20 * np.log10(np.abs(wIR)))
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+    # # # Go to frequency domain
+    # yq = yq[:n, :]
+    # yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
+    # # Keep only positive frequencies
+    # yq_hat = yq_hat[:int(n / 2 + 1)]
+    # # Compress using filter coefficients
+    # zq_hat = np.einsum('ij,ij->i', wHat.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+
+    # # Format for IFFT 
+    # zq = back_to_time_domain(zq_hat, n)
+    # # back_to_time_domain(zq_hat, n)
+    # zq = np.real_if_close(zq)
 
     return zq
 
@@ -717,15 +796,15 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         Node `k`'s sampling frequency [samples/s].
     L : int
         Number of samples to broadcast.
-    yk : np.ndarray of floats
-        Local sensor data from node `k`.
-    w : np.ndarray of complex
+    yk : [N + L - 1 x nSensors] np.ndarray of floats
+        Local sensor data chunk from node `k` at current time stamp.
+    w : [N/2 x nSensors] np.ndarray of complex
         Filter coefficients used for compression.
     n : int
         FFT length.
-    neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists of ints
+    neighbourNodes : [nNodes x 1] list of [nNeighbours[n] x 1] lists of ints
         Network indices of neighbours, per node.
-    lk : [numNodes x 1] list of ints
+    lk : [nNodes x 1] list of ints
         Broadcast index per node.
     zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float)
         For each node, buffers at previous iteration.
@@ -751,7 +830,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
 
         lk[k] += 1  # increment local broadcast index
 
-    return zBuffer
+    return zBuffer, zLocal
 
 
 def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):

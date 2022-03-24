@@ -36,14 +36,14 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
-    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
+    acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS6_allNodesInSamePosition',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS2_allNodesInSamePosition',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     signalDuration=10,
-    baseSNR=50,
+    baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     # SROsppm=[0, 10000, 20000],               # SRO
@@ -54,7 +54,7 @@ mySettings = ProgramSettings(
     # SROsppm=[0,20,40,60,80],
     # SROsppm=[0,100,40,60,80],
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
-    broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     # broadcastLength=2**9,
     expAvgBeta=0.9945,
     danseUpdating='simultaneous',       # node-updating scheme
@@ -62,7 +62,6 @@ mySettings = ProgramSettings(
     computeLocalEstimate=True,
     performGEVD=1,
     # bypassFilterUpdates=True,
-    filterDomain='t',           # domain in which to compute the local node DANSE filter coefficients
     )
 
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
