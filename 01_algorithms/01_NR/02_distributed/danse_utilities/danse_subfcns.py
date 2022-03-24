@@ -276,7 +276,7 @@ def back_to_time_domain(x, n):
     return xout
 
 
-def danse_compression(yq, w, n, filterDomain):
+def danse_compression(yq, w, n):
     """Performs local signals compression according to DANSE theory [1].
     
     Parameters
@@ -287,63 +287,30 @@ def danse_compression(yq, w, n, filterDomain):
         Local filter estimated (from previous DANSE iteration).
     n : int
         FFT order.
-    filterDomain : str
-        Domain in which to compute the DANSE local node filters ("t" for time-domain, "f" for frequency- (i.e., STFT-) domain)
         
     Returns
     -------
     zq : [N x 1] np.ndarray (real)
         Compress local sensor signals (1-D).
     """
+    # 2022/03/23: CURRENTLY WRONG -- Does not work since we cannot properly apply OLS/OLA, as we only have N/2 filter taps
+    # (already computed in the frequency domain during DANSE updates) and we cannot compute the 2*N FFT correctly
+    # -- see WED notes in Word journal week12_2022.
+    # raise ValueError('"Frequency domain" compression not correctly implemented yet -- see WED notes in Word journal week12_2022.')
 
-    if filterDomain == 'f':
-        
-        # 2022/03/23: CURRENTLY WRONG -- Does not work since we cannot properly apply OLS/OLA, as we only have N/2 filter taps
-        # (already computed in the frequency domain during DANSE updates) and we cannot compute the 2*N FFT correctly
-        # -- see WED notes in Word journal week12_2022.
-        raise ValueError('"Frequency domain" compression not correctly implemented yet -- see WED notes in Word journal week12_2022.')
+    
 
-        # Go to frequency domain
-        yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
-        # Keep only positive frequencies
-        yq_hat = yq_hat[:int(n / 2 + 1)]
-        # Compress using filter coefficients
-        zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+    # Go to frequency domain
+    yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
+    # Keep only positive frequencies
+    yq_hat = yq_hat[:int(n / 2 + 1)]
+    # Compress using filter coefficients
+    zq_hat = np.einsum('ij,ij->i', w.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
 
-        # Format for IFFT 
-        zq = back_to_time_domain(zq_hat, n)
-        # back_to_time_domain(zq_hat, n)
-        zq = np.real_if_close(zq)
-
-    elif filterDomain == 't':
-
-        
-        zq = np.einsum('ij,ij->i', w.conj(), yq)
-        
-        # # Time-domain processing
-        # nFFT = yq.shape[0] + len(w) - 1
-        # # Zero-pad
-        # yzp = np.concatenate((yq, np.zeros((nFFT - yq.shape[0], yq.shape[-1]))), axis=0)
-        # wzp = np.concatenate((w, np.zeros((nFFT - len(w), w.shape[-1]))), axis=0)
-        # # FFT
-        # Yq = np.fft.fft(yzp, nFFT, axis=0)
-        # Wcurr = np.fft.fft(wzp, nFFT, axis=0)
-        # # Apply filter
-        # Zq = np.einsum('ij,ij->i', Wcurr.conj(), Yq)
-        # # IFFT
-        # zq = np.fft.ifft(Zq, nFFT, axis=0)  # irfft() for real inputs
-
-        import matplotlib.pyplot as plt
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(111)
-        ax.plot(yq)
-        ax.plot(zq, 'k')
-        #
-        # ax.plot(np.abs(Yq))
-        # ax.plot(np.abs(Wcurr))
-        ax.grid()
-        plt.tight_layout()	
-        plt.show()
+    # Format for IFFT 
+    zq = back_to_time_domain(zq_hat, n)
+    # back_to_time_domain(zq_hat, n)
+    zq = np.real_if_close(zq)
 
     return zq
 
@@ -737,7 +704,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
     return eventInstantsFormatted, fs
 
 
-def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, filterDomain):
+def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
     """Performs the broadcast of data from node `k` to its neighbours.
     
     Parameters
@@ -762,8 +729,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, filterDomain):
         Broadcast index per node.
     zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float)
         For each node, buffers at previous iteration.
-    filterDomain : str
-        Domain in which to compute the DANSE local node filters ("t" for time-domain, "f" for frequency- (i.e., STFT-) domain)
     
     Returns
     -------
@@ -779,18 +744,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, filterDomain):
 
     else:
         # Compress current data chunk in the frequency domain
-        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n, filterDomain)        # local compressed signals
-
-        # 2022/03/23: TODO -- Correctly fill in buffers, following OLA principles...
-
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure(figsize=(8,4))
-        # ax = fig.add_subplot(111)
-        # ax.plot(zLocal)
-        # ax.plot(yk)
-        # ax.grid()
-        # plt.tight_layout()	
-        # plt.show()
+        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
+        
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
 
