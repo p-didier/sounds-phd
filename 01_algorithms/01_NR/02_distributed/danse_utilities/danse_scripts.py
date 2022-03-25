@@ -1,4 +1,6 @@
 
+from bz2 import compress
+from operator import ne
 import numpy as np
 import time, datetime
 from . import classes
@@ -192,6 +194,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
+
+    # Debugging variables
+    flagPlot = False
     
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
@@ -285,10 +290,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
-                idxStartChunk = np.amax([idxEndChunk - 2 * frameSize, 0])   # don't go into negative sample indices!
-                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                idxBegChunk = np.amax([idxEndChunk - 2 * frameSize, 0])   # don't go into negative sample indices!
+                yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
                 # Pad zeros at beginning if needed
-                if idxEndChunk - idxStartChunk < 2 * frameSize:
+                if idxEndChunk - idxBegChunk < 2 * frameSize:   # Using 2*N to keep power of 2 for FFT
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
                 # if lk[k] == 0:  # first ever broadcast case
@@ -305,10 +310,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if lk[k] > 0:
                     stop = 1
 
-                # # Extract current local data chunk
-                # idxEndChunk = int(np.floor(t * fs[k]))
-                # idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
-                # yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                # Extract current local data chunk
+                idxEndChunk = int(np.floor(t * fs[k]))
+                idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
+                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
 
                 # Perform broadcast -- update all buffers in network
                 zBuffer, zLocal = subs.broadcast(
@@ -323,17 +328,40 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             lk,
                             zBuffer,
                         )
-                
+
+
+                if 0:
+                # if k == 0 and i[k] >= 110:
+                    if not flagPlot:
+                        fig, axes = plt.subplots(2,1)
+                        flagPlot = True
+
+                    if len(zBuffer[k][0]) > 0:
+                        axes[0].plot(zBuffer[k][0], 'k')
+                        axes[0].set_title(f'buffer of node {k+1}, for its 1st neighbor (TD), i={i[k]}')
+                        axes[0].vlines(np.arange(len(zBuffer[k][0])/settings.broadcastLength) * settings.broadcastLength, 0, np.amax(zBuffer[k][0]), 'r')
+                        axes[1].plot(20 * np.log10(np.abs(np.fft.fft(zBuffer[k][0])[:int(len(zBuffer[k][0])/2)])), 'k')
+                        axes[1].set_title(f'FD version')
+                    # draw the plot
+                    plt.tight_layout()
+                    plt.draw() 
+                    plt.pause(0.01)
+
+                    # start removing points if you don't want all shown
+                    if lk[k] >= 1:
+                        for ii in range(len(axes)):
+                            axes[ii].clear()
+                    
             elif event == 'update':
                 t0Local = time.perf_counter()
 
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
-                idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
-                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                idxBegChunk = idxEndChunk - frameSize     # <N> samples long chunk
+                yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
                 
                 # Compute VAD
-                VADinFrame = oVAD[idxStartChunk:idxEndChunk]
+                VADinFrame = oVAD[idxBegChunk:idxEndChunk]
                 oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
 
                 # Count number of spatial covariance matrices updates
@@ -361,20 +389,35 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         zBufferAll = np.array([])
                     zBufferAll = np.concatenate((zBufferAll, zBuffer[k][0]))
 
-
-                if k == 0:
-                    
+                # if k == 0:
+                if 0:
                     if i[k] == 0:
-                        fig = plt.figure(figsize=(8,4))
-                        ax1 = fig.add_subplot(311)
-                        ax2 = fig.add_subplot(312)
-                        ax3 = fig.add_subplot(313)
-                    ax1.plot(20 * np.log10(np.abs(np.fft.fft(yin[idxStartChunk:idxEndChunk,1])[:int(len(yin[idxStartChunk:idxEndChunk,1])/2)])), 'b')
-                    ax1.set_title(f'Local data captured at node 1 (not compressed, 1st sensor)')
-                    ax2.plot(20 * np.log10(np.abs(np.fft.fft(z[k][:,0])[:int(len(z[k][:,0])/2)])), 'k')
-                    ax2.set_title(f'zBuffer(Node {k+1}, neighbor 1) [dB], i={i[k]}')
-                    ax3.plot(20 * np.log10(np.abs(wTilde[k][:, i[k], 1])), 'b')
-                    ax3.set_title(f'Filter coefficients (FD), i={i[k]}')
+                        fig, axes = plt.subplots(2,1)
+                    
+                    neighborIdx = 1     # network-wide index of neighbor to consider
+                    if neighborIdx == k:
+                        raise ValueError('Neighbor should not have the same index as the current node')
+
+                    # Select local sensor data of neighbor node (uncompressed) (time-domain)
+                    neighborData = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == neighborIdx+1]
+                    if neighborData.shape[-1] > 1:
+                        neighborData = neighborData[:, 0]
+                    neighborData = np.squeeze(neighborData)
+
+                    # Select compressed neighbor data from z (time-domain)
+                    compressedNeighData = z[k][:, neighborIdx - sum(asc.sensorToNodeTags == k+1)]
+
+                    # Select filter coefficients that were used for compression of that neighbor's data
+                    filtCoeffsForCompression = wTilde[neighborIdx][:, i[neighborIdx], 0]
+
+                    axes[0].plot(20 * np.log10(np.abs(np.fft.fft(neighborData)[:int(len(neighborData)/2)])), 'b', label='$yq$')
+                    axes[0].set_title(f'Local data captured at node #{k+1} [dB] (raw, uncompressed, 1st sensor)')
+                    axes[0].plot(20 * np.log10(np.abs(np.fft.fft(compressedNeighData)[:int(len(compressedNeighData)/2)])), 'k', label='$zq$')
+                    axes[0].set_title(f'zBuffer(Node #{k+1}, neighbor #{neighborIdx+1}) [dB], i={i[k]}')
+                    axes[0].legend()
+                    #
+                    axes[1].plot(20 * np.log10(np.abs(filtCoeffsForCompression)), 'b')
+                    axes[1].set_title(f'Filter coefficients (FD), i={i[k]}')
                     # draw the plot
                     plt.tight_layout()
                     plt.draw() 
@@ -382,12 +425,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                     # start removing points if you don't want all shown
                     if lk[k] >= 1:
-                        ax1.lines[0].remove()
-                        ax2.lines[0].remove()
-                        ax3.lines[0].remove()
+                        for ii in range(len(axes)):
+                            axes[ii].clear()
 
-                # if 0:
-                if len(zBufferAll) / 16000 > 5:
+                if 0:
+                # if len(zBufferAll) / 16000 > 5:
                     stop = 1
 
                     # import matplotlib.pyplot as plt
@@ -488,7 +530,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
-                d[idxStartChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+                d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
                 
                 if settings.computeLocalEstimate:
                     # Local observations only
@@ -496,7 +538,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                     # Transform back to time domain (WOLA processing)
                     dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
-                    dLocal[idxStartChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
+                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
                 # -----------------------------------------------------------------------
                 
                 # Increment DANSE iteration index

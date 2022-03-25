@@ -102,6 +102,9 @@ class ProgramSettings(object):
         # Check lengths consistency
         if self.broadcastLength > self.stftWinLength:
             raise ValueError(f'Broadcast length is too large ({self.broadcastLength}, with STFT frame size {self.stftWinLength}).')
+        # Check that chunk overlap makes sense
+        if self.chunkOverlap >= 1:
+            raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.chunkOverlap}).')
 
         return self
 
