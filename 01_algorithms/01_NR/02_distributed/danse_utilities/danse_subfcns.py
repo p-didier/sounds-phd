@@ -368,59 +368,6 @@ def danse_compression(yq, wHat, n):
     # Discard oldest (incorrect) samples
     zq = zq[n:]
 
-    # zq2 = sig.fftconvolve(wIR, )...
-
-    stop = 1
-
-    if 0:
-        import matplotlib.pyplot as plt
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(211)
-        f = np.arange(len(wHat)) * 8e3/len(wHat)
-        ffull = np.arange(len(wHatFull)) * 8e3/len(wHatFull)
-        ax.plot(f, 20 * np.log10(np.abs(wHat)))
-        ax.plot(ffull, 20 * np.log10(np.abs(wHatFull)))
-        ax.plot(ffull, 20 * np.log10(np.abs(yqHat)), 'k')
-        ax.plot(ffull, 20 * np.log10(np.abs(zqHat)), 'r')
-        # ax.plot(f, 20 * np.log10(np.abs(wHat2[:int(len(wHat2)/2 + 1)])), 'k')
-        ax = fig.add_subplot(212)
-        ax.plot(wIR)
-        plt.tight_layout()	
-        plt.show()
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(211)
-    # ax.plot(20 * np.log10(np.abs(yqHat)), label='$\\hat{y}_q$')
-    # ax.plot(20 * np.log10(np.abs(wHatFull)), 'r', label='$\\hat{w}_{qq}$')
-    # ax.plot(20 * np.log10(np.abs(zqHat)), 'k', label='$\\hat{z}_q$')
-    # # ax.plot(20 * np.log10(np.abs(np.fft.fft(zqfull)[:int(len(zqfull)/2)])), 'y', label='$\\hat{z}_q$')
-    # ax.legend()
-    # ax.grid()
-    # ax = fig.add_subplot(212)
-    # ax.plot(yq)
-    # ax.plot(zq, 'k')
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-
-    # # # Go to frequency domain
-    # # yq = yq[:n, :]
-    # yq_hat = np.fft.fft(yq, n, axis=0)  # np.fft.fft: frequencies ordered from DC to Nyquist, then -Nyquist to -DC (https://numpy.org/doc/stable/reference/generated/numpy.fft.fftfreq.html)
-    # # Keep only positive frequencies
-    # yq_hat = yq_hat[:int(n / 2 + 1)]
-    # # Compress using filter coefficients
-    # # zq_hat = np.einsum('ij,ij->i', wHat.conj(), yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-    # # zq_hat = np.einsum('ij,ij->i', wHat, yq_hat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-    # zq_hat = wHat * yq_hat
-
-
-    # # Format for IFFT 
-    # zq = back_to_time_domain(zq_hat, n)
-    # # back_to_time_domain(zq_hat, n)
-    # zq = np.real_if_close(zq)
-    # zq = np.squeeze(zq)
-
     return zq
 
 

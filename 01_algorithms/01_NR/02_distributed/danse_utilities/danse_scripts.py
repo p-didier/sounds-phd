@@ -296,25 +296,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if idxEndChunk - idxBegChunk < 2 * frameSize:   # Using 2*N to keep power of 2 for FFT
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
-                # if lk[k] == 0:  # first ever broadcast case
-                #     idxStartChunk = idxEndChunk - frameSize
-                #     yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-                #     # Pad with preceding zeros to reach the correct chunk length (OLS processing)
-                #     # yLocalCurr = np.concatenate((yLocalCurr, np.zeros((frameSize + settings.broadcastLength - 1 - yLocalCurr.shape[0], yLocalCurr.shape[1]))))
-                #     yLocalCurr = np.concatenate((yLocalCurr, np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1]))))
-                # else:
-                #     # <2N> samples long chunk (for OLS processing during compression)
-                #     idxStartChunk = idxEndChunk - 2 * frameSize
-                #     yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-
-                if lk[k] > 0:
-                    stop = 1
-
-                # Extract current local data chunk
-                idxEndChunk = int(np.floor(t * fs[k]))
-                idxStartChunk = idxEndChunk - frameSize     # <N> samples long chunk
-                yLocalCurr = yin[idxStartChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-
                 # Perform broadcast -- update all buffers in network
                 zBuffer, zLocal = subs.broadcast(
                             t,
@@ -328,157 +309,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             lk,
                             zBuffer,
                         )
-
-
-                if 0:
-                # if k == 0 and i[k] >= 110:
-                    if not flagPlot:
-                        fig, axes = plt.subplots(2,1)
-                        flagPlot = True
-
-                    if len(zBuffer[k][0]) > 0:
-                        axes[0].plot(zBuffer[k][0], 'k')
-                        axes[0].set_title(f'buffer of node {k+1}, for its 1st neighbor (TD), i={i[k]}')
-                        axes[0].vlines(np.arange(len(zBuffer[k][0])/settings.broadcastLength) * settings.broadcastLength, 0, np.amax(zBuffer[k][0]), 'r')
-                        axes[1].plot(20 * np.log10(np.abs(np.fft.fft(zBuffer[k][0])[:int(len(zBuffer[k][0])/2)])), 'k')
-                        axes[1].set_title(f'FD version')
-                    # draw the plot
-                    plt.tight_layout()
-                    plt.draw() 
-                    plt.pause(0.01)
-
-                    # start removing points if you don't want all shown
-                    if lk[k] >= 1:
-                        for ii in range(len(axes)):
-                            axes[ii].clear()
-                    
-            elif event == 'update':
-                t0Local = time.perf_counter()
-
-                # Extract current local data chunk
-                idxEndChunk = int(np.floor(t * fs[k]))
-                idxBegChunk = idxEndChunk - frameSize     # <N> samples long chunk
-                yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-                
-                # Compute VAD
-                VADinFrame = oVAD[idxBegChunk:idxEndChunk]
-                oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
-
-                # Count number of spatial covariance matrices updates
-                if oVADframes[i[k]]:
-                    numUpdatesRyy[k] += 1
-                else:
-                    numUpdatesRnn[k] += 1
-                
-                # Process buffers
-                z[k], _ = subs.process_incoming_signals_buffers(
-                    zBuffer[k],
-                    z[k],
-                    neighbourNodes[k],
-                    i[k],
-                    frameSize,
-                    N=nExpectedNewSamplesPerFrame,
-                    L=settings.broadcastLength,
-                    lastExpectedIter=numIterations - 1)
-
-
-                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
-                # Save up buffer
-                if k == 0:
-                    if i[k] == 0:
-                        zBufferAll = np.array([])
-                    zBufferAll = np.concatenate((zBufferAll, zBuffer[k][0]))
-
-                # if k == 0:
-                if 0:
-                    if i[k] == 0:
-                        fig, axes = plt.subplots(2,1)
-                    
-                    neighborIdx = 1     # network-wide index of neighbor to consider
-                    if neighborIdx == k:
-                        raise ValueError('Neighbor should not have the same index as the current node')
-
-                    # Select local sensor data of neighbor node (uncompressed) (time-domain)
-                    neighborData = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == neighborIdx+1]
-                    if neighborData.shape[-1] > 1:
-                        neighborData = neighborData[:, 0]
-                    neighborData = np.squeeze(neighborData)
-
-                    # Select compressed neighbor data from z (time-domain)
-                    compressedNeighData = z[k][:, neighborIdx - sum(asc.sensorToNodeTags == k+1)]
-
-                    # Select filter coefficients that were used for compression of that neighbor's data
-                    filtCoeffsForCompression = wTilde[neighborIdx][:, i[neighborIdx], 0]
-
-                    axes[0].plot(20 * np.log10(np.abs(np.fft.fft(neighborData)[:int(len(neighborData)/2)])), 'b', label='$yq$')
-                    axes[0].set_title(f'Local data captured at node #{k+1} [dB] (raw, uncompressed, 1st sensor)')
-                    axes[0].plot(20 * np.log10(np.abs(np.fft.fft(compressedNeighData)[:int(len(compressedNeighData)/2)])), 'k', label='$zq$')
-                    axes[0].set_title(f'zBuffer(Node #{k+1}, neighbor #{neighborIdx+1}) [dB], i={i[k]}')
-                    axes[0].legend()
-                    #
-                    axes[1].plot(20 * np.log10(np.abs(filtCoeffsForCompression)), 'b')
-                    axes[1].set_title(f'Filter coefficients (FD), i={i[k]}')
-                    # draw the plot
-                    plt.tight_layout()
-                    plt.draw() 
-                    plt.pause(0.01)
-
-                    # start removing points if you don't want all shown
-                    if lk[k] >= 1:
-                        for ii in range(len(axes)):
-                            axes[ii].clear()
-
-                if 0:
-                # if len(zBufferAll) / 16000 > 5:
-                    stop = 1
-
-                    # import matplotlib.pyplot as plt
-                    fig = plt.figure(figsize=(8,4))
-                    ax = fig.add_subplot(211)
-                    ax.plot(zBufferAll)
-                    ax.plot(yin[:len(zBufferAll), 0] + 1.2 * np.amax(zBufferAll))
-                    ax.grid()
-                    ax = fig.add_subplot(212)
-                    zfft = 20*np.log10(np.abs(np.fft.fft(zBufferAll)))
-                    ax.plot(zfft)
-                    ax.plot(20*np.log10(np.abs(np.fft.fft(yin[:len(zBufferAll), 0]))) + 1.2 * np.amax(zfft))
-                    ax.grid()
-                    plt.tight_layout()	
-                    plt.show()
-
-                    # STFTs
-                    vlimMin = -100
-                    vlimMax = -30
-                    fig = plt.figure(figsize=(8,4))
-                    ax = fig.add_subplot(121)
-                    out, f, t = classes.get_stft(yin[:len(zBufferAll), 0], fs, settings)
-                    mappable = plt.pcolormesh(t, f / 1e3, np.squeeze(20*np.log10(np.abs(out))), vmin=vlimMin, vmax=vlimMax)
-                    ax.set_title('yin')
-                    plt.colorbar(mappable)
-                    ax = fig.add_subplot(122)
-                    out2, f2, t2 = classes.get_stft(zBufferAll, fs, settings)
-                    mappable = plt.pcolormesh(t2, f2 / 1e3, np.squeeze(20*np.log10(np.abs(out2))), vmin=vlimMin, vmax=vlimMax)
-                    ax.set_title('zBuffer')
-                    plt.colorbar(mappable)
-                    plt.tight_layout()	
-                    plt.show()
-
-                    # fig = plt.figure(figsize=(8,4))
-                    # ax = fig.add_subplot(111)
-                    # plt.plot(20*np.log10(np.abs(wTilde[0][:, i[0], 0])))
-
-
-                    import simpleaudio as sa
-                    audio_array = copy.copy(zBufferAll)
-                    audio_array *= 32767 / max(abs(audio_array))
-                    audio_array = audio_array.astype(np.int16)
-                    sa.play_buffer(audio_array,1,2,16000)
-
-                    audio_array = copy.copy(yin[:len(zBufferAll), 0])
-                    audio_array *= 32767 / max(abs(audio_array))
-                    audio_array = audio_array.astype(np.int16)
-                    sa.play_buffer(audio_array,1,2,16000)
-                # TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY TEMPORARY
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -527,6 +357,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                # dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :], ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)

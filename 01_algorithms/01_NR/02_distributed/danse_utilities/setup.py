@@ -142,7 +142,7 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
         if (np.array(SROsppm) == 0).all():
             SROsppm = [0 for _ in range(numNodes)]
         else:
-            raise ValueError('Number of sensors does not match number of given non-zero SRO values.')
+            raise ValueError('Number of nodes does not match number of given non-zero SRO values.')
 
     # Base time stamps
     sigsOut       = np.zeros((numSamples, numSensors))
