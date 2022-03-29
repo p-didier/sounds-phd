@@ -1,2 +1,2 @@
 # sounds-phd
-SOUNDS PhD general repository
+Paul Didier's SOUNDS PhD general repository (Marie-Curie ETN, ESR8)
