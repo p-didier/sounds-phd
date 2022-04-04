@@ -141,7 +141,8 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     performGEVD=1,
                     SROsppm=sros[ii][jj],
                     danseUpdating=danseParams.nodeUpdating,
-                    broadcastLength=danseParams.broadcastLength
+                    broadcastLength=danseParams.broadcastLength,
+                    computeLocalEstimate=False
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
             experiments.append(dict([('sets', sets), ('path', exportPath)]))

@@ -15,7 +15,7 @@ testType = 'basic_performance_srofree'
 testType = 'sro_effect'
 # testType = 'sro_compensation'
 
-exportBasePath = f'{Path(__file__).parent}/res/testings_SROs/automated'
+exportBasePath = f'{Path(__file__).parent}/res/testing_SROs/automated'
 
 # Build testing parameters object
 danseTestingParams = sro_testing.DanseTestingParameters(
@@ -31,10 +31,10 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     sigDur=20,
     baseSNR=5,
-    possibleSROs=[0, 100, 200, 400, 800, 1600, 3200],
+    # possibleSROs=[0, 100, 200, 400, 800, 1600, 3200],
     # possibleSROs=[0, 20, 40, 60, 80, 100],
     # possibleSROs=[0, 20, 40, 60, 80, 100, 200, 400, 600, 800, 1000],
-    # possibleSROs=[0, 10000, 20000, 40000, 80000, 160000, 320000],
+    possibleSROs=[0, 10000, 20000, 40000, 80000, 160000, 320000],
     nodeUpdating='simultaneous',
     broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
 )

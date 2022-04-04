@@ -8,7 +8,7 @@ matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 def plotsro(exportpath):
     n = 30
     x = np.arange(n)
-    y = np.linspace(start=0, stop=n-1, num=n+1)
+    y = np.linspace(start=0, stop=n-1, num=n+2)
 
     f = 0.75/5
     t = np.linspace(start=0, stop=n-1, num=1000)
@@ -32,7 +32,8 @@ def plotsro(exportpath):
     plt.yticks([-1, 1, 3], labels=['Node $q$', 'Node $k$', 'True signal'])
     plt.ylim((-2, 5))
     plt.xticks(x, labels=[])
-    plt.xlim((-0.5, int(n/2)))
+    # plt.xlim((-0.5, int(n/2)))
+    plt.xlim((-0.5, int(n)))
     plt.xlabel('Time')
     fig.savefig(exportpath)
     plt.show()

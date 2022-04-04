@@ -1,11 +1,6 @@
-from ctypes import get_last_error
-from socket import ntohl
-from sys import flags
-from matplotlib.pyplot import axis, flag
 import numpy as np
 from numba import njit
-import scipy, time, copy
-import scipy.signal as sig
+import scipy
 
 
 def danse_init(yin, settings, asc):
@@ -345,7 +340,7 @@ def danse_compression(yq, wHat, n):
         wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
 
     # Go (back) to frequency domain
-    wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding combined with the non-causality of the IR creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
+    wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding (combined with the non-causality of the IR?) creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
     yqHat = np.fft.fft(np.squeeze(yq), nTotal, axis=0)
 
     if flagSingleSensor:
@@ -637,7 +632,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L):
+def get_events_matrix(timeInstants, N, Ns, L, minTimeBtwFiltUpdates):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -653,6 +648,8 @@ def get_events_matrix(timeInstants, N, Ns, L):
         Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap) (Ns < N).
     L : int
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
+    minTimeBtwFiltUpdates : float
+        Minimum time between 2 consecutive filter update at a node [s].
     
     Returns
     -------
@@ -684,12 +681,13 @@ def get_events_matrix(timeInstants, N, Ns, L):
         fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
 
     # Total signal duration [s] per node (after truncation during signal generation)
-    Ttot = timeInstants[-1, :]      
+    Ttot = timeInstants[-1, :]
     
     # Get expected DANSE update instants
     numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
     updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
     #                               ^ note that we only start updating when we have enough samples
+    # TODO -- take into account 'minTimeBtwFiltUpdates'
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
     broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants

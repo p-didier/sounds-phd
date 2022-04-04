@@ -3,7 +3,8 @@ import sys
 import scipy.signal as sig
 from scipy.signal import stft
 from pathlib import Path, PurePath
-from pystoi import stoi as stoi_fcn
+from pystoi import stoi_any_fs as stoi_fcn
+from pesq import pesq
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -35,23 +36,44 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     Returns
     -------
     snr : [3 x 1] np.ndarray (real)
-        Unweighted signal-to-noise ratio (SNR).
-    fwSNRseg : float    
-        Frequency-weighted segmental SNR.
-    stoi : float
-        Short-Time Objective Intelligibility.
+        Unweighted signal-to-noise ratio (SNR) [before, after, difference].
+    fwSNRseg : [3 x 1] np.ndarray (real)    
+        Frequency-weighted segmental SNR [before, after, difference].
+    myStoi : [3 x 1] np.ndarray (real)
+        Short-Time Objective Intelligibility [before, after, difference].
+    myPesq : [3 x 1] np.ndarray (real)
+        Perceptual Evaluation of Speech Quality [before, after, difference].
     """
+
     # Init output arrays
     snr = np.zeros(3)
+    fwSNRseg = np.zeros(3)
+    myStoi = np.zeros(3)
+    myPesq = np.zeros(3)
     # Unweighted SNR
     snr[0] = get_snr(noisySignal, VAD)
     snr[1] = get_snr(enhancedSignal, VAD)
     snr[2] = snr[1] - snr[0]
     # Frequency-weight segmental SNR
-    fwSNRseg = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
+    fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, noisySignal, fs, frameLen, gammafwSNRseg)
+    fwSNRseg[0] = np.mean(fwSNRseg_allFrames)
+    fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
+    fwSNRseg[1] = np.mean(fwSNRseg_allFrames)
+    fwSNRseg[2] = fwSNRseg[1] - fwSNRseg[0]
     # Short-Time Objective Intelligibility (STOI)
-    stoii = stoi_fcn(cleanSignal, enhancedSignal, int(fs))
-    return snr, fwSNRseg, stoii
+    myStoi[0] = stoi_fcn(cleanSignal, noisySignal, fs)
+    myStoi[1] = stoi_fcn(cleanSignal, enhancedSignal, fs)
+    myStoi[2] = myStoi[1] - myStoi[0]
+    # Perceptual Evaluation of Speech Quality (PESQ)
+    if fs in [8e3, 16e3]:
+        myPesq[0] = pesq(fs, cleanSignal, noisySignal, 'wb')
+        myPesq[1] = pesq(fs, cleanSignal, enhancedSignal, 'wb')
+        myPesq[2] = myPesq[1] - myPesq[0]
+    else:
+        print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Setting `myPesq` to NaN.')
+        myPesq = np.nan
+
+    return snr, fwSNRseg, myStoi, myPesq
 
 
 def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):
@@ -113,7 +135,7 @@ def get_sisnr(x, Fs, VAD):
     return sisnr
 
 
-def getSNR(timeDomainSignal, VAD, silent=False):
+def getSNR(timeDomainSignal, VAD):
     # getSNR -- Sub-function for SNRest().
     #
     # (c) Paul Didier - 14-Sept-2021
@@ -123,32 +145,27 @@ def getSNR(timeDomainSignal, VAD, silent=False):
     # Ensure correct input formats
     VAD = np.array(VAD)
 
-    # Only start computing VAD from the first frame where there has been VAD =
-    # 0 and VAD = 1 at least once (condition added on 25/08/2021).
-    idx_start = 0
-    for ii in range(1,len(VAD)):
-        if VAD[ii] != VAD[0]:
-            idx_start = ii
-            break
-
     # Check input lengths
     if len(timeDomainSignal) < len(VAD):
-        if not silent:
-            print('WARNING: VAD is longer than provided signal (possibly due to non-integer Tmax*Fs/(L-R)) --> truncating VAD')
+        print('WARNING: VAD is longer than provided signal (possibly due to non-integer Tmax*Fs/(L-R)) --> truncating VAD')
         VAD = VAD[:len(timeDomainSignal)]
-    
-    # Truncate signals and VAD accordingly
-    VAD = VAD[idx_start:]
-    timeDomainSignal = timeDomainSignal[idx_start:]
 
     # Number of time frames where VAD is active/inactive
     Ls = np.count_nonzero(VAD)
     Ln = len(VAD) - Ls
 
-    if Ls > 0 and Ln > 0:
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(timeDomainSignal)
+    # ax.plot(VAD * np.amax(timeDomainSignal), 'k')
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
 
-        noisePower = np.mean(np.power(np.abs(timeDomainSignal[VAD == 0]), 2))
-        signalPower = np.mean(np.power(np.abs(timeDomainSignal[VAD == 1]), 2))
+    if Ls > 0 and Ln > 0:
+        noisePower = np.mean(np.power(timeDomainSignal[VAD == 0], 2))
+        signalPower = np.mean(np.power(timeDomainSignal[VAD == 1], 2))
         speechPower = signalPower - noisePower
         if speechPower < 0:
             SNRout = -1 * float('inf')
@@ -201,7 +218,10 @@ def get_fwsnrseg(cleanSig, enhancedSig, fs, frameLen=0.03, overlap=0.75, gamma=0
     """
     Extracted (and slightly adapted) from pysepm.qualityMeasures package
     See https://github.com/schmiph2/pysepm
+
+    See inline comments for EDITS w.r.t. original implementation.
     """
+
     if cleanSig.shape!=enhancedSig.shape:
         raise ValueError('The two signals do not match!')
     eps=np.finfo(np.float64).eps
@@ -286,10 +306,31 @@ def get_fwsnrseg(cleanSig, enhancedSig, fs, frameLen=0.03, overlap=0.75, gamma=0
     SNRlog=10*np.log10((clean_energy**2)/error_energy)
     fwSNR=np.sum(W_freq*SNRlog,0)/np.sum(W_freq,0)
     distortion=fwSNR.copy()
-    distortion[distortion<-10]=-10
+    # distortion[distortion<-10]=-10    # ORIGINAL IMPLEMENTATION: -10 dB bound (see hu2008a / hansen1998a) 
+    distortion[distortion<0]=0          # modification by Paul Didier (04/04/2022, 14h21) -- ensures absence of negative fwSNRseg values
     distortion[distortion>35]=35
 
-    return np.mean(distortion)
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(311)
+    # ax.imshow(20*np.log10(np.abs(clean_energy)))
+    # ax.grid()
+    # ax.invert_yaxis()
+    # ax.set_aspect('auto')
+    # ax = fig.add_subplot(312)
+    # ax.imshow(20*np.log10(np.abs(processed_energy)))
+    # ax.grid()
+    # ax.invert_yaxis()
+    # ax.set_aspect('auto')
+    # ax = fig.add_subplot(313)
+    # ax.plot(distortion, 'k')
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+    stop = 1
+
+    return distortion
 # ------------------------------------------
 # ------------------------------------------
 # ------------------------------------------
@@ -297,3 +338,6 @@ def get_fwsnrseg(cleanSig, enhancedSig, fs, frameLen=0.03, overlap=0.75, gamma=0
 # ------------------------------------------
 # ------------------------------------------
 # ------------------------------------------
+
+
+

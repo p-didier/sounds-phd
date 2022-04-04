@@ -269,7 +269,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # ------------------------------------------------------------------
 
     # Prepare events to be considered in main `for`-loop
-    eventsMatrix, fs = subs.get_events_matrix(timeInstants, frameSize, nExpectedNewSamplesPerFrame, settings.broadcastLength)
+    eventsMatrix, fs = subs.get_events_matrix(timeInstants,
+                                            frameSize,
+                                            nExpectedNewSamplesPerFrame,
+                                            settings.broadcastLength,
+                                            settings.minTimeBtwFiltUpdates)
 
     t0 = time.perf_counter()    # loop timing
     # Loop over time instants when one or more event(s) occur(s)
@@ -309,6 +313,35 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             lk,
                             zBuffer,
                         )
+                    
+            elif event == 'update':
+                t0Local = time.perf_counter()
+
+                # Extract current local data chunk
+                idxEndChunk = int(np.floor(t * fs[k]))
+                idxBegChunk = idxEndChunk - frameSize     # <N> samples long chunk
+                yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                
+                # Compute VAD
+                VADinFrame = oVAD[idxBegChunk:idxEndChunk]
+                oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
+
+                # Count number of spatial covariance matrices updates
+                if oVADframes[i[k]]:
+                    numUpdatesRyy[k] += 1
+                else:
+                    numUpdatesRnn[k] += 1
+                
+                # Process buffers
+                z[k], _ = subs.process_incoming_signals_buffers(
+                    zBuffer[k],
+                    z[k],
+                    neighbourNodes[k],
+                    i[k],
+                    frameSize,
+                    N=nExpectedNewSamplesPerFrame,
+                    L=settings.broadcastLength,
+                    lastExpectedIter=numIterations - 1)
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]

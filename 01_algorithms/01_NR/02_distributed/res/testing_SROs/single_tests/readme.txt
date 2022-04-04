@@ -1,0 +1,1 @@
+FOLDER NAME = type of node-updating strategy used in DANSE

@@ -1,6 +1,5 @@
 
 #%%
-from multiprocessing.managers import ValueProxy
 from pathlib import Path, PurePath
 import sys
 import matplotlib.pyplot as plt
@@ -13,7 +12,6 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 from danse_utilities.classes import Results, ProgramSettings
 sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
-import utilsASC
 
 # resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_3sensorseach'
 # resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_2sensorseach'
@@ -67,11 +65,11 @@ meanfwSNRseg = meanfwSNRseg[:, idxSorting]
 fig = plt.figure(figsize=(8,4))
 ax = fig.add_subplot(121)
 for idxNode in range(nNodes):
-    ax.semilogx(srosMean, meanStois[idxNode, :] * 100, f'C{idxNode}-o', label=f'Node {idxNode+1}')
+    ax.semilogx(srosMean, meanStois[idxNode, :], f'C{idxNode}-o', label=f'Node {idxNode+1}')
 ax.grid()
-ax.set_ylim([0, 100])
+ax.set_ylim([0, 1])
 ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
-ax.set_ylabel('Sensors-averaged STOI [%]')
+ax.set_ylabel('STOI')
 #
 ax = fig.add_subplot(122)
 for idxNode in range(nNodes):
@@ -79,11 +77,11 @@ for idxNode in range(nNodes):
 ax.grid()
 # ax.set_ylim([-5, 3])
 ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
-ax.set_ylabel('Sensors-averaged $\\Delta$fwSNRseg [dB]')
+ax.set_ylabel('$\\Delta$fwSNRseg [dB]')
 plt.tight_layout()
 plt.legend()
-fig.savefig(exportFileName + ".png")
-fig.savefig(exportFileName + ".pdf")
+# fig.savefig(exportFileName + ".png")
+# fig.savefig(exportFileName + ".pdf")
 plt.show()
 
 stop = 1

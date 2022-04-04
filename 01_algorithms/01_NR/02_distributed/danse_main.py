@@ -2,9 +2,11 @@
 # %%
 # ---------------- Imports
 import time
+from turtle import settiltangle
 t00 = time.perf_counter()
 from pathlib import Path, PurePath
 import sys
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
@@ -37,45 +39,52 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS6_allNodesInSamePosition',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS1',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS2_allNodesInSamePosition',
-    desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
+    #
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
+    desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    signalDuration=10,
-    baseSNR=0,
+    #
+    signalDuration=5,
+    baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     # chunkOverlap=0,           # Overlap between DANSE iteration processing chunks [/100%]
+    #
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
-    SROsppm=0,
-    # SROsppm=[0,20,40,60,80],
-    # SROsppm=[0,100,40,60,80],
+    SROsppm=[0, 100],
+    # SROsppm=0,
+    #
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
-    broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
-    # broadcastLength=2**9,
+    # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=2**9,
     expAvgBeta=0.9945,
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
-    # computeLocalEstimate=True,
+    computeLocalEstimate=True,
     performGEVD=1,
     # bypassFilterUpdates=True,
+    minTimeBtwFiltUpdates=1,            # [s] minimum time between 2 consecutive filter update at a node 
     )
 
+# Subfolder for export
+subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySettings.acousticScenarioPath).parent.name}'
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
-experimentName = f'{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
+experimentName = f'{[int(sro) for sro in mySettings.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
 if mySettings.compensateSROs:
     experimentName += '_comp'
 else:
     experimentName += '_nocomp'
 
-exportPath = f'{Path(__file__).parent}/res/single_sensor_nodes/{experimentName}'
-lightExport = True          # <-- set to True to not export whole signals
+exportPath = f'{Path(__file__).parent}/res/{subfolder}/{experimentName}'
+lightExport = True          # <-- set to True to not export whole signals in pkl.gz archives
 # ------------------------
 
 def main(mySettings, exportPath, showPlots=1, lightExport=True):
@@ -160,7 +169,8 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
 
     # Plot performance
     fig = results.plot_enhancement_metrics()
-    fig.suptitle(f'Speech enhancement metrics ($\\beta={settings.expAvgBeta}$)')
+    expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * results.signals.fs[0])
+    fig.suptitle(f'Speech enhancement metrics ($\\beta={settings.expAvgBeta} \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)')
     fig.tight_layout()
     plt.savefig(f'{pathToResults}/enhMetrics.png')
     if showPlots:
@@ -172,6 +182,8 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
     for idxNode in range(results.acousticScenario.numNodes):
         currSTOIs = results.enhancementEval.stoi[f'Node{idxNode + 1}']
         for idxSensor, stoi in enumerate(currSTOIs):
+            if not isinstance(stoi, float):
+                stoi = stoi[-1]  # compare the improvements before/after filtering
             if stoi >= maxSTOI:
                 bestNode, bestSensor = idxNode, idxSensor
                 maxSTOI = stoi

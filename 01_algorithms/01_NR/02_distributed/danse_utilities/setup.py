@@ -1,3 +1,4 @@
+from signal import signal
 import sys, time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -215,13 +216,13 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     snr      = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Unweighted SNR
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
     stoi     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Short-Time Objective Intelligibility
+    pesq     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
-        for idxSensor in range(numSensorsPerNode[idxNode]):
-            trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + idxSensor
-            
-            print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {idxSensor + 1}/{numSensorsPerNode[idxNode]})...')
-            out0, out1, out2 = eval_enhancement.get_metrics(
+        trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + settings.referenceSensor
+        
+        print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
+        out0, out1, out2, out3 = eval_enhancement.get_metrics(
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
@@ -230,14 +231,16 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg
                                     )
-            snr[f'Node{idxNode + 1}'].append(out0)
-            fwSNRseg[f'Node{idxNode + 1}'].append(out1)
-            stoi[f'Node{idxNode + 1}'].append(out2)
+        snr[f'Node{idxNode + 1}'].append(out0)
+        fwSNRseg[f'Node{idxNode + 1}'].append(out1)
+        stoi[f'Node{idxNode + 1}'].append(out2)
+        pesq[f'Node{idxNode + 1}'].append(out3)
     print(f'All signal enhancement evaluation metrics computed in {np.round(time.perf_counter() - tStart, 3)} s.')
 
     # Group measures into EnhancementMeasures object
     measures = classes.EnhancementMeasures(fwSNRseg=fwSNRseg,
                                             stoi=stoi,
+                                            pesq=pesq,
                                             snr=snr)
 
     return measures
@@ -381,13 +384,33 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     return desiredSigEst, desiredSigEstLocal
 
 
-def whiten(sig):
-    """Renders a signal zero-mean and unit-variance."""
-    return (sig - np.mean(sig))/np.std(sig)
+def whiten(sig, vad=[]):
+    """Renders a sequence zero-mean and unit-variance.
+    
+    Parameters
+    ----------
+    sig : [N x 1] np.ndarray (real floats)
+        Non-white input sequence.
+    vad : [N x 1] np.ndarray (binary)
+        Corresponding oracle Voice Activity Detector.
+
+    Returns
+    -------
+    sig_out : [N x 1] np.ndarray
+        Whitened input.
+    """
+    
+    if vad == []:
+        sig_out = (sig - np.mean(sig)) / np.std(sig)
+    else:
+        sig_out = (sig - np.mean(sig)) / np.std(sig[vad == 1])
+
+    return sig_out
 
 
-def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
+def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs, VADenergyFactor, VADwinLength, vadGiven=[]):
     """Truncates/extends, resamples, centers, and scales a signal to match a target.
+    Computes VAD estimate before whitening. 
 
     Parameters
     ----------
@@ -399,6 +422,12 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
         Original raw signal sampling frequency [samples/s].
     targetFs : int
         Target sampling frequency [samples/s].
+    VADenergyFactor : float or int
+        VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor).
+    VADwinLength : float
+        VAD window duration [s].
+    vadGiven : [N x 1] np.ndarray (binary float)
+        Pre-computed VAD. If not `[]`, `VADenergyFactor` and `VADwinLength` arguments are ignored.
 
     Returns
     -------
@@ -411,11 +440,22 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
         rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
     if len(rawSignal) > signalLength:
         rawSignal = rawSignal[:int(desiredDuration * originalFs)]  # truncate too long signals
-    # Resample signal so that its sampling frequency matches the target
-    rawSignal = sig.resample(rawSignal, signalLength) 
+    
+    if len(rawSignal) != signalLength:
+        # Resample signal so that its sampling frequency matches the target
+        rawSignal = sig.resample(rawSignal, signalLength) 
+
+    # Voice Activity Detection (pre-truncation/resampling)
+    if vadGiven == []:
+        thrsVAD = np.amax(rawSignal ** 2) / VADenergyFactor
+        vad, _ = VAD.oracleVAD(rawSignal, VADwinLength, thrsVAD, targetFs)
+    else:
+        vad = vadGiven
+
     # Whiten signal 
-    sig_out = whiten(rawSignal) 
-    return sig_out
+    sig_out = whiten(rawSignal, vad)
+
+    return sig_out, vad
 
 
 def generate_signals(settings: classes.ProgramSettings):
@@ -451,25 +491,29 @@ def generate_signals(settings: classes.ProgramSettings):
     dryDesiredSignals = np.zeros((signalLength, asc.numDesiredSources))
     wetDesiredSignals = np.zeros((signalLength, asc.numDesiredSources, asc.numSensors))
     oVADsourceSpecific = np.zeros((signalLength, asc.numDesiredSources))
-    # Compute oracle VAD
     for ii in range(asc.numDesiredSources):
-        
+        # Load signal
         rawSignal, fsRawSignal = sf.read(settings.desiredSignalFile[ii])
-        dryDesiredSignals[:, ii] = pre_process_signal(rawSignal, settings.signalDuration, fsRawSignal, asc.samplingFreq)
 
-        # Voice Activity Detection
-        thrsVAD = np.amax(dryDesiredSignals[:, ii] ** 2)/settings.VADenergyFactor
-        oVADsourceSpecific[:, ii], _ = VAD.oracleVAD(dryDesiredSignals[:, ii], settings.VADwinLength, thrsVAD, asc.samplingFreq)
+        # Pre-process (resample, truncate, whiten)
+        dryDesiredSignals[:, ii], oVADsourceSpecific[:, ii] = pre_process_signal(rawSignal,
+                                                                                settings.signalDuration,
+                                                                                fsRawSignal,
+                                                                                asc.samplingFreq,
+                                                                                settings.VADenergyFactor,
+                                                                                settings.VADwinLength)
 
         # Convolve with RIRs to create wet signals
         for jj in range(asc.numSensors):
             tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
 
+
     # Get VAD consensus
     oVADsourceSpecific = np.sum(oVADsourceSpecific, axis=1)
     oVAD = np.zeros_like(oVADsourceSpecific)
-    oVAD[oVADsourceSpecific == asc.numDesiredSources] = 1
+    oVAD[oVADsourceSpecific == asc.numDesiredSources] = 1   # only set global VAD = 1 when all sources are active
+
 
     # Load + pre-process dry noise signals and build wet noise signals
     dryNoiseSignals = np.zeros((signalLength, asc.numNoiseSources))
@@ -477,7 +521,14 @@ def generate_signals(settings: classes.ProgramSettings):
     for ii in range(asc.numNoiseSources):
 
         rawSignal, fsRawSignal = sf.read(settings.noiseSignalFile[ii])
-        tmp = pre_process_signal(rawSignal, settings.signalDuration, fsRawSignal, asc.samplingFreq)
+        tmp, _ = pre_process_signal(rawSignal,
+                                    settings.signalDuration,
+                                    fsRawSignal,
+                                    asc.samplingFreq,
+                                    0,
+                                    0,
+                                    oVAD)   # <-- given VAD, computed from noiseless target speech 
+
         # Set SNR
         dryNoiseSignals[:, ii] = 10**(-settings.baseSNR / 20) * tmp
 
@@ -487,10 +538,10 @@ def generate_signals(settings: classes.ProgramSettings):
             wetNoiseSignals[:, ii, jj] = tmp[:signalLength]
 
     # Build speech-only and noise-only signals
-    wetNoise = np.sum(wetNoiseSignals, axis=1)
-    wetSpeech = np.sum(wetDesiredSignals, axis=1)
-    wetNoise_norm = wetNoise / np.amax(wetNoise + wetSpeech)    # Normalize
-    wetSpeech_norm = wetSpeech / np.amax(wetNoise + wetSpeech)  # Normalize
+    wetNoise = np.sum(wetNoiseSignals, axis=1)      # sum all noise sources at each sensor
+    wetSpeech = np.sum(wetDesiredSignals, axis=1)   # sum all speech sources at each sensor
+    wetNoise_norm = wetNoise / np.amax(np.abs(wetNoise + wetSpeech))    # Normalize
+    wetSpeech_norm = wetSpeech / np.amax(np.abs(wetNoise + wetSpeech))  # Normalize
 
     # --- Apply SROs ---
     wetNoise_norm, _, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
@@ -526,5 +577,61 @@ def generate_signals(settings: classes.ProgramSettings):
     if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
         conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
         raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
+
+    if 0:
+
+        from metrics.eval_enhancement import getSNR
+        import matplotlib.pyplot as plt
+
+        t = np.arange(wetNoiseSignals.shape[0]) / asc.samplingFreq
+
+        fig = plt.figure(figsize=(8,4))
+        # First subplot: raw signals (before RIRs application)
+        nsbp = (asc.numNodes + 1) * 100 + 11
+        ax = fig.add_subplot(nsbp)
+        ax.plot(t, dryNoiseSignals[:, 0] / np.amax(np.abs(dryNoiseSignals[:, 0] + dryDesiredSignals[:, 0])))
+        ax.plot(t, dryDesiredSignals[:, 0] / np.amax(np.abs(dryNoiseSignals[:, 0] + dryDesiredSignals[:, 0])))
+        ax.set_ylim([-1, 1])
+        # Get effective SNR
+        snr = getSNR(dryNoiseSignals[:, 0] + dryDesiredSignals[:, 0], oVAD)
+        ax.set_title(f'Raw signals (before convolve w/ RIRs) - SNR = {round(snr, 1)} dB')
+
+        idxlist = np.arange(asc.numSensors)
+        for ii in range(asc.numNodes):
+
+            # Find current sensor indices
+            currSensors = idxlist[asc.sensorToNodeTags == ii + 1]
+            # Get effective SNR
+            snr = getSNR(sensorSignals[:, currSensors[0]], oVAD)
+
+            nsbp = (asc.numNodes + 1) * 100 + 10 + ii + 2
+            ax = fig.add_subplot(nsbp)
+            ax.plot(t, wetNoise_norm[:, currSensors[0]])
+            ax.plot(t, wetSpeech_norm[:, currSensors[0]])
+            ax.set_title(f'Node {ii+1} (ref. sensor) - SNR = {np.round(snr, 1)} dB')
+            ax.set_ylim([-1, 1])
+            if ii == asc.numNodes - 1:
+                ax.set_xlabel('$t$ [s]')
+        plt.tight_layout()
+        plt.show()
+
+
+        stop = 1
+
+        # Export sounds
+        currSensors = idxlist[asc.sensorToNodeTags == 1]
+        currSensors = idxlist[asc.sensorToNodeTags == 2]
+        data = sensorSignals[:, currSensors[0]]
+        # data = wetSpeech_norm[:, currSensors[0]]
+        # data = dryNoiseSignals[:, 0] + dryDesiredSignals[:, 0]
+        #
+        from scipy.io import wavfile
+        amplitude = np.iinfo(np.int16).max
+        data = (amplitude * data/np.amax(data) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
+        wavfile.write('out_tmp.wav', int(asc.samplingFreq), data)
+
+
+        stop = 1
+
 
     return signals, asc

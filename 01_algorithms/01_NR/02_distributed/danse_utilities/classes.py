@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 import sys, warnings, copy
 from pathlib import PurePath, Path
 import numpy as np
@@ -37,36 +37,39 @@ class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
     # Signal generation parameters
     acousticScenarioPath: str = ''          # path to acoustic scenario to be used
-    signalDuration: float = 1               # total signal duration [s]
+    signalDuration: float = 1               # [s] total signal duration
     desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
     noiseSignalFile: list[str] = field(default_factory=list)              # list of paths to noise signal file(s)
-    baseSNR: int = 0                        # SNR between dry desired signals and dry noise
+    baseSNR: int = 0                        # [dB] SNR between dry desired signals and dry noise
     referenceSensor: int = 0                # Index of the reference sensor at each node
-    stftWinLength: int = 1024               # STFT frame length [samples]
-    stftFrameOvlp: float = 0.5              # STFT frame overlap [%]
+    stftWinLength: int = 1024               # [samples] STFT frame length
+    stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
     stftWin: np.ndarray = np.hanning(stftWinLength)  # STFT window
     # VAD parameters
-    VADwinLength: float = 40e-3             # VAD window length [s]
+    VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
-    filterDomain: str = 'f'                 # domain in which to compute the DANSE local node filters ("t" for time-domain, "f" for frequency- (i.e., STFT-) domain)
-    chunkSize: int = 1024                   # processing chunk size
+    minTimeBtwFiltUpdates: float = 0        # [s] minimum time between 2 consecutive filter update at a node 
+                                            #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
+    filterDomain: str = 'f'                 # domain in which to compute the DANSE local node filters 
+                                            #  ^---> ["t" for time-domain, "f" for frequency- (i.e., STFT-) domain]
+    chunkSize: int = 1024                   # [samples] processing chunk size
     chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
     danseWindow: np.ndarray = np.hanning(chunkSize)  # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
     expAvgBeta: float = 0.9945              # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
     performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
-    computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only the local sensor observations
-    bypassFilterUpdates: bool = False        # if True, only update the covariance matrices, but do not update the filter coefficients (no adaptive filtering)
+    computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
+    bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
     # Broadcasting parameters
-    broadcastLength: int = 8                # number of (compressed) signal samples to be broadcasted at a time to other nodes [samples]
+    broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
-    frameLenfwSNRseg: float = 0.03          # time window duration for fwSNRseg computation [s]
+    frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     # SROs parameters
-    SROsppm: list[float] = field(default_factory=list)   # sampling rate offsets [ppm]
+    SROsppm: list[float] = field(default_factory=list)   # [ppm] sampling rate offsets
     compensateSROs: bool = False            # if True, estimate + compensate SROs dynamically
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
@@ -86,10 +89,16 @@ class ProgramSettings(object):
                 print('Empty SROppm parameter: setting SROppm = [0.]')
             else:
                 raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+        # Adapt formats
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
         if not isinstance(self.noiseSignalFile, list):
             self.noiseSignalFile = [self.noiseSignalFile]
+        # Check that SNR is reasonably high
+        if self.baseSNR < -3:
+            inp = input(f'The base SNR value is low ({self.baseSNR} dB). Continue? [y/n]  ')
+            if inp not in ['y', 'Y']:
+                raise ValueError('Run aborted.')
         # Check window constraints
         if not sig.check_NOLA(self.stftWin, self.stftWinLength, self.stftEffectiveFrameLen):
             raise ValueError('Window NOLA contrained is not respected.')
@@ -138,8 +147,10 @@ Exponential averaging constant: beta = {self.expAvgBeta}.
         return met.load(self, filename, silent)
 
     def save(self, filename: str):
+        # Save most important parameters as quickly-readable .txt file
+        met.save_as_txt(self, filename)
+        # Save data as archive
         met.save(self, filename)
-
 
 @dataclass
 class AcousticScenario(object):
@@ -204,6 +215,7 @@ class EnhancementMeasures:
     snr: dict         # Unweighted SNR
     fwSNRseg: dict    # Frequency-weighted segmental SNR
     stoi: dict        # Short-Time Objective Intelligibility
+    pesq: dict        # Perceptual Evaluation of Speech Quality
 
 
 @dataclass
@@ -314,7 +326,11 @@ class Signals(object):
         ax.set(xlabel='$t$ [s]')
         ax.grid()
         plt.legend(loc=(0.01, 0.5), fontsize=8)
-        plt.title(f'Node {nodeIdx + 1}, sensor {sensorIdx + 1} -- $\\beta = {settings.expAvgBeta}$')
+        # Compute time at which the exponential weight decreases to 50% of its initial value
+        self.expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * self.fs[nodeIdx])
+        # Set title
+        plt.title(f'Node {nodeIdx + 1}, s.{sensorIdx + 1} - $\\beta = {settings.expAvgBeta}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
+        
         #
         if self.stftComputed:
             # Get color plot limits
@@ -541,16 +557,35 @@ class Results:
         numNodes = self.signals.desiredSigEst.shape[1]
         
         fig = plt.figure(figsize=(10,3))
-        ax = fig.add_subplot(1, 3, 1)   # Unweighted SNR
-        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
-        ax.set(title='$\Delta$SNR (before/after filtering)', ylabel='[dB]')
-        ax = fig.add_subplot(1, 3, 2)   # fwSNRseg
-        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
-        ax.set(title='fwSNRseg', ylabel='[dB]')
-        ax = fig.add_subplot(1, 3, 3)   # STOI
-        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
-        ax.set(title='STOI')
-        ax.set_ylim(0,1)
+        #
+        ax = fig.add_subplot(1, 4, 1)   # Unweighted SNR
+        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
+        txt = 'SNR'
+        if flagDelta:
+            txt = f'$\\Delta${txt}'
+        ax.set(title=txt, ylabel='[dB]')
+        #
+        ax = fig.add_subplot(1, 4, 2)   # fwSNRseg
+        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
+        txt = 'fwSNRseg'
+        if flagDelta:
+            txt = f'$\\Delta${txt}'
+        ax.set(title=txt, ylabel='[dB]')
+        #
+        ax = fig.add_subplot(1, 4, 3)   # STOI
+        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
+        txt = 'STOI'
+        if flagDelta:
+            txt = f'$\\Delta${txt}'
+        ax.set(title=txt)
+        #
+        ax = fig.add_subplot(1, 4, 4)   # PESQ
+        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.pesq)
+        txt = 'PESQ'
+        if flagDelta:
+            txt = f'$\\Delta${txt}'
+        ax.set(title=txt)
+
         return fig
 
         
@@ -600,22 +635,55 @@ def get_stft(x, fs, settings: ProgramSettings):
 
 
 def metrics_subplot(numNodes, ax, barWidth, data):
-    """Helper function for <Results.plot_enhancement_metrics()>."""
+    """Helper function for <Results.plot_enhancement_metrics()>.
+    
+    Parameters
+    ----------
+    numNodes : int
+        Number of nodes in network.
+    ax : Axes handle
+        Axes handle to plot on.
+    barWidth : float
+        Width of bars for bar plot.
+    data : dict of np.ndarrays of floats /or/ dict of np.ndarrays of [3 x 1] lists of floats
+        Speech enhancement metric(s) per node.
+    
+    Returns
+    -------
+    flagDelta : bool
+        If True, the quantity plotted is a "before vs. after enhancement improvement" metric.
+
+    """
+
+    # Flag for "difference"-type metrics (before vs. after)
+    if not isinstance(data[f'Node1'][0], float):
+        flagDelta = True
+    else:
+        flagDelta = False
+
+    flagZeroBar = False     # flag for plotting a horizontal line at `metric = 0`
+
     xTicks = []
     xTickLabels = []
     for idxNode in range(numNodes):
         numSensors = len(data[f'Node{idxNode + 1}'])
         if not isinstance(data[f'Node{idxNode + 1}'][0], float):
-            toPlot = [lst[-1] for lst in data[f'Node{idxNode + 1}']]
+            toPlot = [lst[-1] for lst in data[f'Node{idxNode + 1}']]    # if measure has format: `[before, after, difference]`, select and plot only `difference`
         else:
             toPlot = data[f'Node{idxNode + 1}']
         xTicksCurr = idxNode + 1 - (numSensors / 2 + 0.5) * barWidth + np.arange(numSensors) * barWidth
         ax.bar(xTicksCurr, toPlot, width=barWidth, color=f'C{idxNode}', edgecolor='k')
         xTicks += list(xTicksCurr)
         xTickLabels += [f'N{idxNode + 1}S{ii + 1}' for ii in range(numSensors)]
+        if toPlot[0] < 0:
+            flagZeroBar = True  
     plt.xticks(xTicks, xTickLabels, fontsize=8)
     ax.tick_params(axis='x', labelrotation=90)
     ax.grid()
+    if flagZeroBar:
+        ax.hlines(0, np.amin(xTicks) - barWidth/2, np.amax(xTicks) + barWidth/2, colors='k', linestyles='dashed')     # plot horizontal line at `metric = 0`
+
+    return flagDelta
 
     
 
