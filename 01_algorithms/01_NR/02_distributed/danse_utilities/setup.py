@@ -571,6 +571,12 @@ def generate_signals(settings: classes.ProgramSettings):
     # Build sensor signals
     sensorSignals = wetSpeech_norm + wetNoise_norm
 
+    # Add self-noise to microphones
+    rng = np.random.default_rng(settings.randSeed)
+    for k in range(sensorSignals.shape[-1]):
+        selfnoise = 10**(settings.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
+        sensorSignals[:, k] += selfnoise
+        
     # Time vector
     timeVector = np.arange(signalLength) / asc.samplingFreq
 
