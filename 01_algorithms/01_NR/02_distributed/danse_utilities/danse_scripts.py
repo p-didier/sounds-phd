@@ -194,9 +194,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
-
-    # Debugging variables
-    flagPlot = False
     
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)

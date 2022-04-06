@@ -21,21 +21,21 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios=1,                   # Number of AS to generate
+    numScenarios=3,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
-    roomDimBounds=[3,4],              # [Smallest, largest] room dimension possible [m]
+    roomDimBounds=[4,8],              # [Smallest, largest] room dimension possible [m]
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=1,                # nr. of noise sources
-    numNodes=5,                       # nr. of nodes
-    # numSensorPerNode=[3,1],               # nr. of sensor per node,
+    numNodes=2,                       # nr. of nodes
+    numSensorPerNode=[3,1],               # nr. of sensor per node,
     # numSensorPerNode=[2,2],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
-    numSensorPerNode=1,               # nr. of sensor per node,
+    # numSensorPerNode=1,               # nr. of sensor per node,
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation=0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime=0.0,                      # reverberation time [s]
+    revTime=0.5,                      # reverberation time [s]
     seed=12345,                       # seed for random generator
     # specialCase='allNodesInSamePosition'    # special cases 
 )
@@ -68,10 +68,6 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
 
     # Export folder
     expFolder = f"{basepath}/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
-    if sets.revTime == 0:
-        expFolder += '_anechoic'
-    else:
-        expFolder += f'_RT{int(sets.revTime * 1e3)}ms'
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
 
@@ -89,6 +85,10 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
         foldername = f"{expFolder}/AS{nas + 1}"  # file name
         if sets.specialCase not in ['', 'none']:
             foldername += f'_{sets.specialCase}'
+        if sets.revTime == 0:
+            foldername += '_anechoic'
+        else:
+            foldername += f'_RT{int(sets.revTime * 1e3)}ms'
         # Export
         if exportit:
             asc.save(foldername)

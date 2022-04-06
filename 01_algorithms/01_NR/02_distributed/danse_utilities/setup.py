@@ -1,4 +1,3 @@
-from signal import signal
 import sys, time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -219,22 +218,22 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     pesq     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
-        trueIdxSensor = sum(numSensorsPerNode[:idxNode]) + settings.referenceSensor
+        trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
         out0, out1, out2, out3 = eval_enhancement.get_metrics(
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
-                                    sigs.fs[settings.referenceSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
+                                    sigs.fs[trueIdxSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
                                     sigs.VAD[startIdx:],
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg
                                     )
-        snr[f'Node{idxNode + 1}'].append(out0)
-        fwSNRseg[f'Node{idxNode + 1}'].append(out1)
-        stoi[f'Node{idxNode + 1}'].append(out2)
-        pesq[f'Node{idxNode + 1}'].append(out3)
+        snr[f'Node{idxNode + 1}'] = out0
+        fwSNRseg[f'Node{idxNode + 1}'] = out1
+        stoi[f'Node{idxNode + 1}'] = out2
+        pesq[f'Node{idxNode + 1}'] = out3
     print(f'All signal enhancement evaluation metrics computed in {np.round(time.perf_counter() - tStart, 3)} s.')
 
     # Group measures into EnhancementMeasures object
@@ -483,6 +482,25 @@ def generate_signals(settings: classes.ProgramSettings):
         raise ValueError(f'{settings.desiredSignalFile} "desired" signal files provided while {asc.numDesiredSources} are needed.')
     if asc.numNoiseSources > len(settings.noiseSignalFile):
         raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
+
+    # Adapt sampling frequency
+    if asc.samplingFreq != settings.samplingFrequency:
+        # Resample RIRs
+        for ii in range(asc.rirDesiredToSensors.shape[1]):
+            for jj in range(asc.rirDesiredToSensors.shape[2]):
+                resampled = resampy.resample(asc.rirDesiredToSensors[:, ii, jj], asc.samplingFreq, settings.samplingFrequency)
+                if ii == 0 and jj == 0:
+                    rirDesiredToSensors_resampled = np.zeros((resampled.shape[0], asc.rirDesiredToSensors.shape[1], asc.rirDesiredToSensors.shape[2]))
+                rirDesiredToSensors_resampled[:, ii, jj] = resampled
+            for jj in range(asc.rirNoiseToSensors.shape[2]):
+                resampled = resampy.resample(asc.rirNoiseToSensors[:, ii, jj], asc.samplingFreq, settings.samplingFrequency)
+                if ii == 0 and jj == 0:
+                    rirNoiseToSensors_resampled = np.zeros((resampled.shape[0], asc.rirNoiseToSensors.shape[1], asc.rirNoiseToSensors.shape[2]))
+                rirNoiseToSensors_resampled[:, ii, jj] = resampled
+        asc.rirDesiredToSensors = rirDesiredToSensors_resampled
+        asc.rirNoiseToSensors = rirNoiseToSensors_resampled
+        # Modify ASC object parameter
+        asc.samplingFreq = settings.samplingFrequency
 
     # Desired signal length [samples]
     signalLength = int(settings.signalDuration * asc.samplingFreq) 

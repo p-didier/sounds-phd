@@ -3,6 +3,7 @@
 import sys
 from danse_utilities.testing import sro_testing
 from pathlib import Path, PurePath
+import numpy as np
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -21,12 +22,13 @@ exportBasePath = f'{Path(__file__).parent}/res/testing_SROs/automated'
 danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 3]_Ns1_Nn1_anechoic/AS1'],
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[2, 2]_Ns1_Nn1_anechoic/AS1'],
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[2, 1]_Ns1_Nn1_anechoic/AS1'],
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS1'],
-    # specificAcousticScenario=f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS3',
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1_anechoic/AS1'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 3]_Ns1_Nn1/AS1_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[2, 2]_Ns1_Nn1/AS1_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[2, 1]_Ns1_Nn1/AS1_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS5_RT500ms'],
+    # specificAcousticScenario=f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS3_anechoic',
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic'],
     specificDesiredSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     sigDur=20,
@@ -34,9 +36,11 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # possibleSROs=[0, 100, 200, 400, 800, 1600, 3200],
     # possibleSROs=[0, 20, 40, 60, 80, 100],
     # possibleSROs=[0, 20, 40, 60, 80, 100, 200, 400, 600, 800, 1000],
-    possibleSROs=[0, 10000, 20000, 40000, 80000, 160000, 320000],
+    possibleSROs=[int(ii) for ii in np.logspace(0, np.log10(32000), num=20)],
+    # possibleSROs=[32000],
     nodeUpdating='simultaneous',
-    broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=512,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
 )
 # -----------------------------------------------------------------------------
 

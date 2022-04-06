@@ -2,7 +2,6 @@
 # %%
 # ---------------- Imports
 import time
-from turtle import settiltangle
 t00 = time.perf_counter()
 from pathlib import Path, PurePath
 import sys
@@ -36,13 +35,14 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS10',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1_anechoic/AS6_allNodesInSamePosition',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS1',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1_anechoic/AS2_allNodesInSamePosition',
+    samplingFrequency=10000,
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_allNodesInSamePosition_anechoic',
     #
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
@@ -64,7 +64,7 @@ mySettings = ProgramSettings(
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastLength=2**9,
-    expAvgBeta=0.9945,
+    expAvg50PercentTime=2.,             # Time in the past [s] at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
@@ -177,29 +177,35 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
         plt.draw()
 
     # Plot best performance node (in terms of STOI)
-    maxSTOI = 0
-    minSTOI = 1
+    maxSTOI = -9999999
+    minSTOI = 9999999
     for idxNode in range(results.acousticScenario.numNodes):
         currSTOIs = results.enhancementEval.stoi[f'Node{idxNode + 1}']
-        for idxSensor, stoi in enumerate(currSTOIs):
-            if not isinstance(stoi, float):
-                stoi = stoi[-1]  # compare the improvements before/after filtering
-            if stoi >= maxSTOI:
-                bestNode, bestSensor = idxNode, idxSensor
-                maxSTOI = stoi
-            if stoi <= minSTOI:
-                worstNode, worstSensor = idxNode, idxSensor
-                minSTOI = stoi
-    print(f'Best node (STOI = {round(maxSTOI * 100, 2)}%)')
-    results.signals.plot_signals(bestNode, bestSensor, settings)
+        if not isinstance(currSTOIs, float):
+            currSTOIs = currSTOIs[-1]  # compare the improvements before/after filtering
+        if currSTOIs >= maxSTOI:
+            bestNode, maxSTOI = idxNode, currSTOIs
+        if currSTOIs <= minSTOI:
+            worstNode, minSTOI = idxNode, currSTOIs
+
+    if not isinstance(results.enhancementEval.stoi[f'Node{1}'], float):
+        print(f'Best node (Delta-STOI = {round(maxSTOI, 2)})')
+    else:
+        print(f'Best node (STOI = {round(maxSTOI, 2)})')
+    results.signals.plot_signals(bestNode, settings)
     plt.savefig(f'{pathToResults}/bestPerfNode.png')
     if showPlots:
         plt.draw()
-    print(f'Worst node (STOI = {round(minSTOI * 100, 2)}%)')
-    results.signals.plot_signals(worstNode, worstSensor, settings)
+    
+    if not isinstance(results.enhancementEval.stoi[f'Node{1}'], float):
+        print(f'Best node (Delta-STOI = {round(minSTOI, 2)})')
+    else:
+        print(f'Best node (STOI = {round(minSTOI, 2)})')
+    results.signals.plot_signals(worstNode, settings)
     plt.savefig(f'{pathToResults}/worstPerfNode.png')
     if showPlots:
         plt.draw()
+
     results.signals.plot_enhanced_stft(bestNode, worstNode, results.enhancementEval)
     plt.savefig(f'{pathToResults}/bestAndWorstSTFTs.png')
     if showPlots:

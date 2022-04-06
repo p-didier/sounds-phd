@@ -36,6 +36,7 @@ class SamplingRateOffsets:
 class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
     # Signal generation parameters
+    samplingFrequency: float = 16000.       # [samples/s] base sampling frequency
     acousticScenarioPath: str = ''          # path to acoustic scenario to be used
     signalDuration: float = 1               # [s] total signal duration
     desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
@@ -58,7 +59,8 @@ class ProgramSettings(object):
     chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
     danseWindow: np.ndarray = np.hanning(chunkSize)  # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
-    expAvgBeta: float = 0.9945              # exponential average constant: Ryy[l] = beta*Ryy[l-1] + (1-beta)*y[l]*y[l]^H
+    expAvg50PercentTime: float = 2.         # [s] Time in the past at which the value is weighted by 50% via exponential averaging
+                                            # -- Used to compute beta in, e.g.: Ryy[l] = beta * Ryy[l - 1] + (1 - beta) * y[l] * y[l]^H
     performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
@@ -77,8 +79,10 @@ class ProgramSettings(object):
     randSeed: int = 12345                   # random generator(s) seed
 
     def __post_init__(self) -> None:
-        # Checks on class attributes
+        # Create new attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
+        self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.stftEffectiveFrameLen))
+        # Checks on class attributes
         if isinstance(self.SROsppm, int) or isinstance(self.SROsppm, float):
             if self.SROsppm == 0:
                 self.SROsppm = [self.SROsppm]
@@ -109,8 +113,8 @@ class ProgramSettings(object):
             print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.chunkSize}.')
             self.danseWindow = np.hanning(self.chunkSize)
         # Check lengths consistency
-        if self.broadcastLength > self.stftWinLength:
-            raise ValueError(f'Broadcast length is too large ({self.broadcastLength}, with STFT frame size {self.stftWinLength}).')
+        if self.broadcastLength > self.stftEffectiveFrameLen:
+            raise ValueError(f'Broadcast length ({self.broadcastLength}) is too large for STFT frame size {self.stftWinLength} and {int(self.stftFrameOvlp * 100)}% overlap.')
         # Check that chunk overlap makes sense
         if self.chunkOverlap >= 1:
             raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.chunkOverlap}).')
@@ -128,7 +132,7 @@ and noise signal file(s):
 \t{[PurePath(f).name for f in self.noiseSignalFile]}
 with a base SNR btw. dry signals of {self.baseSNR} dB.
 ------ DANSE settings ------
-Exponential averaging constant: beta = {self.expAvgBeta}.
+Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
 """
         if self.performGEVD:
             string += f'GEVD with R = {self.GEVDrank}.' 
@@ -286,20 +290,18 @@ class Signals(object):
 
         return self
 
-    def plot_signals(self, nodeIdx, sensorIdx, settings: ProgramSettings):
+    def plot_signals(self, nodeIdx, settings: ProgramSettings):
         """Creates a visual representation of the signals at a particular sensor.
         Parameters
         ----------
         nodeNum : int
             Index of the node to inspect.
-        sensorNum : int
-            Index of the sensor of nodeNum to inspect.
         settings : ProgramSettings object
             Program settings, containing info that can be included on the plots.
         """
         # Useful variables
         indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx + 1)
-        effectiveSensorIdx = indicesSensors[sensorIdx]
+        effectiveSensorIdx = indicesSensors[settings.referenceSensor]
         # Useful booleans
         desiredSignalsAvailable = len(self.desiredSigEst) > 0
 
@@ -329,7 +331,7 @@ class Signals(object):
         # Compute time at which the exponential weight decreases to 50% of its initial value
         self.expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * self.fs[nodeIdx])
         # Set title
-        plt.title(f'Node {nodeIdx + 1}, s.{sensorIdx + 1} - $\\beta = {settings.expAvgBeta}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
+        plt.title(f'Node {nodeIdx + 1}, s.{settings.referenceSensor + 1} - $\\beta = {settings.expAvgBeta}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
         
         #
         if self.stftComputed:
@@ -389,6 +391,7 @@ class Signals(object):
         perf : EnhancementMeasures object
             Signal enhancement evaluation metrics.
         """
+
         plotLocalEstimate = len(self.desiredSigEstLocal) > 0
         nSubplotsRows = 1
         if plotLocalEstimate:
@@ -432,13 +435,19 @@ class Signals(object):
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Best: N{bestNodeIdx + 1} ({np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][0] * 100, 2)}% STOI)')
+        if isinstance(perf.stoi[f"Node{bestNodeIdx + 1}"], float):
+            plt.title(f'Best: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"], 2)})')
+        else:   # before/after delta-STOI case
+            plt.title(f'Best: N{bestNodeIdx + 1} ($\\Delta$STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][-1], 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Worst: N{worstNodeIdx + 1} ({np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][0] * 100, 2)}% STOI)')
+        if isinstance(perf.stoi[f"Node{worstNodeIdx + 1}"], float):
+            plt.title(f'Worst: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"], 2)})')
+        else:   # before/after delta-STOI case
+            plt.title(f'Worst: N{worstNodeIdx + 1} ($\\Delta$STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][-1], 2)})')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
         if plotLocalEstimate:
@@ -478,10 +487,8 @@ class Signals(object):
         fname_desired  = []
         fname_enhanced = []
         for idxNode in range(self.numNodes):
-            if idxNode == 1:
-                idxSensor = self.referenceSensor
-            else:
-                idxSensor = self.referenceSensor + np.sum(self.nSensorPerNode[:idxNode])
+            # Network-wide sensor index
+            idxSensor = self.referenceSensor + np.sum(self.nSensorPerNode[:idxNode])
             #
             fname_noisy.append(f'{folder}/wav/noisy_N{idxNode + 1}_Sref{self.referenceSensor + 1}.wav')
             data = normalize_toint16(self.sensorSignals[:, idxSensor])
@@ -656,32 +663,26 @@ def metrics_subplot(numNodes, ax, barWidth, data):
     """
 
     # Flag for "difference"-type metrics (before vs. after)
-    if not isinstance(data[f'Node1'][0], float):
+    if not isinstance(data['Node1'], float):
         flagDelta = True
     else:
         flagDelta = False
 
     flagZeroBar = False     # flag for plotting a horizontal line at `metric = 0`
 
-    xTicks = []
-    xTickLabels = []
     for idxNode in range(numNodes):
-        numSensors = len(data[f'Node{idxNode + 1}'])
-        if not isinstance(data[f'Node{idxNode + 1}'][0], float):
-            toPlot = [lst[-1] for lst in data[f'Node{idxNode + 1}']]    # if measure has format: `[before, after, difference]`, select and plot only `difference`
+        if not isinstance(data[f'Node{idxNode + 1}'], float):
+            toPlot = data[f'Node{idxNode + 1}'][-1]    # if measure has format: `[before, after, difference]`, select and plot only `difference`
         else:
             toPlot = data[f'Node{idxNode + 1}']
-        xTicksCurr = idxNode + 1 - (numSensors / 2 + 0.5) * barWidth + np.arange(numSensors) * barWidth
-        ax.bar(xTicksCurr, toPlot, width=barWidth, color=f'C{idxNode}', edgecolor='k')
-        xTicks += list(xTicksCurr)
-        xTickLabels += [f'N{idxNode + 1}S{ii + 1}' for ii in range(numSensors)]
-        if toPlot[0] < 0:
+        ax.bar(idxNode, toPlot, width=barWidth, color=f'C{idxNode}', edgecolor='k')
+        if toPlot < 0:
             flagZeroBar = True  
-    plt.xticks(xTicks, xTickLabels, fontsize=8)
+    plt.xticks(np.arange(numNodes), [f'N{ii + 1}' for ii in range(numNodes)], fontsize=8)
     ax.tick_params(axis='x', labelrotation=90)
     ax.grid()
     if flagZeroBar:
-        ax.hlines(0, np.amin(xTicks) - barWidth/2, np.amax(xTicks) + barWidth/2, colors='k', linestyles='dashed')     # plot horizontal line at `metric = 0`
+        ax.hlines(0, - barWidth/2, numNodes - 1 + barWidth/2, colors='k', linestyles='dashed')     # plot horizontal line at `metric = 0`
 
     return flagDelta
 
