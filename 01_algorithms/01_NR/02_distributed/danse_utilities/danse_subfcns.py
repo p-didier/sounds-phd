@@ -360,6 +360,21 @@ def danse_compression(yq, wHat, n):
     zq = back_to_time_domain(zqHat, nTotal)
     zq = np.real_if_close(zq)
 
+    
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(211)
+    ax.plot(yq)
+    ax.plot(zq)
+    ax.grid()
+    ax = fig.add_subplot(212)
+    ax.plot(wHat)
+    ax.grid()
+    plt.tight_layout()	
+    plt.show()
+
+
+
     # Discard oldest (incorrect) samples
     zq = zq[n:]
 
@@ -820,6 +835,12 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
     else:
         # Compress current data chunk in the frequency domain
         zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
+
+        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+        # zLocal = yk[:, 0]
+        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
 
