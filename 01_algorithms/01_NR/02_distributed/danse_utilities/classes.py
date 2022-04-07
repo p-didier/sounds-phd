@@ -52,7 +52,7 @@ class ProgramSettings(object):
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
     # DANSE parameters
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
-    minTimeBtwFiltUpdates: float = 0        # [s] minimum time between 2 consecutive filter update at a node 
+    timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
     filterDomain: str = 'f'                 # domain in which to compute the DANSE local node filters 
                                             #  ^---> ["t" for time-domain, "f" for frequency- (i.e., STFT-) domain]

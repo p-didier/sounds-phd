@@ -1,5 +1,6 @@
 
 from bz2 import compress
+from cmath import inf
 from operator import ne
 import numpy as np
 import time, datetime
@@ -201,11 +202,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
 
-    # ---------------------- Arrays initialization ----------------------
+    # -------------------vvv Arrays initialization vvv-------------------
     lk = np.zeros(asc.numNodes, dtype=int)                      # node-specific broadcast index
     i = np.zeros(asc.numNodes, dtype=int)                       # !node-specific! DANSE iteration index
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
+    wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     ryd = []                                        # cross-correlation between observations and estimations
@@ -229,6 +231,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
         wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTilde.append(wtmp)
+        wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
+        wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+        wTildeExternal.append(wtmp)
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
@@ -263,14 +268,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
     # Booleans
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
-    # ------------------------------------------------------------------
+    # -------------------^^^ Arrays initialization ^^^-------------------
 
     # Prepare events to be considered in main `for`-loop
     eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             nExpectedNewSamplesPerFrame,
-                                            settings.broadcastLength,
-                                            settings.minTimeBtwFiltUpdates)
+                                            settings.broadcastLength)
+
+    # External filter updates (for broadcasting)
+    lastExternalFiltUpdateInstant = 0   # [s]
 
     t0 = time.perf_counter()    # loop timing
     # Loop over time instants when one or more event(s) occur(s)
@@ -297,6 +304,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if idxEndChunk - idxBegChunk < 2 * frameSize:   # Using 2*N to keep power of 2 for FFT
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
+
+
                 # Perform broadcast -- update all buffers in network
                 zBuffer, zLocal = subs.broadcast(
                             t,
@@ -304,7 +313,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             fs[k],
                             settings.broadcastLength,
                             yLocalCurr,
-                            wTilde[k][:, i[k], :],
+                            # wTilde[k][:, i[k], :],
+                            wTildeExternal[k],
                             frameSize,
                             neighbourNodes,
                             lk,
@@ -347,6 +357,23 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                 ytilde[k][:, i[k], :] = yTildeCurr
 
+
+                # if k == 0:
+                #     if i[k] == 0:
+                #         import matplotlib.pyplot as plt
+                #         fig = plt.figure(figsize=(8,4))
+                #         ax = fig.add_subplot(111)
+                #     ax.plot(yLocalCurr, 'b')
+                #     ax.plot(z[k], 'r')
+                #     # draw the plot
+                #     ax.set_ylim([np.amin(yTildeCurr), np.amax(yTildeCurr)])
+                #     plt.draw() 
+                #     plt.pause(0.01)
+                #     # start removing points if you don't want all shown
+                #     if i[k] >= 1:
+                #         for ii in range(len(ax.lines)):
+                #             ax.lines[-1].remove()
+
                 # --------------------- Spatial covariance matrices updates ---------------------
                 # Go to frequency domain
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
@@ -367,7 +394,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if startUpdates[k] and not settings.bypassFilterUpdates:
                     # No `for`-loop versions
                     if settings.performGEVD:    # GEVD update
-                        wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
+                        wTildeTemp, _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
+                        # ... $g_{k-k}$ is updated entirely
+                        wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1]:] = wTildeTemp[:, yLocalCurr.shape[-1]:]    
+                        # alpha = 1 / i[k]      # see bertrand2010b, p.6
+                        alpha = 1               # no relaxation
+                        # alpha = 1 / np.log10(10 + i[k])     # see bertrand2010b, p.6
+                        # ... $w_{kk}$ is updated progressively (exponential averaging, adaptive forgetting factor)
+                        wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]] = (1 - alpha) * wTilde[k][:, i[k], :yLocalCurr.shape[-1]] + alpha * wTildeTemp[:, :yLocalCurr.shape[-1]]
+
                         if settings.computeLocalEstimate:
                             wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
 
@@ -385,9 +420,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     print('!! User-forced bypass of filter coefficients updates !!')
                 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+                # Update external filters (for broadcasting)
+                if t - lastExternalFiltUpdateInstant >= settings.timeBtwExternalFiltUpdates:
+                    alpha = 0.7     # cfr. Alexander Bertrand's MATLAB scripts https://homes.esat.kuleuven.be/~abertran/software.html
+                    wTildeExternal[k] = (1 - alpha) * wTildeExternal[k] + alpha * wTilde[k][:, i[k] + 1, :]
+                    
+                    lastExternalFiltUpdateInstant = t
+                    print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS (every {settings.timeBtwExternalFiltUpdates}s)')
+                    
+
+
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                # dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :], ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)

@@ -37,19 +37,19 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     SROsppm=0,
     #
-    broadcastLength=2**9,
+    # broadcastLength=2**9,
+    broadcastLength=2**5,
     expAvg50PercentTime=2.,             # Time in the past [s] at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
-    minTimeBtwFiltUpdates=1,            # [s] minimum time between 2 consecutive filter update at a node 
+    timeBtwExternalFiltUpdates=1,       # [s] minimum time between 2 consecutive filter update at a node 
     )
 
 # SIMULATIONMODE_MWF = 'online'
 SIMULATIONMODE_MWF = 'batch'
     
-
 
 def main(settings):
 
@@ -78,36 +78,53 @@ def main(settings):
     elif SIMULATIONMODE_MWF == 'online':
         raise ValueError('NOT YET IMPLEMENTED')
 
+
     # Distributed solution - DANSE
     print('Computing distributed solution (DANSE)...')
     mySignals.desiredSigEst, mySignals.desiredSigEstLocal = danse(mySignals, asc, settings)
 
+
+    # PLOT
     DfiltDANSE, f, t = get_stft(mySignals.desiredSigEst, mySignals.fs, settings)
+    Ystft, _, _ = get_stft(mySignals.sensorSignals[:, 0], mySignals.fs, settings)
+    if f.ndim == 1:
+        f = f[:, np.newaxis]
 
     # Get colorbar limits
-    climHigh = np.amax(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0]))), axis=0))
-    climLow = np.amin(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0]))), axis=0))
+    climHigh = np.amax(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0])), 20*np.log10(np.abs(Ystft[:,:,0]))), axis=0))
+    climLow = np.amin(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0])), 20*np.log10(np.abs(Ystft[:,:,0]))), axis=0))
+    if climLow < -200:
+        climLow = -200
 
-    # Comparison
     fig = plt.figure(figsize=(8,4))
-    ax = fig.add_subplot(311)
-    mapp = plt.imshow(20*np.log10(np.abs(DfiltGEVD)), extent=[t[0], t[-1], f[-1,0], f[0,0]])
+    ax = fig.add_subplot(411)
+    mapp = plt.imshow(20*np.log10(np.abs(Ystft)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
+    ax.invert_yaxis()
+    ax.set_aspect('auto')
+    plt.colorbar(mapp)
+    plt.title(f'Original microphone signal')
+    #
+    ax = fig.add_subplot(412)
+    mapp = plt.imshow(20*np.log10(np.abs(DfiltGEVD)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'After batch-GEVD-MWF (rank {settings.GEVDrank})')
-    ax = fig.add_subplot(312)
-    mapp = plt.imshow(20*np.log10(np.abs(DfiltDANSE[:,:,0])), extent=[t[0], t[-1], f[-1,0], f[0,0]])
+    #
+    ax = fig.add_subplot(413)
+    mapp = plt.imshow(20*np.log10(np.abs(DfiltDANSE[:,:,0])), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'After GEVD-DANSE (rank {settings.GEVDrank})')
-    ax = fig.add_subplot(313)
+    #
+    ax = fig.add_subplot(414)
     mapp = plt.imshow(np.abs(20*np.log10(np.abs(DfiltDANSE[:,:,0])) - 20*np.log10(np.abs(DfiltGEVD))), extent=[t[0], t[-1], f[-1,0], f[0,0]])
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'Absolute magnitude difference [dB]')
+    #
     plt.tight_layout()	
     plt.show()
 

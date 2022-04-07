@@ -360,21 +360,6 @@ def danse_compression(yq, wHat, n):
     zq = back_to_time_domain(zqHat, nTotal)
     zq = np.real_if_close(zq)
 
-    
-    import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(8,4))
-    ax = fig.add_subplot(211)
-    ax.plot(yq)
-    ax.plot(zq)
-    ax.grid()
-    ax = fig.add_subplot(212)
-    ax.plot(wHat)
-    ax.grid()
-    plt.tight_layout()	
-    plt.show()
-
-
-
     # Discard oldest (incorrect) samples
     zq = zq[n:]
 
@@ -647,7 +632,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L, minTimeBtwFiltUpdates):
+def get_events_matrix(timeInstants, N, Ns, L):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -663,8 +648,6 @@ def get_events_matrix(timeInstants, N, Ns, L, minTimeBtwFiltUpdates):
         Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap) (Ns < N).
     L : int
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
-    minTimeBtwFiltUpdates : float
-        Minimum time between 2 consecutive filter update at a node [s].
     
     Returns
     -------
@@ -702,7 +685,6 @@ def get_events_matrix(timeInstants, N, Ns, L, minTimeBtwFiltUpdates):
     numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
     updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
     #                               ^ note that we only start updating when we have enough samples
-    # TODO -- take into account 'minTimeBtwFiltUpdates'
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
     broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
@@ -836,6 +818,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         # Compress current data chunk in the frequency domain
         zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
 
+        
+
         # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
         # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
         # zLocal = yk[:, 0]
@@ -843,6 +827,19 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
         # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+
+        
+        # import matplotlib.pyplot as plt
+        # fig = plt.figure(figsize=(8,4))
+        # ax = fig.add_subplot(211)
+        # ax.plot(yk[n:, 0])
+        # ax.plot(zBuffer[1][0])
+        # ax.grid()
+        # ax = fig.add_subplot(212)
+        # ax.plot(w[:, :yk.shape[-1]])
+        # ax.grid()
+        # plt.tight_layout()	
+        # plt.show()
 
         lk[k] += 1  # increment local broadcast index
 
