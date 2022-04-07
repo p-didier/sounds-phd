@@ -31,15 +31,15 @@ sets = ASCProgramSettings(
     minDistFromWalls = 0.2,
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=1,                # nr. of noise sources
-    numNodes=2,                       # nr. of nodes
-    numSensorPerNode=[3,1],               # nr. of sensor per node,
+    numNodes=5,                       # nr. of nodes
+    numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
     # numSensorPerNode=[2,2],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
     # numSensorPerNode=1,               # nr. of sensor per node,
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation=0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime=0.5,                      # reverberation time [s]
+    revTime=0.0,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases 
 )
 

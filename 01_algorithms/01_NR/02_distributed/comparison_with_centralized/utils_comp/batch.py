@@ -38,6 +38,15 @@ def gevd_mwf_batch(signals: Signals, asc: AcousticScenario, settings: ProgramSet
 
     y = signals.sensorSignals
 
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # for ii in range(y.shape[-1]):
+    #     ax.plot(y[:, ii] + ii * 2 * np.amax(y))
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+
     # Get STFTs
     for k in range(y.shape[-1]):
         f, t, out = sig.stft(y[:, k],
@@ -125,6 +134,8 @@ def gevd_mwf_batch(signals: Signals, asc: AcousticScenario, settings: ProgramSet
         plt.title(f'After batch-GEVD-MWF (rank {settings.GEVDrank})')
         plt.tight_layout()	
         plt.show()
+
+        stop = 1
 
     return DfiltGEVD, Dfilt
 

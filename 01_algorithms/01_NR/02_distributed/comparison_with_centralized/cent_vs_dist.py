@@ -26,7 +26,12 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     samplingFrequency=16000,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS4_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS3_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[4, 5, 6, 5, 4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/speech1.wav'],
     noiseSignalFile=[f'{signalsPath}/02_noise/whitenoise_signal_1.wav'],
@@ -37,9 +42,11 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     SROsppm=0,
     #
+    selfnoiseSNR=-50,
+    #
     # broadcastLength=2**9,
     broadcastLength=2**5,
-    expAvg50PercentTime=2.,             # Time in the past [s] at which the value is weighted by 50% via exponential averaging
+    expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
@@ -49,28 +56,18 @@ mySettings = ProgramSettings(
 
 # SIMULATIONMODE_MWF = 'online'
 SIMULATIONMODE_MWF = 'batch'
-    
+
 
 def main(settings):
 
     print(mySettings)
 
-    print(f'Simulating in {SIMULATIONMODE_MWF} mode.')
-
     print('\nGenerating simulation signals...')
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
 
-    if 0:
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(111)
-        ax.plot(mySignals.sensorSignals)
-        ax.grid()
-        plt.tight_layout()	
-        plt.show()
-
-
     # Centralized solution - GEVD-MWF
+    print(f'Simulating centralized solution in {SIMULATIONMODE_MWF} mode.')
     if SIMULATIONMODE_MWF == 'batch':
         print('Computing centralized solution...')
         DfiltGEVD, _ = batch.gevd_mwf_batch(mySignals, asc, settings)
@@ -97,33 +94,26 @@ def main(settings):
         climLow = -200
 
     fig = plt.figure(figsize=(8,4))
-    ax = fig.add_subplot(411)
+    ax = fig.add_subplot(311)
     mapp = plt.imshow(20*np.log10(np.abs(Ystft)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'Original microphone signal')
     #
-    ax = fig.add_subplot(412)
+    ax = fig.add_subplot(312)
     mapp = plt.imshow(20*np.log10(np.abs(DfiltGEVD)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'After batch-GEVD-MWF (rank {settings.GEVDrank})')
     #
-    ax = fig.add_subplot(413)
+    ax = fig.add_subplot(313)
     mapp = plt.imshow(20*np.log10(np.abs(DfiltDANSE[:,:,0])), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'After GEVD-DANSE (rank {settings.GEVDrank})')
-    #
-    ax = fig.add_subplot(414)
-    mapp = plt.imshow(np.abs(20*np.log10(np.abs(DfiltDANSE[:,:,0])) - 20*np.log10(np.abs(DfiltGEVD))), extent=[t[0], t[-1], f[-1,0], f[0,0]])
-    ax.invert_yaxis()
-    ax.set_aspect('auto')
-    plt.colorbar(mapp)
-    plt.title(f'Absolute magnitude difference [dB]')
     #
     plt.tight_layout()	
     plt.show()
