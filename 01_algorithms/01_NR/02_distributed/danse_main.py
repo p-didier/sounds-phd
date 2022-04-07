@@ -35,7 +35,7 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    samplingFrequency=10000,
+    samplingFrequency=16000,
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
@@ -48,18 +48,17 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=5,
-    baseSNR=5,
+    signalDuration=10,
+    baseSNR=15,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
-    # chunkOverlap=0,           # Overlap between DANSE iteration processing chunks [/100%]
     #
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
-    SROsppm=[0, 100],
-    # SROsppm=0,
+    # SROsppm=[0, 100],
+    SROsppm=0,
     #
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
@@ -170,7 +169,7 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
     # Plot performance
     fig = results.plot_enhancement_metrics()
     expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * results.signals.fs[0])
-    fig.suptitle(f'Speech enhancement metrics ($\\beta={settings.expAvgBeta} \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)')
+    fig.suptitle(f'Speech enhancement metrics ($\\beta={np.round(settings.expAvgBeta, 4)} \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)')
     fig.tight_layout()
     plt.savefig(f'{pathToResults}/enhMetrics.png')
     if showPlots:

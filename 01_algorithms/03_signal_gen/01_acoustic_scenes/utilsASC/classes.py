@@ -15,7 +15,7 @@ from plotting.twodim import plot_side_room
 
 
 @dataclass
-class AcousticScenario():
+class AcousticScenario:
     """Class for keeping track of acoustic scenario parameters"""
     rirDesiredToSensors: np.ndarray = np.array([1])     # RIRs between desired sources and sensors
     rirNoiseToSensors: np.ndarray = np.array([1])       # RIRs between noise sources and sensors
@@ -102,24 +102,24 @@ class micArrayAttributes:
 @dataclass
 class ASCProgramSettings:
     """Class for keeping track of global simulation settings"""
-    roomDimBounds: list                             # [smallest, largest] room dimension possible [m]
+    roomDimBounds: list[float] = field(default_factory=list)   # [m] [smallest, largest] room dimension possible 
+    minDistFromWalls: float = 0.                    # [m] minimum distance between room boundaries and elements in the room
     numScenarios: int = 1                           # number of AS to generate
-    samplingFrequency: int = 16e3                   # sampling frequency [samples/s]
-    rirLength: int = 2**12                          # RIR length [samples]
+    samplingFrequency: int = 16e3                   # [samples/s] sampling frequency 
+    rirLength: int = 2**12                          # [samples] RIR length 
     numSpeechSources: int = 1                       # nr. of speech sources
     numNoiseSources: int = 1                        # nr. of noise sources
     numNodes: int = 3                               # nr. of nodes
     numSensorPerNode: np.ndarray = np.array([1])    # nr. of sensor per node
-    revTime: float = 0.0                            # reverberation time [s]
+    revTime: float = 0.0                            # [s] reverberation time 
     arrayGeometry: str = 'linear'                   # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation: float = 0.05                  # separation between sensor in array (only used if numSensorPerNode > 1)
     seed: int = 12345                               # seed for random generator
     specialCase: str = ''                           # flag for special cases: '' or 'none' --> no special case;
                                                     # 'allNodesInSamePosition': all nodes and sensors are placed at the same position in space.
     
-    @classmethod
-    def load(cls, filename: str):
-        return met.load(cls, filename)
+    def load(self, filename: str, silent=False):
+        return met.load(self, filename, silent)
     def save(self, filename: str):
         met.save(self, filename)
     

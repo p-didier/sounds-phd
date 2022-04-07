@@ -42,6 +42,7 @@ class ProgramSettings(object):
     desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
     noiseSignalFile: list[str] = field(default_factory=list)              # list of paths to noise signal file(s)
     baseSNR: int = 0                        # [dB] SNR between dry desired signals and dry noise
+    selfnoiseSNR: int = -999999             # [dB] microphone self-noise SNR
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
@@ -81,7 +82,7 @@ class ProgramSettings(object):
     def __post_init__(self) -> None:
         # Create new attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
-        self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.stftEffectiveFrameLen))
+        self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.samplingFrequency / self.stftEffectiveFrameLen))
         # Checks on class attributes
         if isinstance(self.SROsppm, int) or isinstance(self.SROsppm, float):
             if self.SROsppm == 0:
@@ -131,6 +132,7 @@ Acoustic scenario: '{path.parent.name} : {path.name}'
 and noise signal file(s):
 \t{[PurePath(f).name for f in self.noiseSignalFile]}
 with a base SNR btw. dry signals of {self.baseSNR} dB.
+Microphone self-noise SNR: {self.selfnoiseSNR} dB.
 ------ DANSE settings ------
 Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
 """
@@ -331,7 +333,7 @@ class Signals(object):
         # Compute time at which the exponential weight decreases to 50% of its initial value
         self.expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * self.fs[nodeIdx])
         # Set title
-        plt.title(f'Node {nodeIdx + 1}, s.{settings.referenceSensor + 1} - $\\beta = {settings.expAvgBeta}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
+        plt.title(f'Node {nodeIdx + 1}, s.{settings.referenceSensor + 1} - $\\beta = {np.round(settings.expAvgBeta, 4)}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
         
         #
         if self.stftComputed:
@@ -526,7 +528,7 @@ def normalize_toint16(nparray):
         Normalized array.
     """
     amplitude = np.iinfo(np.int16).max
-    nparrayNormalized = (amplitude*nparray/np.amax(nparray) * 0.99).astype(np.int16)  # 0.99 to avoid clipping
+    nparrayNormalized = (amplitude * nparray / np.amax(nparray) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
     return nparrayNormalized
 
 
@@ -622,6 +624,10 @@ def get_stft(x, fs, settings: ProgramSettings):
         x = x[:, np.newaxis]
 
     for channel in range(x.shape[-1]):
+        
+        if x.shape[-1] == 1 and isinstance(fs, float):
+            fs = [fs]   # from float to list
+
         fcurr, t, tmp = sig.stft(x[:, channel],
                             fs=fs[channel],
                             window=settings.stftWin,

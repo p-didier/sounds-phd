@@ -19,12 +19,16 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}/_general_fcts')
 from utilsASC.classes import *
 
+# asc = ASCProgramSettings()
+# asc = asc.load(r'U:\py\sounds-phd\02_data\01_acoustic_scenarios\tests\J2Mk[3, 1]_Ns1_Nn1\AS1_anechoic')
+
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios=3,                   # Number of AS to generate
+    numScenarios=1,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
-    roomDimBounds=[4,8],              # [Smallest, largest] room dimension possible [m]
+    roomDimBounds=[3,7],              # [Smallest, largest] room dimension possible [m]
+    minDistFromWalls = 0.2,
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=1,                # nr. of noise sources
     numNodes=2,                       # nr. of nodes
@@ -36,7 +40,6 @@ sets = ASCProgramSettings(
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation=0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
     revTime=0.5,                      # reverberation time [s]
-    seed=12345,                       # seed for random generator
     # specialCase='allNodesInSamePosition'    # special cases 
 )
 
@@ -141,15 +144,15 @@ def genAS(sets: ASCProgramSettings):
         absorbCoeff = np.minimum(1, 0.161 * roomVolume / (sets.revTime * roomSurface))  # Absorption coefficient of the walls (Sabine's equation)
     
     # Random element positioning in 3-D space
-    speechSourceCoords = np.multiply(rng.uniform(0, 1, (sets.numSpeechSources, 3)), roomDimensions)
-    noiseSourceCoords  = np.multiply(rng.uniform(0, 1, (sets.numNoiseSources, 3)), roomDimensions)
+    speechSourceCoords = np.multiply(rng.uniform(0, 1, (sets.numSpeechSources, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+    noiseSourceCoords  = np.multiply(rng.uniform(0, 1, (sets.numNoiseSources, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
     if sets.specialCase == 'allNodesInSamePosition':
         # Special case: put all nodes and sensors at the same position
-        nodesCoords = np.multiply(rng.uniform(0, 1, (1, 3)), roomDimensions)
+        nodesCoords = np.multiply(rng.uniform(0, 1, (1, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
         nodesCoords = np.repeat(nodesCoords, sets.numNodes, axis=0)
         sets.sensorSeparation = 0.0
     else:
-        nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions)
+        nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
     
     # Generate sensor arrays
     totalNumSensors = np.sum(sets.numSensorPerNode, dtype=int)

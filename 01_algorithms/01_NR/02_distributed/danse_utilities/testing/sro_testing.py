@@ -137,7 +137,6 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     plotAcousticScenario=False,
                     VADwinLength=40e-3,
                     VADenergyFactor=4000,
-                    expAvgBeta=0.98,
                     performGEVD=1,
                     SROsppm=sros[ii][jj],
                     danseUpdating=danseParams.nodeUpdating,

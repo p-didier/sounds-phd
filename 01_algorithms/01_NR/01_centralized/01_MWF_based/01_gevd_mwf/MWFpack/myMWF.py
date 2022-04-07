@@ -3,16 +3,9 @@ import scipy
 import time
 from numba import njit
 import sys, os
-import matplotlib.pyplot as plt
-from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
 from mySTFT.calc_STFT import calcSTFT, calcISTFT
-from utilities.terminal import loop_progress
-from plotting.threedim import set_axes_equal
-from plotting.exports import makegif
-from general.frequency import noctfr
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\03_signal_gen\\01_acoustic_scenes')))
-from rimPypack.rimPy import rimPy
 #
 from MWFpack import spatial
 
@@ -323,7 +316,7 @@ def spatial_visu_MWF(W,freqs,rd,alpha,r,Fs,rir_dur,targetSources=None,noiseSourc
     return 0
 
 
-def applyMWF_tdomain(y, W_hat, Fs,win,L_fft,R_fft):
+def applyMWF_tdomain(y, W_hat, Fs, win, L_fft, R_fft):
     # Applies a MWF derived in the frequency domain to a signal in the time-domain.
 
     y_STFT = calcSTFT(y, Fs, win, L_fft, R_fft, 'onesided')[0]
