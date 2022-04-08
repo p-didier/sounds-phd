@@ -292,7 +292,7 @@ class Signals(object):
 
         return self
 
-    def plot_signals(self, nodeIdx, settings: ProgramSettings):
+    def plot_signals(self, nodeIdx, settings: ProgramSettings, stoiImpLocalVsGlobal=None):
         """Creates a visual representation of the signals at a particular sensor.
         Parameters
         ----------
@@ -300,6 +300,8 @@ class Signals(object):
             Index of the node to inspect.
         settings : ProgramSettings object
             Program settings, containing info that can be included on the plots.
+        stoiImpLocalVsGlobal : float
+            [dB] Local vs. global signal estimate STOI improvement (only used is `settings.computeLocalEstimate` is True).
         """
         # Useful variables
         indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx + 1)
@@ -307,25 +309,29 @@ class Signals(object):
         # Useful booleans
         desiredSignalsAvailable = len(self.desiredSigEst) > 0
 
+        # PLOT
         fig = plt.figure(figsize=(8,4))
         if self.stftComputed:
             ax = fig.add_subplot(1,2,1)
         else:
             ax = fig.add_subplot(1,1,1)
             print('STFTs were not yet computed. Plotting only waveforms.')
+
+        # -------- WAVEFORMS -------- 
         delta = np.amax(np.abs(self.sensorSignals))
         ax.plot(self.timeVector, self.wetSpeech[:, effectiveSensorIdx], label='Desired')
         ax.plot(self.timeVector, self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
         # ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
         ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 2*delta, label='Noisy')
+        # -------- Desired signal estimate waveform -------- 
         if desiredSignalsAvailable:        
+            # -------- Desired signal _local_ estimate waveform -------- 
             if settings.computeLocalEstimate:
                 ax.plot(self.timeVector, self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
                 deltaNextWaveform = 6*delta
             else:
                 deltaNextWaveform = 4*delta
             ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
-            
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
@@ -335,7 +341,7 @@ class Signals(object):
         # Set title
         plt.title(f'Node {nodeIdx + 1}, s.{settings.referenceSensor + 1} - $\\beta = {np.round(settings.expAvgBeta, 4)}$ ($\\tau_{{50\%}} = {np.round(self.expAvgTau, 2)}$s)')
         
-        #
+        # -------- STFTs -------- 
         if self.stftComputed:
             # Get color plot limits
             limLow = 20 * np.log10(np.amin([np.amin(np.abs(self.wetSpeech_STFT[:, :, effectiveSensorIdx])), 
@@ -356,11 +362,19 @@ class Signals(object):
             data = 20 * np.log10(np.abs(np.squeeze(self.wetSpeech_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], 'Desired')
             plt.xticks([])
+            if settings.computeLocalEstimate:
+                txt = f'{np.round(stoiImpLocalVsGlobal, 2)}'
+                if np.round(stoiImpLocalVsGlobal, 2) > 0:
+                    txt = f'+{txt}'
+                ax.set_title(f'Local vs. global STOI improvement: {txt}')
             ax = fig.add_subplot(nRows,2,4)     # Sensor signals
             data = 20 * np.log10(np.abs(np.squeeze(self.sensorSignals_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], 'Noisy')
+            
+            # -------- Desired signal estimate STFT -------- 
             if desiredSignalsAvailable:
                 plt.xticks([])
+                # -------- Desired signal _local_ estimate STFT -------- 
                 if settings.computeLocalEstimate:
                     ax = fig.add_subplot(nRows,2,6)     # Enhanced signals (local)
                     data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, nodeIdx])))
@@ -437,34 +451,29 @@ class Signals(object):
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        if isinstance(perf.stoi[f"Node{bestNodeIdx + 1}"], float):
-            plt.title(f'Best: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"], 2)})')
-        else:   # before/after delta-STOI case
-            plt.title(f'Best: N{bestNodeIdx + 1} ($\\Delta$STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"][-1], 2)})')
+        plt.title(f'Best: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        if isinstance(perf.stoi[f"Node{worstNodeIdx + 1}"], float):
-            plt.title(f'Worst: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"], 2)})')
-        else:   # before/after delta-STOI case
-            plt.title(f'Worst: N{worstNodeIdx + 1} ($\\Delta$STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"][-1], 2)})')
+        plt.title(f'Worst: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: N{bestNodeIdx + 1}')
+            plt.title(f'Local estimate: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: N{worstNodeIdx + 1}')
+            plt.title(f'Local estimate: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             colorb.set_label('[dB]')
+        plt.tight_layout()
 
         return fig
 
@@ -561,39 +570,26 @@ class Results:
     def plot_enhancement_metrics(self):
         """Creates a visual representation of DANSE performance results."""
         # Useful variables
-        _, sensorCounts = np.unique(self.signals.sensorToNodeTags, return_counts=True)
-        barWidth = 1 / np.amax(sensorCounts)
+        barWidth = 1
         numNodes = self.signals.desiredSigEst.shape[1]
         
         fig = plt.figure(figsize=(10,3))
-        #
         ax = fig.add_subplot(1, 4, 1)   # Unweighted SNR
-        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
-        txt = 'SNR'
-        if flagDelta:
-            txt = f'$\\Delta${txt}'
-        ax.set(title=txt, ylabel='[dB]')
+        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
+        ax.set(title='SNR', ylabel='[dB]')
+        plt.legend()
         #
         ax = fig.add_subplot(1, 4, 2)   # fwSNRseg
-        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
-        txt = 'fwSNRseg'
-        if flagDelta:
-            txt = f'$\\Delta${txt}'
-        ax.set(title=txt, ylabel='[dB]')
+        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
+        ax.set(title='fwSNRseg', ylabel='[dB]')
         #
         ax = fig.add_subplot(1, 4, 3)   # STOI
-        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
-        txt = 'STOI'
-        if flagDelta:
-            txt = f'$\\Delta${txt}'
-        ax.set(title=txt)
+        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
+        ax.set(title='STOI')
         #
         ax = fig.add_subplot(1, 4, 4)   # PESQ
-        flagDelta = metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.pesq)
-        txt = 'PESQ'
-        if flagDelta:
-            txt = f'$\\Delta${txt}'
-        ax.set(title=txt)
+        metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.pesq)
+        ax.set(title='PESQ')
 
         return fig
 
@@ -660,37 +656,25 @@ def metrics_subplot(numNodes, ax, barWidth, data):
         Width of bars for bar plot.
     data : dict of np.ndarrays of floats /or/ dict of np.ndarrays of [3 x 1] lists of floats
         Speech enhancement metric(s) per node.
-    
-    Returns
-    -------
-    flagDelta : bool
-        If True, the quantity plotted is a "before vs. after enhancement improvement" metric.
-
     """
-
-    # Flag for "difference"-type metrics (before vs. after)
-    if not isinstance(data['Node1'], float):
-        flagDelta = True
-    else:
-        flagDelta = False
 
     flagZeroBar = False     # flag for plotting a horizontal line at `metric = 0`
 
     for idxNode in range(numNodes):
-        if not isinstance(data[f'Node{idxNode + 1}'], float):
-            toPlot = data[f'Node{idxNode + 1}'][-1]    # if measure has format: `[before, after, difference]`, select and plot only `difference`
+        if idxNode == 0:    # only add legend labels to first node
+            ax.bar(idxNode - barWidth / 6, data[f'Node{idxNode + 1}'].before, width=barWidth / 3, color='tab:orange', edgecolor='k', label='Before')
+            ax.bar(idxNode + barWidth / 6, data[f'Node{idxNode + 1}'].after, width=barWidth / 3, color='tab:blue', edgecolor='k', label='After')
         else:
-            toPlot = data[f'Node{idxNode + 1}']
-        ax.bar(idxNode, toPlot, width=barWidth, color=f'C{idxNode}', edgecolor='k')
-        if toPlot < 0:
-            flagZeroBar = True  
+            ax.bar(idxNode - barWidth / 6, data[f'Node{idxNode + 1}'].before, width=barWidth / 3, color='tab:orange', edgecolor='k')
+            ax.bar(idxNode + barWidth / 6, data[f'Node{idxNode + 1}'].after, width=barWidth / 3, color='tab:blue', edgecolor='k')
+
+        if data[f'Node{idxNode + 1}'].after < 0 or data[f'Node{idxNode + 1}'].before < 0:
+            flagZeroBar = True
     plt.xticks(np.arange(numNodes), [f'N{ii + 1}' for ii in range(numNodes)], fontsize=8)
     ax.tick_params(axis='x', labelrotation=90)
     ax.grid()
     if flagZeroBar:
         ax.hlines(0, - barWidth/2, numNodes - 1 + barWidth/2, colors='k', linestyles='dashed')     # plot horizontal line at `metric = 0`
-
-    return flagDelta
 
     
 

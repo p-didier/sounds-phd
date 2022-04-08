@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 import sys
 import scipy.signal as sig
@@ -13,65 +14,92 @@ while PurePath(pathToRoot).name != rootFolder:
 if f'{pathToRoot}/_third_parties' not in sys.path:
     sys.path.append(f'{pathToRoot}/_third_parties')
 
+@dataclass
+class Metric:
+    """Class for storing objective speech enhancement metrics"""
+    before: float = 0.      # metric value before enhancement
+    after: float = 0.       # metric value after enhancement
+    diff: float = 0.        # difference between before and after enhancement
+    afterLocal: float = 0.  # metric value after _local_ enhancement (only using local sensors )
+    diffLocal: float = 0.   # difference between before and after local enhancement
 
-def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03):
+
+def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
-    cleanSignal : [N x 1] np.ndarray (real)
+    cleanSignal : [N x 1] np.ndarray (float)
         The clean, noise-free signal used as reference.
-    noisySignal : [N x 1] np.ndarray (real)
+    noisySignal : [N x 1] np.ndarray (float)
         The noisy signal (pre-signal enhancement).
-    enhancedSignal : [N x 1] np.ndarray (real)
+    enhancedSignal : [N x 1] np.ndarray (float)
         The enhanced signal (post-signal enhancement).
     fs : int
         Sampling frequency [samples/s].
-    VAD : [N x 1] np.ndarray (real)
+    VAD : [N x 1] np.ndarray (float)
         Voice Activity Detector (1: voice + noise; 0: noise only).
     gammafwSNRseg : float
         Gamma exponent for fwSNRseg computation.
     frameLen : float
         Time window duration for fwSNRseg computation [s].
+    enhancedSignalLocal : np.ndarray (float)
+        Local estimate of desired signal (only using local node info, i.e., no network info).
 
     Returns
     -------
-    snr : [3 x 1] np.ndarray (real)
-        Unweighted signal-to-noise ratio (SNR) [before, after, difference].
-    fwSNRseg : [3 x 1] np.ndarray (real)    
-        Frequency-weighted segmental SNR [before, after, difference].
-    myStoi : [3 x 1] np.ndarray (real)
-        Short-Time Objective Intelligibility [before, after, difference].
-    myPesq : [3 x 1] np.ndarray (real)
-        Perceptual Evaluation of Speech Quality [before, after, difference].
+    snr : Metric object
+        Unweighted signal-to-noise ratio (SNR).
+    fwSNRseg : Metric object
+        Frequency-weighted segmental SNR.
+    myStoi : Metric object
+        Short-Time Objective Intelligibility.
+    myPesq : Metric object
+        Perceptual Evaluation of Speech Quality.
     """
+    
+    # Flag to signal presence of a local signal estimate
+    flagLocal = enhancedSignalLocal != [] and enhancedSignalLocal.shape == enhancedSignal.shape
 
     # Init output arrays
-    snr = np.zeros(3)
-    fwSNRseg = np.zeros(3)
-    myStoi = np.zeros(3)
-    myPesq = np.zeros(3)
+    snr = Metric()
+    fwSNRseg = Metric()
+    myStoi = Metric()
+    myPesq = Metric()
+    
     # Unweighted SNR
-    snr[0] = get_snr(noisySignal, VAD)
-    snr[1] = get_snr(enhancedSignal, VAD)
-    snr[2] = snr[1] - snr[0]
+    snr.before = get_snr(noisySignal, VAD)
+    snr.after = get_snr(enhancedSignal, VAD)
+    snr.diff = snr.after - snr.before
+    if flagLocal:
+        snr.afterLocal = get_snr(enhancedSignalLocal, VAD)
+        snr.diffLocal = snr.afterLocal - snr.before
     # Frequency-weight segmental SNR
     fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, noisySignal, fs, frameLen, gammafwSNRseg)
-    fwSNRseg[0] = np.mean(fwSNRseg_allFrames)
+    fwSNRseg.before = np.mean(fwSNRseg_allFrames)
     fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignal, fs, frameLen, gammafwSNRseg)
-    fwSNRseg[1] = np.mean(fwSNRseg_allFrames)
-    fwSNRseg[2] = fwSNRseg[1] - fwSNRseg[0]
+    fwSNRseg.after = np.mean(fwSNRseg_allFrames)
+    fwSNRseg.diff = fwSNRseg.after - fwSNRseg.before
+    if flagLocal:
+        fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignalLocal, fs, frameLen, gammafwSNRseg)
+        fwSNRseg.afterLocal = np.mean(fwSNRseg_allFrames)
+        fwSNRseg.diffLocal = fwSNRseg.afterLocal - fwSNRseg.before
     # Short-Time Objective Intelligibility (STOI)
-    myStoi[0] = stoi_fcn(cleanSignal, noisySignal, fs)
-    myStoi[1] = stoi_fcn(cleanSignal, enhancedSignal, fs)
-    myStoi[2] = myStoi[1] - myStoi[0]
+    myStoi.before = stoi_fcn(cleanSignal, noisySignal, fs)
+    myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs)
+    myStoi.diff = myStoi.after - myStoi.before
+    if flagLocal:
+        myStoi.afterLocal = stoi_fcn(cleanSignal, enhancedSignalLocal, fs)
+        myStoi.diffLocal = myStoi.afterLocal - myStoi.before
     # Perceptual Evaluation of Speech Quality (PESQ)
     if fs in [8e3, 16e3]:
-        myPesq[0] = pesq(fs, cleanSignal, noisySignal, 'wb')
-        myPesq[1] = pesq(fs, cleanSignal, enhancedSignal, 'wb')
-        myPesq[2] = myPesq[1] - myPesq[0]
+        myPesq.before = pesq(fs, cleanSignal, noisySignal, 'wb')
+        myPesq.after = pesq(fs, cleanSignal, enhancedSignal, 'wb')
+        myPesq.diff = myPesq.after - myPesq.before
+        if flagLocal:
+            myPesq.afterLocal = pesq(fs, cleanSignal, enhancedSignalLocal, 'wb')
+            myPesq.diffLocal = myPesq.afterLocal - myPesq.before
     else:
-        print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Setting `myPesq` to NaN.')
-        myPesq = np.nan
+        print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
     return snr, fwSNRseg, myStoi, myPesq
 

@@ -83,6 +83,7 @@ def main(settings):
 
     # PLOT
     DfiltDANSE, f, t = get_stft(mySignals.desiredSigEst, mySignals.fs, settings)
+    DfiltDANSElocal, f, t = get_stft(mySignals.desiredSigEstLocal, mySignals.fs, settings)
     Ystft, _, _ = get_stft(mySignals.sensorSignals[:, 0], mySignals.fs, settings)
     if f.ndim == 1:
         f = f[:, np.newaxis]
@@ -94,21 +95,28 @@ def main(settings):
         climLow = -200
 
     fig = plt.figure(figsize=(8,4))
-    ax = fig.add_subplot(311)
+    ax = fig.add_subplot(411)
     mapp = plt.imshow(20*np.log10(np.abs(Ystft)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'Original microphone signal')
     #
-    ax = fig.add_subplot(312)
+    ax = fig.add_subplot(412)
     mapp = plt.imshow(20*np.log10(np.abs(DfiltGEVD)), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     plt.colorbar(mapp)
     plt.title(f'After batch-GEVD-MWF (rank {settings.GEVDrank})')
     #
-    ax = fig.add_subplot(313)
+    ax = fig.add_subplot(413)
+    mapp = plt.imshow(20*np.log10(np.abs(DfiltDANSElocal[:,:,0])), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
+    ax.invert_yaxis()
+    ax.set_aspect('auto')
+    plt.colorbar(mapp)
+    plt.title(f'After GEVD-DANSE [local estimate]')
+    #
+    ax = fig.add_subplot(414)
     mapp = plt.imshow(20*np.log10(np.abs(DfiltDANSE[:,:,0])), extent=[t[0], t[-1], f[-1,0], f[0,0]], vmin=climLow, vmax=climHigh)
     ax.invert_yaxis()
     ax.set_aspect('auto')

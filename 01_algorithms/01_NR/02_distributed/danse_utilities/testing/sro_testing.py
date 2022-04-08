@@ -30,10 +30,11 @@ class DanseTestingParameters():
     specificDesiredSignalFiles: list[str] = field(default_factory=list)     # Path(s) to specific desired signal file(s). If not [''], `signalsPath` is ignored for desired signals.
     specificNoiseSignalFiles: list[str] = field(default_factory=list)       # Path(s) to specific noise signal file(s). If not [''], `signalsPath` is ignored for noise signals.
     #
-    sigDur: float = 1.      # signals duration [s]
-    baseSNR: float = 0.     # # SNR between dry desired signals and dry noise [dB]
-    nodeUpdating: str = 'simultaneous'  # node-updating strategy
-    broadcastLength: int = 8    # length of broadcast chunk [samples]
+    sigDur: float = 1.                      # signals duration [s]
+    baseSNR: float = 0.                     # SNR between dry desired signals and dry noise [dB]
+    nodeUpdating: str = 'simultaneous'      # node-updating strategy
+    broadcastLength: int = 8                # length of broadcast chunk [samples]
+    timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
 
@@ -141,7 +142,8 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     SROsppm=sros[ii][jj],
                     danseUpdating=danseParams.nodeUpdating,
                     broadcastLength=danseParams.broadcastLength,
-                    computeLocalEstimate=False
+                    computeLocalEstimate=False,
+                    timeBtwExternalFiltUpdates=danseParams.timeBtwExternalFiltUpdates
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
             experiments.append(dict([('sets', sets), ('path', exportPath)]))

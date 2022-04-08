@@ -219,6 +219,11 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
         trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
+
+        if settings.computeLocalEstimate:
+            localSig = sigs.desiredSigEstLocal[startIdx:, idxNode]
+        else:
+            localSig = []
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
         out0, out1, out2, out3 = eval_enhancement.get_metrics(
@@ -228,7 +233,8 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     sigs.fs[trueIdxSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
                                     sigs.VAD[startIdx:],
                                     settings.gammafwSNRseg,
-                                    settings.frameLenfwSNRseg
+                                    settings.frameLenfwSNRseg,
+                                    localSig, 
                                     )
         snr[f'Node{idxNode + 1}'] = out0
         fwSNRseg[f'Node{idxNode + 1}'] = out1

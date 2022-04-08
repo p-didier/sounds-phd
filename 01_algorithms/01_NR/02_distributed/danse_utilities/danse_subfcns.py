@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 import scipy
+import scipy.linalg
 
 
 def danse_init(yin, settings, asc):

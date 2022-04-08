@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings
+from danse_utilities.classes import ProgramSettings, Results
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -41,14 +41,15 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_allNodesInSamePosition_anechoic',
     #
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=10,
+    signalDuration=3,
     baseSNR=15,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
@@ -63,13 +64,13 @@ mySettings = ProgramSettings(
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastLength=2**9,
-    expAvg50PercentTime=2.,             # Time in the past [s] at which the value is weighted by 50% via exponential averaging
+    expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
     # bypassFilterUpdates=True,
-    minTimeBtwFiltUpdates=1,            # [s] minimum time between 2 consecutive filter update at a node 
+    timeBtwExternalFiltUpdates=1,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node 
     )
 
 # Subfolder for export
@@ -86,7 +87,7 @@ exportPath = f'{Path(__file__).parent}/res/{subfolder}/{experimentName}'
 lightExport = True          # <-- set to True to not export whole signals in pkl.gz archives
 # ------------------------
 
-def main(mySettings, exportPath, showPlots=1, lightExport=True):
+def main(mySettings: ProgramSettings, exportPath, showPlots=1, lightExport=True):
     """Main function for DANSE runs.
 
     Parameters
@@ -135,7 +136,7 @@ def main(mySettings, exportPath, showPlots=1, lightExport=True):
     return None
 
 
-def get_figures_and_sound(results, pathToResults, settings, showPlots=False, listen=False, listeningMaxDuration=5.):
+def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSettings, showPlots=False, listen=False, listeningMaxDuration=5.):
     """From exported pkl.gz file names, import simulation results,
     plots them nicely, exports plots, exports relevent sounds,
     and, if asked, plays back the sounds. 
@@ -179,28 +180,29 @@ def get_figures_and_sound(results, pathToResults, settings, showPlots=False, lis
     maxSTOI = -9999999
     minSTOI = 9999999
     for idxNode in range(results.acousticScenario.numNodes):
-        currSTOIs = results.enhancementEval.stoi[f'Node{idxNode + 1}']
-        if not isinstance(currSTOIs, float):
-            currSTOIs = currSTOIs[-1]  # compare the improvements before/after filtering
-        if currSTOIs >= maxSTOI:
-            bestNode, maxSTOI = idxNode, currSTOIs
-        if currSTOIs <= minSTOI:
-            worstNode, minSTOI = idxNode, currSTOIs
+        currSTOI = results.enhancementEval.stoi[f'Node{idxNode + 1}'].after
+        if currSTOI >= maxSTOI:
+            bestNode, maxSTOI = idxNode, currSTOI
+        if currSTOI <= minSTOI:
+            worstNode, minSTOI = idxNode, currSTOI
 
-    if not isinstance(results.enhancementEval.stoi[f'Node{1}'], float):
-        print(f'Best node (Delta-STOI = {round(maxSTOI, 2)})')
-    else:
-        print(f'Best node (STOI = {round(maxSTOI, 2)})')
-    results.signals.plot_signals(bestNode, settings)
+
+    print(f'Best node (STOI = {round(maxSTOI, 2)})')
+    stoiImpLocalVsGlobal = None
+    if settings.computeLocalEstimate:
+        stoiBest = results.enhancementEval.stoi[f'Node{bestNode + 1}']
+        stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
+    results.signals.plot_signals(bestNode, settings, stoiImpLocalVsGlobal)
     plt.savefig(f'{pathToResults}/bestPerfNode.png')
     if showPlots:
         plt.draw()
     
-    if not isinstance(results.enhancementEval.stoi[f'Node{1}'], float):
-        print(f'Best node (Delta-STOI = {round(minSTOI, 2)})')
-    else:
-        print(f'Best node (STOI = {round(minSTOI, 2)})')
-    results.signals.plot_signals(worstNode, settings)
+    print(f'Best node (STOI = {round(minSTOI, 2)})')
+    stoiImpLocalVsGlobal = None
+    if settings.computeLocalEstimate:
+        stoiBest = results.enhancementEval.stoi[f'Node{worstNode + 1}']
+        stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
+    results.signals.plot_signals(worstNode, settings, stoiImpLocalVsGlobal)
     plt.savefig(f'{pathToResults}/worstPerfNode.png')
     if showPlots:
         plt.draw()

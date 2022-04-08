@@ -1,13 +1,11 @@
 
-from bz2 import compress
-from cmath import inf
-from operator import ne
 import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
 import copy
 import matplotlib.pyplot as plt
+from pyinstrument import Profiler
 
 """
 References:
@@ -195,6 +193,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
+
+    # Profiling
+    profiler = Profiler()
+    profiler.start()
     
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
@@ -357,23 +359,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                 ytilde[k][:, i[k], :] = yTildeCurr
 
-
-                # if k == 0:
-                #     if i[k] == 0:
-                #         import matplotlib.pyplot as plt
-                #         fig = plt.figure(figsize=(8,4))
-                #         ax = fig.add_subplot(111)
-                #     ax.plot(yLocalCurr, 'b')
-                #     ax.plot(z[k], 'r')
-                #     # draw the plot
-                #     ax.set_ylim([np.amin(yTildeCurr), np.amax(yTildeCurr)])
-                #     plt.draw() 
-                #     plt.pause(0.01)
-                #     # start removing points if you don't want all shown
-                #     if i[k] >= 1:
-                #         for ii in range(len(ax.lines)):
-                #             ax.lines[-1].remove()
-
                 # --------------------- Spatial covariance matrices updates ---------------------
                 # Go to frequency domain
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
@@ -394,15 +379,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if startUpdates[k] and not settings.bypassFilterUpdates:
                     # No `for`-loop versions
                     if settings.performGEVD:    # GEVD update
-                        wTildeTemp, _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
-                        # ... $g_{k-k}$ is updated entirely
-                        wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1]:] = wTildeTemp[:, yLocalCurr.shape[-1]:]    
-                        # alpha = 1 / i[k]      # see bertrand2010b, p.6
-                        alpha = 1               # no relaxation
-                        # alpha = 1 / np.log10(10 + i[k])     # see bertrand2010b, p.6
-                        # ... $w_{kk}$ is updated progressively (exponential averaging, adaptive forgetting factor)
-                        wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]] = (1 - alpha) * wTilde[k][:, i[k], :yLocalCurr.shape[-1]] + alpha * wTildeTemp[:, :yLocalCurr.shape[-1]]
-
+                        wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                         if settings.computeLocalEstimate:
                             wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
 
@@ -457,5 +434,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Export empty array if local desired signal estimate was not computed
     if (dLocal == 0).all():
         dLocal = np.array([])
+
+    # Profiling
+    profiler.stop()
+    profiler.print()
+    stop = 1
 
     return d, dLocal

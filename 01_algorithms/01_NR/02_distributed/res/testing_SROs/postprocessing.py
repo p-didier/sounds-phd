@@ -15,18 +15,12 @@ sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 from danse_utilities.classes import Results, ProgramSettings
 sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 
-# resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_3sensorseach'
-# resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_2sensorseach'
-# resultsBaseFolder = f'{Path(__file__).parent}/automated/10s_signals_2nodes_whitenoise_1sensoreach'
-# resultsBaseFolder = f'{Path(__file__).parent}/automated/J2Mk[3, 1]_Ns1_Nn1/anechoic_Leq8'
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[3, 1]_Ns1_Nn1/anechoic_Leq512',\
-                        f'{Path(__file__).parent}/automated/J2Mk[3, 1]_Ns1_Nn1/anechoic_Leq8']
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
 TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
 
-
 def main():
-
     
     # Global results storing dictionary
     res = dict([('stoi', []), ('fwSNRseg', []), ('sro', []), ('ref', [])])
@@ -76,7 +70,7 @@ def main():
     ax = fig.add_subplot(121)
     for idxNode in range(nNodes):
         for ii in range(len(res['stoi'])):
-            ax.semilogx(res['sro'][ii], res['stoi'][ii][idxNode, :],\
+            ax.plot(res['sro'][ii], res['stoi'][ii][idxNode, :],\
                         f'C{idxNode * len(res["stoi"]) + ii}-o',\
                         label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
     ax.grid()
@@ -85,12 +79,13 @@ def main():
         ax.set_ylabel('$\\Delta$STOI')
     else:
         ax.set_ylabel('STOI')
+    ax.set_ylim([0, 1])
     plt.legend()
     #
     ax = fig.add_subplot(122)
     for idxNode in range(nNodes):
         for ii in range(len(res['fwSNRseg'])):
-            ax.semilogx(res['sro'][ii], res['fwSNRseg'][ii][idxNode, :],\
+            ax.plot(res['sro'][ii], res['fwSNRseg'][ii][idxNode, :],\
                         f'C{idxNode * len(res["fwSNRseg"]) + ii}-o',\
                         label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
     ax.grid()
@@ -123,21 +118,17 @@ def extract_metrics(nNodes, resSubDirs, typeMetric='improvement'):
             raise ValueError('Mismatch between expected vs. actual number of nodes in WASN.')
         params = ProgramSettings().load(resSubDirs[ii], silent=True)
         for idx, val in enumerate(resObject.enhancementEval.stoi.values()):
-            if not isinstance(val, float):
-                if typeMetric == 'improvement':
-                    val = val[-1]   # plot before/after enhancement improvement
-                    flagDelta_stoi = True
-                elif typeMetric == 'afterEnhancement':
-                    val = val[1]   # plot before/after enhancement improvement
-            stois[idx, ii] = val
+            if typeMetric == 'improvement':
+                stois[idx, ii] = val.diff  # plot before/after enhancement improvement
+                flagDelta_stoi = True
+            elif typeMetric == 'afterEnhancement':
+                stois[idx, ii] = val.after   # plot before/after enhancement improvement
         for idx, val in enumerate(resObject.enhancementEval.fwSNRseg.values()):
-            if not isinstance(val, float):
-                if typeMetric == 'improvement':
-                    val = val[-1]   # plot before/after enhancement improvement
-                    flagDelta_fwSNRseg = True
-                elif typeMetric == 'afterEnhancement':
-                    val = val[1]   # plot before/after enhancement improvement
-            fwSNRsegs[idx, ii] = val
+            if typeMetric == 'improvement':
+                fwSNRsegs[idx, ii] = val.diff  # plot before/after enhancement improvement
+                flagDelta_fwSNRseg = True
+            elif typeMetric == 'afterEnhancement':
+                fwSNRsegs[idx, ii] = val.after   # plot before/after enhancement improvement
         sros[:, ii] = params.SROsppm
         if all(v == 0 for v in params.SROsppm):
             idxbenchmark = ii
