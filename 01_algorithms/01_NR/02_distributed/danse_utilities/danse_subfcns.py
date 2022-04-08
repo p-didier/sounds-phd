@@ -1,7 +1,7 @@
+from lib2to3.pgen2 import driver
 import numpy as np
 from numba import njit
-import scipy
-import scipy.linalg
+import scipy.linalg as sla
 
 
 def danse_init(yin, settings, asc):
@@ -148,7 +148,7 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0, jitted=False):
     Evect = np.zeros((Ryy.shape[0],))
     Evect[refSensorIdx] = 1
     # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted
-    sigma, Xmat = scipy.linalg.eigh(Ryy, Rnn)
+    sigma, Xmat = sla.eigh(Ryy, Rnn, check_finite=False, driver='gvd')
     if jitted:
         Qmat = invert_jitted(Xmat.conj().T)
         diagveig, Qmat = sortevls_jitted(Qmat, sigma, rank)
@@ -200,7 +200,7 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
     # t0 = time.perf_counter()
     for kappa in range(nFreqs):
         # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted / vectorized
-        sigmacurr, Xmatcurr = scipy.linalg.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
+        sigmacurr, Xmatcurr = sla.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :], check_finite=False, driver='gvd')
         # Flip Xmat to sort eigenvalues in descending order
         idx = np.flip(np.argsort(sigmacurr))
         sigma[kappa, :] = sigmacurr[idx]
