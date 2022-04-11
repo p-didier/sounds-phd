@@ -1,10 +1,8 @@
 
 #%%
-from msilib import typemask
 from pathlib import Path, PurePath
 import sys
 import matplotlib.pyplot as plt
-from matplotlib import markers
 import numpy as np
 # Find path to root folder
 rootFolder = 'sounds-phd'
@@ -16,7 +14,8 @@ from danse_utilities.classes import Results, ProgramSettings
 sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 
 resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512']]
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
 TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
 

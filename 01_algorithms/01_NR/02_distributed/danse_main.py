@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -35,42 +35,45 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    samplingFrequency=16000,
+    samplingFrequency=8000,
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_allNodesInSamePosition_anechoic',
     #
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=3,
+    signalDuration=20,
     baseSNR=15,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
+    broadcastLength=2**9,
     #
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
-    # SROsppm=[0, 100],
-    SROsppm=0,
+    SROsppm=[0, 100],
+    # SROsppm=0,
     #
     compensateSROs=True,                # if True, estimate + compensate SRO dynamically
     # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
-    broadcastLength=2**9,
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
     # bypassFilterUpdates=True,
-    timeBtwExternalFiltUpdates=1,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node 
+    timeBtwExternalFiltUpdates=1,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    # 
+    # vvv Printouts parameters vvv
+    printouts=PrintoutsParameters(events_parser=True)
     )
 
 # Subfolder for export

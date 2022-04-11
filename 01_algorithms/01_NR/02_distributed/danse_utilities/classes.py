@@ -17,6 +17,13 @@ from plotting.twodim import plot_side_room
 
 
 @dataclass
+class PrintoutsParameters:
+    events_parser: bool = False             # controls printouts in `events_parser()` function
+    danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
+    externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
+
+
+@dataclass
 class SamplingRateOffsets:
     """Sampling rate/time offsets class, containing all necessary info for
     applying, estimating, and compensation SROs/STOs"""
@@ -42,7 +49,7 @@ class ProgramSettings(object):
     desiredSignalFile: list[str] = field(default_factory=list)            # list of paths to desired signal file(s)
     noiseSignalFile: list[str] = field(default_factory=list)              # list of paths to noise signal file(s)
     baseSNR: int = 0                        # [dB] SNR between dry desired signals and dry noise
-    selfnoiseSNR: int = -999999             # [dB] microphone self-noise SNR
+    selfnoiseSNR: int = -50                 # [dB] microphone self-noise SNR
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
@@ -78,6 +85,7 @@ class ProgramSettings(object):
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
     randSeed: int = 12345                   # random generator(s) seed
+    printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
 
     def __post_init__(self) -> None:
         # Create new attributes
@@ -303,6 +311,10 @@ class Signals(object):
         stoiImpLocalVsGlobal : float
             [dB] Local vs. global signal estimate STOI improvement (only used is `settings.computeLocalEstimate` is True).
         """
+
+        # Disable divide-by-zero warnings
+        np.seterr(divide = 'ignore') 
+
         # Useful variables
         indicesSensors = np.argwhere(self.sensorToNodeTags == nodeIdx + 1)
         effectiveSensorIdx = indicesSensors[settings.referenceSensor]
@@ -394,6 +406,9 @@ class Signals(object):
             else:
                 ax.set(xlabel='$t$ [s]')
         plt.tight_layout()
+
+        # Re-enable divide-by-zero warnings
+        np.seterr(divide = 'warn') 
 
     def plot_enhanced_stft(self, bestNodeIdx, worstNodeIdx, perf: EnhancementMeasures):
         """Plots the STFT of the enhanced signal (best and worse nodes) side by side.
@@ -490,10 +505,11 @@ class Signals(object):
         fnames : dict
             Full paths of exported files, sorted by type.
         """
+        folderShort = met.shorten_path(folder)
         # Check path validity
         if not Path(f'{folder}/wav').is_dir():
             Path(f'{folder}/wav').mkdir()
-            print(f'Created .wav export folder "{folder}/wav".')
+            print(f'Created .wav export folder ".../{folderShort}/wav".')
         fname_noisy    = []
         fname_desired  = []
         fname_enhanced = []
@@ -518,7 +534,7 @@ class Signals(object):
                 fname_enhanced.append(f'{folder}/wav/enhancedLocal_N{idxNode + 1}.wav')
                 data = normalize_toint16(self.desiredSigEstLocal[:, idxNode])
                 wavfile.write(fname_enhanced[-1], int(self.fs[idxSensor]), data)
-        print(f'Signals exported in folder "{folder}/wav/".')
+        print(f'Signals exported in folder ".../{folderShort}/wav".')
         # WAV files names dictionary
         fnames = dict([('Noisy', fname_noisy), ('Desired', fname_desired), ('Enhanced', fname_enhanced)])
         return fnames
@@ -683,7 +699,7 @@ def stft_subplot(ax, t, f, data, vlims, label=''):
     # Text boxes properties
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     #
-    mappable = ax.pcolormesh(t, f / 1e3, data, vmin=vlims[0], vmax=vlims[1])
+    mappable = ax.pcolormesh(t, f / 1e3, data, vmin=vlims[0], vmax=vlims[1], shading='auto')
     ax.set(ylabel='$f$ [kHz]')
     if label != '':
         ax.text(0.025, 0.9, label, fontsize=8, transform=ax.transAxes,

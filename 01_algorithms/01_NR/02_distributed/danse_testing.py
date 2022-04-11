@@ -23,8 +23,8 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic'],
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_RT500ms'],
     #
@@ -33,7 +33,8 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     sigDur=20,
     baseSNR=5,
     # possibleSROs=[0, 100, 200, 400, 800, 1600, 3200],
-    possibleSROs=[0, 20, 40, 60, 80, 100],
+    # possibleSROs=[0, 20, 40, 60, 80, 100],
+    possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=20)],
     # possibleSROs=[0, 20, 40, 60, 80, 100, 200, 400, 600, 800, 1000],
     # possibleSROs=[int(ii) for ii in np.logspace(0, np.log10(32000), num=20)],
     # possibleSROs=[32000],

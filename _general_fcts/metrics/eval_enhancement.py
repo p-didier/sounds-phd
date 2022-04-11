@@ -4,7 +4,14 @@ import sys
 import scipy.signal as sig
 from scipy.signal import stft
 from pathlib import Path, PurePath
-from pystoi import stoi_any_fs as stoi_fcn
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+if not any("_third_parties" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/_third_parties')
+from mypystoi import stoi_any_fs as stoi_fcn
 from pesq import pesq
 # Find path to root folder
 rootFolder = 'sounds-phd'
@@ -92,11 +99,15 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
         myStoi.diffLocal = myStoi.afterLocal - myStoi.before
     # Perceptual Evaluation of Speech Quality (PESQ)
     if fs in [8e3, 16e3]:
-        myPesq.before = pesq(fs, cleanSignal, noisySignal, 'wb')
-        myPesq.after = pesq(fs, cleanSignal, enhancedSignal, 'wb')
+        if fs == 8e3:
+            mode = 'nb'  # narrowband PESQ
+        elif fs == 16e3:
+            mode = 'wb'  # wideband PESQ
+        myPesq.before = pesq(fs, cleanSignal, noisySignal, mode)
+        myPesq.after = pesq(fs, cleanSignal, enhancedSignal, mode)
         myPesq.diff = myPesq.after - myPesq.before
         if flagLocal:
-            myPesq.afterLocal = pesq(fs, cleanSignal, enhancedSignalLocal, 'wb')
+            myPesq.afterLocal = pesq(fs, cleanSignal, enhancedSignalLocal, mode)
             myPesq.diffLocal = myPesq.afterLocal - myPesq.before
     else:
         print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
