@@ -1,4 +1,5 @@
 
+from doctest import master
 import numpy as np
 import time, datetime
 from . import classes
@@ -194,6 +195,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     """
 
+    # Hard-coded parameters
+    printingInterval = 2            # [s] minimum time between two "% done" printouts
+    alphaExternalFilters = 0.7      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
+
     # Profiling
     profiler = Profiler()
     profiler.start()
@@ -205,8 +210,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
 
     # -------------------vvv Arrays initialization vvv-------------------
-    lk = np.zeros(asc.numNodes, dtype=int)                      # node-specific broadcast index
-    i = np.zeros(asc.numNodes, dtype=int)                       # !node-specific! DANSE iteration index
+    lk = np.zeros(asc.numNodes, dtype=int)          # node-specific broadcast index
+    i = np.zeros(asc.numNodes, dtype=int)           # !node-specific! DANSE iteration index
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
@@ -234,7 +239,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTilde.append(wtmp)
         wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
-        wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+        wtmp[:, 0] = 1      # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
@@ -273,7 +278,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # -------------------^^^ Arrays initialization ^^^-------------------
 
     # Prepare events to be considered in main `for`-loop
-    eventsMatrix, fs = subs.get_events_matrix(timeInstants,
+    eventsMatrix, fs, initialTimeBiases = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             nExpectedNewSamplesPerFrame,
                                             settings.broadcastLength)
@@ -282,11 +287,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     lastExternalFiltUpdateInstant = 0   # [s]
 
     t0 = time.perf_counter()    # loop timing
+    tprint = -printingInterval
     # Loop over time instants when one or more event(s) occur(s)
     for events in eventsMatrix:
 
         # Parse event matrix (+ inform user)
-        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=True)
+        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=settings.printouts.events_parser)
+
+        if t > tprint + printingInterval and settings.printouts.danseProgress:
+            print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100)}% done -----')
+            tprint = t
 
         # Loop over events
         for idxEvent in range(len(eventTypes)):
@@ -305,8 +315,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Pad zeros at beginning if needed
                 if idxEndChunk - idxBegChunk < 2 * frameSize:   # Using 2*N to keep power of 2 for FFT
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
-
-
 
                 # Perform broadcast -- update all buffers in network
                 zBuffer, zLocal = subs.broadcast(
@@ -399,11 +407,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # Update external filters (for broadcasting)
                 if t - lastExternalFiltUpdateInstant >= settings.timeBtwExternalFiltUpdates:
-                    alpha = 0.7     # cfr. Alexander Bertrand's MATLAB scripts https://homes.esat.kuleuven.be/~abertran/software.html
-                    wTildeExternal[k] = (1 - alpha) * wTildeExternal[k] + alpha * wTilde[k][:, i[k] + 1, :]
+                    wTildeExternal[k] = (1 - alphaExternalFilters) * wTildeExternal[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
                     
                     lastExternalFiltUpdateInstant = t
-                    print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS (every {settings.timeBtwExternalFiltUpdates}s)')
+                    if settings.printouts.externalFilterUpdates:
+                        print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
                     
 
 
@@ -429,7 +437,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # print(f'DANSE updated in {np.round((time.perf_counter() - t0) * 1e3)} ms')
     
     print('\nSimultaneous DANSE processing all done.')
-    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=time.perf_counter() - t0))}s.')
+    dur = time.perf_counter() - t0
+    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
+    print(f'(Real-time processing factor: {np.round(masterClock[-1], 2) / dur})')
 
     # Export empty array if local desired signal estimate was not computed
     if (dLocal == 0).all():

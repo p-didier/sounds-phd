@@ -641,7 +641,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
     
     Parameters
     ----------
-    timeInstants : [Nt x Nn] np.ndarray of floats
+    timeInstants : [Nt x Nn] np.ndarray (floats)
         Time instants corresponding to the samples of each of the Nn nodes in the network.
     N : int
         Number of samples used for compression / for updating the DANSE filters.
@@ -656,6 +656,10 @@ def get_events_matrix(timeInstants, N, Ns, L):
         Event instants matrix. One column per event instant.
     fs : [Nn x 1] list of floats
         Sampling frequency of each node.
+    initialTimeBiases : [Nn x 1] np.ndarray (floats)
+        [s] Initial time difference between first update at node `row index`
+        and latest broadcast instant at node `column index` (diagonal elements are
+        all set to zero: there is no bias w.r.t. locally recorded data).
     """
 
     # Make sure time stamps matrix is indeed a matrix, correctly oriented
@@ -690,11 +694,18 @@ def get_events_matrix(timeInstants, N, Ns, L):
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
     broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
     #                              ^ note that we only start broadcasting when we have enough samples to perform compression
-    # Ensure that all nodes have broadcasted at least once before performing any update
-    minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
-    for k in range(nNodes):
-        updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
     
+    # Compute "initial bias" times for each node, per neighbor
+    # -- Note: the first ever broadcast is set to be the _full_ `z` vector, not just its last `L` samples.
+    initialTimeBiases = np.zeros((nNodes, nNodes))
+    for k in range(nNodes):
+        # Check that all nodes have broadcasted at least once before performing any update
+        updateInstants[k] = updateInstants[k][updateInstants[k] >= np.amax([v[0] for v in broadcastInstants])]
+        firstEffectiveUpdate = updateInstants[k][0]
+        for q in range(nNodes):     # loop across other nodes in network (for now: incl. current node)
+            if k != q:
+                passedBroadcastInstants = broadcastInstants[q][broadcastInstants[q] <= firstEffectiveUpdate]
+                initialTimeBiases[k, q] = firstEffectiveUpdate - passedBroadcastInstants[-1]    # time difference between first update of `k` and last broadcast of `q` [s]
 
     # Number of unique update instants across the WASN
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
@@ -731,16 +742,16 @@ def get_events_matrix(timeInstants, N, Ns, L):
     while eventIdx < numEventInstants:
 
         currInstant = eventInstants[eventIdx, 0]
-        nodesConcerned.append(eventInstants[eventIdx, 1])
-        eventTypesConcerned.append(eventInstants[eventIdx, 2])
+        nodesConcerned.append(int(eventInstants[eventIdx, 1]))
+        eventTypesConcerned.append(int(eventInstants[eventIdx, 2]))
 
         if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
             nextInstant = eventInstants[eventIdx + 1, 0]
             while currInstant == nextInstant:
                 eventIdx += 1
                 currInstant = eventInstants[eventIdx, 0]
-                nodesConcerned.append(eventInstants[eventIdx, 1])
-                eventTypesConcerned.append(eventInstants[eventIdx, 2])
+                nodesConcerned.append(int(eventInstants[eventIdx, 1]))
+                eventTypesConcerned.append(int(eventInstants[eventIdx, 2]))
                 if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
                     nextInstant = eventInstants[eventIdx + 1, 0]
                 else:
@@ -752,8 +763,8 @@ def get_events_matrix(timeInstants, N, Ns, L):
             eventIdx += 1
 
         # Sort events at current instant
-        nodesConcerned = np.array(nodesConcerned)
-        eventTypesConcerned = np.array(eventTypesConcerned)
+        nodesConcerned = np.array(nodesConcerned, dtype=int)
+        eventTypesConcerned = np.array(eventTypesConcerned, dtype=int)
         # 1) First broadcasts, then updates
         originalIndices = np.arange(len(nodesConcerned))
         idxUpdateEvent = originalIndices[eventTypesConcerned == 1]
@@ -774,7 +785,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
         nodesConcerned = []         # reset
         eventTypesConcerned = []    # reset
 
-    return eventInstantsFormatted, fs
+    return eventInstantsFormatted, fs, initialTimeBiases
 
 
 def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
@@ -819,28 +830,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         # Compress current data chunk in the frequency domain
         zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
 
-        
-
-        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-        # zLocal = yk[:, 0]
-        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-        # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-        # Loop over node `k`'s neighbours and fill their buffers
         zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
-
-        
-        # import matplotlib.pyplot as plt
-        # fig = plt.figure(figsize=(8,4))
-        # ax = fig.add_subplot(211)
-        # ax.plot(yk[n:, 0])
-        # ax.plot(zBuffer[1][0])
-        # ax.grid()
-        # ax = fig.add_subplot(212)
-        # ax.plot(w[:, :yk.shape[-1]])
-        # ax.grid()
-        # plt.tight_layout()	
-        # plt.show()
 
         lk[k] += 1  # increment local broadcast index
 
