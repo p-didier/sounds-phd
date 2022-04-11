@@ -38,9 +38,9 @@ def save_as_txt(self, filename):
         f.write(string)
 
 
-def shorten_path(file_path, length):
-    """Split the path into separate parts, select the last 
-    'length' elements and join them again
+def shorten_path(file_path, length=3):
+    """Splits `file_path` into separate parts, select the last 
+    `length` elements and join them again
     -- from: https://stackoverflow.com/a/49758154
     """
     return Path(*Path(file_path).parts[-length:])

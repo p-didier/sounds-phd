@@ -1,10 +1,8 @@
 
-from doctest import master
 import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
-import copy
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 
@@ -25,7 +23,7 @@ References:
 """
 
 
-def danse_sequential(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD):
+def danse_sequential(yin, asc, settings: classes.ProgramSettings, oVAD):
     """Wrapper for Sequential-Node-Updating DANSE [1].
 
     Parameters
@@ -212,6 +210,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # -------------------vvv Arrays initialization vvv-------------------
     lk = np.zeros(asc.numNodes, dtype=int)          # node-specific broadcast index
     i = np.zeros(asc.numNodes, dtype=int)           # !node-specific! DANSE iteration index
+    l = np.zeros(asc.numNodes, dtype=int)           # node-specific frame index
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
@@ -224,9 +223,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
+    phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
+    SROsEstimates = []                              # SRO estimates per node (for each neighbor)
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
+    idxStart = np.zeros(asc.numNodes, dtype=int)    # node-specific index of the first sample used in computations
     if settings.computeLocalEstimate:
         wLocal = []                                     # filter coefficients - using only local observations (not data coming from neighbors)
         Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
@@ -254,6 +256,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         z.append(np.empty((frameSize, 0), dtype=float))
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        #
+        phaseShiftFactors.append(np.ones((numFreqLines, dimYTilde[k]), dtype=complex))   # initiate phase shifts as 1's
+        SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -286,8 +291,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = 0   # [s]
 
-    t0 = time.perf_counter()    # loop timing
-    tprint = -printingInterval
+    tprint = -printingInterval      # printouts timing
+
+    t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
     for events in eventsMatrix:
 
@@ -305,7 +311,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             k = int(nodesConcerned[idxEvent])
             event = eventTypes[idxEvent]
 
-
             if event == 'broadcast':
                 
                 # Extract current local data chunk
@@ -317,13 +322,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
                 # Perform broadcast -- update all buffers in network
-                zBuffer, zLocal = subs.broadcast(
+                zBuffer, _ = subs.broadcast(
                             t,
                             k,
                             fs[k],
                             settings.broadcastLength,
                             yLocalCurr,
-                            # wTilde[k][:, i[k], :],
                             wTildeExternal[k],
                             frameSize,
                             neighbourNodes,
@@ -332,23 +336,28 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         )
                     
             elif event == 'update':
-                t0Local = time.perf_counter()
 
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
                 idxBegChunk = idxEndChunk - frameSize     # <N> samples long chunk
                 yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+
+                # Update frame index
+                l[k] += 1
+                if l[k] == 1:
+                    idxStart[k] = idxBegChunk
+                elif int(np.floor(t * fs[k])) != frameSize + nExpectedNewSamplesPerFrame * (l[k] - 1) + idxStart[k]:
+                    raise ValueError(f'The update timing for node {k+1} does not match its expected frame index.')  # should never be raised -- as long as the inner filter updates at every frame
                 
                 # Compute VAD
                 VADinFrame = oVAD[idxBegChunk:idxEndChunk]
                 oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
-
-                # Count number of spatial covariance matrices updates
-                if oVADframes[i[k]]:
+                if oVADframes[i[k]]:    # Count number of spatial covariance matrices updates
                     numUpdatesRyy[k] += 1
                 else:
                     numUpdatesRnn[k] += 1
                 
+                # --------------------- vvv Build local observations vector vvv ---------------------
                 # Process buffers
                 z[k], _ = subs.process_incoming_signals_buffers(
                     zBuffer[k],
@@ -366,19 +375,31 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Build full available observation vector
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                 ytilde[k][:, i[k], :] = yTildeCurr
-
-                # --------------------- Spatial covariance matrices updates ---------------------
                 # Go to frequency domain
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
+                # --------------------- ^^^ Build local observations vector ^^^ ---------------------
 
+                # Compensate for SROs (/STOs)
+                if settings.compensateSROs:
+                    if i[k] == 0 and initialTimeBiases[k] != 0:
+                        # Compensate initial time bias (STO)
+                        for q in range(len(SROsEstimates[k])):
+                            sto = initialTimeBiases[k, q] * fs[q]   # [samples]
+                            stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
+                            ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q] *= stoPSF   # compensate
+                    # Apply SRO PSFs
+                    ytildeHat[k][:, i[k], :] *= phaseShiftFactors[k]
+
+                # --------------------- vvv Spatial covariance matrices updates vvv ---------------------
+                # Update covariance matrices
                 Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                                 Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
                 if settings.computeLocalEstimate:
                     # Local observations only
                     Ryylocal[k], Rnnlocal[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
                                                     Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
-                # -------------------------------------------------------------------------------
+                # --------------------- ^^^ Spatial covariance matrices updates ^^^ ---------------------
                 
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                 if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
@@ -408,12 +429,25 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Update external filters (for broadcasting)
                 if t - lastExternalFiltUpdateInstant >= settings.timeBtwExternalFiltUpdates:
                     wTildeExternal[k] = (1 - alphaExternalFilters) * wTildeExternal[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
-                    
+                    # Update last external filter update instant [s]
                     lastExternalFiltUpdateInstant = t
-                    if settings.printouts.externalFilterUpdates:
+                    if settings.printouts.externalFilterUpdates:    # inform user
                         print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
-                    
 
+
+                # Update SRO estimates
+                if settings.estimateSROs:
+                    raise ValueError('[NOT YET IMPLEMENTED] SRO estimation')    # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+                else:
+                    SROsEstimates[k] = (settings.SROsppm[neighbourNodes[k]] - settings.SROsppm[k]) * 1e-6    # no data-based dynamic SRO estimation: use oracle knowledge
+
+                # Update phase shifts for SRO compensation
+                if settings.compensateSROs:
+                    for q in range(len(SROsEstimates[k])):
+                        # Phase Shift Factor
+                        psf = np.exp( +1 * 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * SROsEstimates[k][q] * l[k] * nExpectedNewSamplesPerFrame)
+                        #                               vvv `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
+                        phaseShiftFactors[k][:, yLocalCurr.shape[-1] + q] = psf
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
@@ -433,8 +467,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 
                 # Increment DANSE iteration index
                 i[k] += 1
-
-                # print(f'DANSE updated in {np.round((time.perf_counter() - t0) * 1e3)} ms')
     
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0

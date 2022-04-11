@@ -28,6 +28,8 @@ class AcousticScenario:
     samplingFreq: float = 16000.                        # Sampling frequency
     numNodes: int = 2                                   # Number of nodes in network
     distBtwSensors: float = 0.05                        # Distance btw. sensors at one node
+    topology: str = 'fully_connected'   # WASN topology type ("fully_connected" or ...TODO)
+    
 
     def __post_init__(self):
         self.numDesiredSources = self.desiredSourceCoords.shape[0]      # number of desired sources

@@ -1,20 +1,20 @@
-from lib2to3.pgen2 import driver
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
+from . import classes
 
 
-def danse_init(yin, settings, asc):
+def danse_init(yin, settings: classes.ProgramSettings, asc):
     """DANSE algorithms initialization function.
     
     Parameters
     ----------
     yin : [Nt x Ns] np.ndarray (real)
         The microphone signals in the time domain.
-    asc : AcousticScenario object
-        Processed data about acoustic scenario (RIRs, dimensions, etc.).
     settings : ProgramSettings object
         The settings for the current run.
+    asc : AcousticScenario object
+        Processed data about acoustic scenario (RIRs, dimensions, etc.).
 
     Returns
     ----------
@@ -54,7 +54,11 @@ def danse_init(yin, settings, asc):
     neighbourNodes = []
     allNodeIdx = np.arange(asc.numNodes)
     for k in range(asc.numNodes):
-        neighbourNodes.append(np.delete(allNodeIdx, k))   # Option 1) - FULLY-CONNECTED WASN
+        if asc.topology == 'fully_connected':
+            # Option 1) - FULLY-CONNECTED WASN
+            neighbourNodes.append(np.delete(allNodeIdx, k))
+        else:
+            raise ValueError('[NOT YET IMPLEMENTED] Non-fully connected topology.')
 
     return rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
 
@@ -369,7 +373,7 @@ def danse_compression(yq, wHat, n):
 
 def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, N, L, lastExpectedIter):
     """When called, processes the incoming data from other nodes, as stored in local node's buffers.
-    Called whenever a DANSE update can be performed (`N` new local samples were captured).
+    Called whenever a DANSE update can be performed (`N` new local samples were captured since last update).
     
     Parameters
     ----------

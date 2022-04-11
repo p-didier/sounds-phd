@@ -52,18 +52,20 @@ mySettings = ProgramSettings(
     signalDuration=20,
     baseSNR=15,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
-    chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
-    broadcastLength=2**9,
+    chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     #
+    # vvv SROs parameters vvv
     # SROsppm=[0, 10000, 20000],               # SRO
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
     SROsppm=[0, 100],
     # SROsppm=0,
+    compensateSROs=True,                # if True, compensate SROs
+    # compensateSROs=False,                # if True, compensate SROs
+    estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
     #
-    compensateSROs=True,                # if True, estimate + compensate SRO dynamically
-    # broadcastLength=16,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     referenceSensor=0,

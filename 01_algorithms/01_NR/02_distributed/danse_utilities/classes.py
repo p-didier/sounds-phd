@@ -13,8 +13,14 @@ if not any("_general_fcts" in s for s in sys.path):
         pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/_general_fcts')
 import class_methods.dataclass_methods as met
-from plotting.twodim import plot_side_room
-
+if not any("01_acoustic_scenes" in s for s in sys.path):
+    # Find path to root folder
+    rootFolder = 'sounds-phd'
+    pathToRoot = Path(__file__)
+    while PurePath(pathToRoot).name != rootFolder:
+        pathToRoot = pathToRoot.parent
+    sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
+from utilsASC.classes import AcousticScenario
 
 @dataclass
 class PrintoutsParameters:
@@ -53,7 +59,7 @@ class ProgramSettings(object):
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
-    stftWin: np.ndarray = np.hanning(stftWinLength)  # STFT window
+    stftWin: np.ndarray = np.hanning(stftWinLength)     # STFT window
     # VAD parameters
     VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
@@ -61,11 +67,9 @@ class ProgramSettings(object):
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
-    filterDomain: str = 'f'                 # domain in which to compute the DANSE local node filters 
-                                            #  ^---> ["t" for time-domain, "f" for frequency- (i.e., STFT-) domain]
     chunkSize: int = 1024                   # [samples] processing chunk size
     chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
-    danseWindow: np.ndarray = np.hanning(chunkSize)  # DANSE window for FFT/IFFT operations
+    danseWindow: np.ndarray = np.hanning(chunkSize)     # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
     expAvg50PercentTime: float = 2.         # [s] Time in the past at which the value is weighted by 50% via exponential averaging
                                             # -- Used to compute beta in, e.g.: Ryy[l] = beta * Ryy[l - 1] + (1 - beta) * y[l] * y[l]^H
@@ -80,7 +84,8 @@ class ProgramSettings(object):
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     # SROs parameters
     SROsppm: list[float] = field(default_factory=list)   # [ppm] sampling rate offsets
-    compensateSROs: bool = False            # if True, estimate + compensate SROs dynamically
+    estimateSROs: bool = False              # if True, estimate SROs
+    compensateSROs: bool = False            # if True, compensate SROs
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
@@ -94,7 +99,7 @@ class ProgramSettings(object):
         # Checks on class attributes
         if isinstance(self.SROsppm, int) or isinstance(self.SROsppm, float):
             if self.SROsppm == 0:
-                self.SROsppm = [self.SROsppm]
+                self.SROsppm = np.array([self.SROsppm])     # transform to NumPy array
             else:
                 raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
         elif 0 not in self.SROsppm:
@@ -102,6 +107,8 @@ class ProgramSettings(object):
                 print('Empty SROppm parameter: setting SROppm = [0.]')
             else:
                 raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+        else:
+            self.SROsppm = np.array(self.SROsppm)           # transform to NumPy array
         # Adapt formats
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
@@ -165,62 +172,6 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
         met.save_as_txt(self, filename)
         # Save data as archive
         met.save(self, filename)
-
-@dataclass
-class AcousticScenario(object):
-    """Class for keeping track of acoustic scenario parameters"""
-    rirDesiredToSensors: np.ndarray     # RIRs between desired sources and sensors
-    rirNoiseToSensors: np.ndarray       # RIRs between noise sources and sensors
-    desiredSourceCoords: np.ndarray     # Coordinates of desired sources
-    sensorCoords: np.ndarray            # Coordinates of sensors
-    sensorToNodeTags: np.ndarray        # Tags relating each sensor to its node
-    noiseSourceCoords: np.ndarray       # Coordinates of noise sources
-    roomDimensions: np.ndarray          # Room dimensions   
-    absCoeff: float                     # Absorption coefficient
-    samplingFreq: int                   # Sampling frequency
-    numNodes: int                       # Number of nodes in network
-    distBtwSensors: float               # Distance btw. sensors at one node
-
-    def __post_init__(self):
-        self.numDesiredSources = self.desiredSourceCoords.shape[0]
-        self.numSensors = self.sensorCoords.shape[0]
-        self.numNoiseSources = self.noiseSourceCoords.shape[0]    
-        self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]
-        return self
-
-    def plot(self):
-
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(121)
-        plot_side_room(ax, self.roomDimensions[0:2], 
-                    self.desiredSourceCoords[:, [0,1]], 
-                    self.noiseSourceCoords[:, [0,1]], 
-                    self.sensorCoords[:, [0,1]], self.sensorToNodeTags)
-        ax.set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
-        #
-        ax = fig.add_subplot(122)
-        plot_side_room(ax, self.roomDimensions[1:], 
-                    self.desiredSourceCoords[:, [1,2]], 
-                    self.noiseSourceCoords[:, [1,2]],
-                    self.sensorCoords[:, [1,2]],
-                    self.sensorToNodeTags)
-        ax.set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
-        # Add info
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        boxText = ''
-        for ii in range(self.numNodes):
-            for jj in range(self.desiredSourceCoords.shape[0]):
-                d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.desiredSourceCoords[jj,:]))
-                boxText += f'Node {ii + 1}$\\to$D{jj + 1}={np.round(d, 2)}m\n'
-            for jj in range(self.noiseSourceCoords.shape[0]):
-                d = np.mean(np.linalg.norm(self.sensorCoords[self.sensorToNodeTags == ii + 1,:] - self.noiseSourceCoords[jj,:]))
-                boxText += f'Node {ii + 1}$\\to$N{jj + 1}={np.round(d, 2)}m\n'
-        boxText = boxText[:-1]
-        ax.text(1.1, 0.9, boxText, transform=ax.transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
-        #
-        fig.tight_layout()
-        return fig
 
 
 @dataclass
