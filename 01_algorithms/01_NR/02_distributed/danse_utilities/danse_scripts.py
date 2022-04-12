@@ -381,7 +381,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
                 # --------------------- ^^^ Build local observations vector ^^^ ---------------------
 
-                # Compensate initial time bias (STO)
+                # Compensate initial time bias (STO)        # TODO TODO TODO TODO TODO ADDRESS THIS TODO TODO TODO TODO TODO
                 if i[k] == 0 and settings.compensateSTOs:
                     for q in range(asc.numNodes):
                         sto = np.floor((settings.STOinducedDelays[q] - settings.STOinducedDelays[k]) * fs[q])

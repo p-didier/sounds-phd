@@ -565,23 +565,6 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocalK, L):
         else:
             # Only broadcast the `L` last samples of local compressed signals
             zBuffer[q][idxKforNeighborQ] = np.concatenate((zBuffer[q][idxKforNeighborQ], zLocalK[-L:]), axis=0)
-
-
-    if k == 0:
-        stop = 1
-    if 0:
-    # if k == 0:
-        
-        import matplotlib.pyplot as plt
-        fig = plt.figure(figsize=(8,4))
-        ax = fig.add_subplot(111)
-        ax.plot(zBuffer[q][idxKforNeighborQ])
-        ax.plot(np.arange(len(zLocalK[-L:])) + len(zBuffer[q][idxKforNeighborQ]) - len(zLocalK[-L:]), zLocalK[-L:], '.-')
-        ax.grid()
-        plt.tight_layout()	
-        plt.show()
-        stop = 1
-    
         
     return zBuffer
 
@@ -683,34 +666,30 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     nNodes = timeInstants.shape[1]
     
     # Check for clock jitter and save sampling frequencies
-    fs = np.zeros(nNodes)
+    deltas = np.diff(timeInstants, axis=0)
     for k in range(nNodes):
-        deltas = np.diff(timeInstants[:, k])
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
-        if len(np.unique(np.round(deltas, precision))) > 1:
-            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
-        fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas[:, k]) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
+        if len(np.unique(np.round(deltas[:, k], precision))) > 1:
+            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas[:, k]))} different sample intervals detected for node {k+1}.')
+    fs = 1 / deltas[0, :]
 
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
     
     # Get expected broadcast instants
-    numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
-    broadcastInstants = np.array([np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)])   # expected broadcast instants
-    #                              ^ note that we only start broadcasting when we have enough samples to perform compression
+    initialBroadcasts = N / fs      # [s] first instant at which each node has recorded its first `N` samples after network start-up
+    stepBetweenBroadcasts = L / fs  # [s] time it takes for each node to record `L` new samples
+    broadcastInstants = np.array([np.arange(start=initialBroadcasts[k], stop=Ttot[k], step=stepBetweenBroadcasts[k]) for k in range(nNodes)])
 
     # Derive first update instants
-    firstUpdateInstants = np.zeros(nNodes)
+    initialUpdates = np.zeros(nNodes)
     for k in range(nNodes):
         firstBroadcastsNeighbors = [v[0] for v in broadcastInstants[nodeLinks[k, :]]]
-        firstUpdateInstants[k] = np.amax(firstBroadcastsNeighbors)
+        initialUpdates[k] = np.amax(firstBroadcastsNeighbors)
 
     # Get expected DANSE update instants
-    numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
-    updateInstants = [np.arange(firstUpdateInstants[k] * fs[k]/Ns, int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
-    # updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
-    #                               ^ note that we only start updating when we have enough samples
-
+    stepBetweenUpdates = Ns / fs  # [s] time it takes for each node to record `Ns` new samples
+    updateInstants = np.array([np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)])
     
     # # Compute "initial bias" times for each node, per neighbor
     # # -- Note: the first ever broadcast is set to be the _full_ `z` vector, not just its last `L` samples.

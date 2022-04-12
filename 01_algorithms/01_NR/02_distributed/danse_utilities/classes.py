@@ -86,6 +86,9 @@ class ProgramSettings(object):
     SROsppm: list[float] = field(default_factory=list)   # [ppm] sampling rate offsets
     estimateSROs: bool = False              # if True, estimate SROs
     compensateSROs: bool = False            # if True, compensate SROs
+    STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
+    estimateSTOs: bool = False              # if True, estimate STOs
+    compensateSTOs: bool = False            # if True, compensate STOs
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
@@ -97,18 +100,8 @@ class ProgramSettings(object):
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.samplingFrequency / self.stftEffectiveFrameLen))
         # Checks on class attributes
-        if isinstance(self.SROsppm, int) or isinstance(self.SROsppm, float):
-            if self.SROsppm == 0:
-                self.SROsppm = np.array([self.SROsppm])     # transform to NumPy array
-            else:
-                raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
-        elif 0 not in self.SROsppm:
-            if self.SROsppm == []:
-                print('Empty SROppm parameter: setting SROppm = [0.]')
-            else:
-                raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
-        else:
-            self.SROsppm = np.array(self.SROsppm)           # transform to NumPy array
+        self.SROsppm = sto_sro_formatting(self.SROsppm)
+        self.STOinducedDelays = sto_sro_formatting(self.STOinducedDelays)
         # Adapt formats
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
@@ -174,6 +167,36 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
         met.save(self, filename)
 
 
+def sto_sro_formatting(arg):
+    """Formatting function. Transforms a list or a float into an array.
+    Ensures the presence of at least one `0` inside the array.
+    
+    Parameters
+    ----------
+    arg : input list / float / array.
+
+    Returns
+    -------
+    out : np.ndarray.
+        Formatted array.
+    """
+
+    if isinstance(arg, int) or isinstance(arg, float):
+        if arg == 0:
+            out = np.array([arg])     # transform to NumPy array
+        else:
+            raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+    elif 0 not in arg:
+        if arg == []:
+            out = np.array([0.])     # set to 0 and transform to NumPy array
+        else:
+            raise ValueError('At least one node should have an SRO of 0 ppm (base sampling frequency).')
+    else:
+        out = np.array(arg)           # transform to NumPy array
+
+    return out
+
+
 @dataclass
 class EnhancementMeasures:
     """Class for storing speech enhancement metrics values"""
@@ -194,7 +217,6 @@ class Signals(object):
     wetSpeech: np.ndarray                               # Wet (convolved with RIRs) desired source signals, all sources mixed
     sensorSignals: np.ndarray                           # Sensor signals (all sources + RIRs)
     VAD: np.ndarray                                     # Voice Activity Detector (1 = voice presence; 0 = noise only)
-    timeVector: np.ndarray                              # Time vector (for time-domain signals)
     sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
     desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)

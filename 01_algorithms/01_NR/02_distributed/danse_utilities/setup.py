@@ -67,6 +67,40 @@ def run_experiment(settings: classes.ProgramSettings):
     return results
 
 
+def apply_sto(x, stoDelay, fs):
+    """Applies a given sampling time offset (STO) to a signal.
+    ---
+    As of 11/04/2022: only applying full-sample STOs. 
+    TODO: include possibility of applying sub-sample STOs.
+    ---
+    NOTE: STOs are always applied backwards: data is discarded
+    from the beginning of the vector. 
+
+    Parameters
+    ----------
+    x : [N x 1] np.ndarray (float)
+        Input signal (single-channel).
+    stoDelay : float
+        [s] STO-induced delay.
+    fs : int or float
+        [samples/s] Sampling frequency.
+    
+    Returns
+    -------
+    xsto : [N x 1] np.ndarray (float)
+        Output signal (STO-disturbed).
+    """
+
+    sto = int(np.floor(stoDelay * fs))
+
+    if sto > 0:
+        xsto = np.concatenate((x[sto:], np.zeros(sto)))
+    else:
+        xsto = x
+
+    return xsto
+
+
 def resample_for_sro(x, baseFs, SROppm):
     """Resamples a vector given an SRO and a base sampling frequency.
 
@@ -109,8 +143,8 @@ def resample_for_sro(x, baseFs, SROppm):
     return xResamp, t, fsSRO
 
 
-def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
-    """Applies sampling rate offsets (SROs) to signals.
+def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plotit=False):
+    """Applies sampling rate offsets (SROs) and sampling time offsets (STOs) to signals.
 
     Parameters
     ----------
@@ -120,10 +154,12 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
         Base sampling frequency [samples/s]
     sensorToNodeTags : [Ns x 1] np.ndarray
         Tags linking each sensor (channel) to a node (i.e. an SRO).
-    SROsppm : [Nn x 1] np.ndarray or list
+    SROsppm : [Nn x 1] np.ndarray or list (floats)
         SROs per node [ppm].
-    showSRO : bool
-        If True, plots a visualization of the applied SROs.
+    STOinducedDelays : [Nn x 1] np.ndarray or list (floats)
+        STO-induced delay per node [s].
+    plotit : bool
+        If True, plots a visualization of the applied signal changes.
 
     Returns
     -------
@@ -138,40 +174,37 @@ def apply_sro(sigs, baseFs, sensorToNodeTags, SROsppm, showSRO=False):
     numSamples = sigs.shape[0]
     numSensors = sigs.shape[-1]
     numNodes = len(np.unique(sensorToNodeTags))
-    if numNodes != len(SROsppm):
-        if (np.array(SROsppm) == 0).all():
-            SROsppm = [0 for _ in range(numNodes)]
-        else:
-            raise ValueError('Number of nodes does not match number of given non-zero SRO values.')
 
-    # Base time stamps
+    # Apply STOs / SROs
     sigsOut       = np.zeros((numSamples, numSensors))
     timeVectorOut = np.zeros((numSamples, numNodes))
     fs = np.zeros(numSensors)
     for idxSensor in range(numSensors):
-        idxNode = sensorToNodeTags[idxSensor] - 1
-        sigsOut[:, idxSensor], timeVectorOut[:, idxNode], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[idxNode])
+        k = sensorToNodeTags[idxSensor] - 1     # corresponding node index
+        # Apply SROs
+        sigsOut[:, idxSensor], timeVectorOut[:, k], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[k])
+        # Apply STOs
+        sigsOut[:, idxSensor] = apply_sto(sigsOut[:, idxSensor], STOinducedDelays[k], fs[idxSensor])
 
     # Plot
-    if showSRO:
+    if plotit:
         minimumObservableDrift = 1   # plot enough samples to observe drifts of at least that many samples on all signals
         smallestDriftFrequency = np.amin(SROsppm[SROsppm != 0]) / 1e6 * baseFs  # [samples/s]
         samplesToPlot = int(minimumObservableDrift / smallestDriftFrequency * baseFs)
         markerFormats = ['o','v','^','<','>','s','*','D']
         fig = plt.figure(figsize=(8,4))
         ax = fig.add_subplot(111)
-        for idxNode in range(numNodes):
+        for k in range(numNodes):
             allSensors = np.arange(numSensors)
-            idxSensor = allSensors[sensorToNodeTags == (idxNode + 1)]
+            idxSensor = allSensors[sensorToNodeTags == (k + 1)]
             if isinstance(idxSensor, np.ndarray):
                 idxSensor = idxSensor[0]
-            markerline, _, _ = ax.stem(timeVectorOut[:samplesToPlot, idxNode], sigsOut[:samplesToPlot, idxSensor],
-                    linefmt=f'C{idxNode}', markerfmt=f'C{idxNode}{markerFormats[idxNode % len(markerFormats)]}',
-                    label=f'Node {idxNode + 1} - $\\varepsilon={SROsppm[idxNode]}$ ppm')
+            markerline, _, _ = ax.stem(timeVectorOut[:samplesToPlot, k], sigsOut[:samplesToPlot, idxSensor],
+                    linefmt=f'C{k}', markerfmt=f'C{k}{markerFormats[k % len(markerFormats)]}',
+                    label=f'Node {k + 1} - $\\varepsilon={SROsppm[k]}$ ppm')
             markerline.set_markerfacecolor('none')
-        ax.set(xlabel='$t$ [s]', title='SROs visualization')
+        ax.set(xlabel='$t$ [s]', title='SROs / STOs visualization')
         ax.grid()
-        # plt.legend(loc='upper right')
         plt.tight_layout()
         plt.show()
 
@@ -324,7 +357,7 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
     y = zero_ext(y, frameSize // 2, axis=0)
     # --- Also adapt timeInstants vector
     t = signals.timeStampsSROs
-    dt = np.diff(t, axis=0)[0, :]   # delta t between each time instant for each node
+    dt = np.diff(t, axis=0)[0, :]   # delta t between each time instant for each node   # TODO what if clock jitter?
     tpre = np.zeros((frameSize // 2, asc.numNodes))
     tpost = np.zeros((frameSize // 2, asc.numNodes))
     for k in range(asc.numNodes):
@@ -341,7 +374,7 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
         # Adapt time vector too
         tzp = np.zeros((nadd, asc.numNodes))
         for k in range(asc.numNodes):
-            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)
+            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)     # TODO what if clock jitter?
         t = np.concatenate((t, tzp), axis=0)
         if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
             raise ValueError('There is a problem with the zero-padding...')
@@ -371,7 +404,7 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     """
     # Prepare signals for Fourier transforms
     y, t, nadd = prep_for_ffts(signals, asc, settings)
-
+    
     # DANSE it up
     desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
@@ -482,12 +515,24 @@ def generate_signals(settings: classes.ProgramSettings):
 
     # Load acoustic scenario
     asc = AcousticScenario().load(settings.acousticScenarioPath)
+    if not hasattr(asc, 'nodeLinks'):
+        asc.__post_init__()
 
     # Detect conflicts
     if asc.numDesiredSources > len(settings.desiredSignalFile):
         raise ValueError(f'{settings.desiredSignalFile} "desired" signal files provided while {asc.numDesiredSources} are needed.')
     if asc.numNoiseSources > len(settings.noiseSignalFile):
         raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
+    if asc.numNodes != len(settings.SROsppm):
+        if (np.array(settings.SROsppm) == 0).all():
+            settings.SROsppm = np.zeros(asc.numNodes)
+        else:
+            raise ValueError('Number of nodes does not match number of given non-zero SRO values.')
+    if asc.numNodes != len(settings.STOinducedDelays):
+        if (np.array(settings.STOinducedDelays) == 0).all():
+            settings.STOinducedDelays = np.zeros(asc.numNodes)
+        else:
+            raise ValueError('Number of nodes does not match number of given non-zero STO values.')
 
     # Adapt sampling frequency
     if asc.samplingFreq != settings.samplingFrequency:
@@ -554,7 +599,7 @@ def generate_signals(settings: classes.ProgramSettings):
                                     oVAD)   # <-- given VAD, computed from noiseless target speech 
 
         # Set SNR
-        dryNoiseSignals[:, ii] = 10**(-settings.baseSNR / 20) * tmp
+        dryNoiseSignals[:, ii] = 10 ** (-settings.baseSNR / 20) * tmp
 
         # Convolve with RIRs to create wet signals
         for jj in range(asc.numSensors):
@@ -567,9 +612,9 @@ def generate_signals(settings: classes.ProgramSettings):
     wetNoise_norm = wetNoise / np.amax(np.abs(wetNoise + wetSpeech))    # Normalize
     wetSpeech_norm = wetSpeech / np.amax(np.abs(wetNoise + wetSpeech))  # Normalize
 
-    # --- Apply SROs ---
-    wetNoise_norm, _, _ = apply_sro(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
-    wetSpeech_norm, timeStampsSROs, fsSROs = apply_sro(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm)
+    # --- Apply STOs / SROs ---
+    wetNoise_norm, _, _ = apply_sro_sto(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm, settings.STOinducedDelays)
+    wetSpeech_norm, timeStampsSROs, fsSROs = apply_sro_sto(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm, settings.STOinducedDelays)
     # Set reference node (for master clock) based on SRO values
     masterClockNodeIdx = np.where(np.array(settings.SROsppm) == 0)[0][0]
     # ------------------
@@ -580,12 +625,9 @@ def generate_signals(settings: classes.ProgramSettings):
     # Add self-noise to microphones
     rng = np.random.default_rng(settings.randSeed)
     for k in range(sensorSignals.shape[-1]):
-        selfnoise = 10**(settings.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
+        selfnoise = 10 ** (settings.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
         sensorSignals[:, k] += selfnoise
-        
-    # Time vector
-    timeVector = np.arange(signalLength) / asc.samplingFreq
-
+    
     # Build output class object
     signals = classes.Signals(dryNoiseSources=dryNoiseSignals,
                                 drySpeechSources=dryDesiredSignals,
@@ -595,7 +637,6 @@ def generate_signals(settings: classes.ProgramSettings):
                                 wetSpeech=wetSpeech_norm,
                                 sensorSignals=sensorSignals,
                                 VAD=oVAD,
-                                timeVector=timeVector,
                                 sensorToNodeTags=asc.sensorToNodeTags,
                                 fs=fsSROs,
                                 referenceSensor=settings.referenceSensor,
@@ -607,5 +648,14 @@ def generate_signals(settings: classes.ProgramSettings):
     if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
         conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
         raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(signals.sensorSignals)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+    # stop = 1
 
     return signals, asc

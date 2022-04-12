@@ -41,6 +41,7 @@ sets = ASCProgramSettings(
     sensorSeparation=0.1,             # separation between sensor in array (only used if numSensorPerNode > 1)
     revTime=0.0,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases 
+    topology='fully_connected',
 )
 
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'

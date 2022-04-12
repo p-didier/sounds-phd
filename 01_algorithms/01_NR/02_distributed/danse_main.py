@@ -49,11 +49,12 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=20,
-    baseSNR=15,
+    signalDuration=60,
+    baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
-    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     # SROsppm=[0, 10000, 20000],               # SRO
@@ -65,6 +66,11 @@ mySettings = ProgramSettings(
     compensateSROs=True,                # if True, compensate SROs
     # compensateSROs=False,                # if True, compensate SROs
     estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
+    #
+    # vvv STOs parameters vvv
+    # STOinducedDelays=[0, 0.1],         # [s]
+    # compensateSTOs=False,                # if True, compensate STOs
+    compensateSTOs=True,                # if True, compensate STOs
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
@@ -202,7 +208,7 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
     if showPlots:
         plt.draw()
     
-    print(f'Best node (STOI = {round(minSTOI, 2)})')
+    print(f'Worst node (STOI = {round(minSTOI, 2)})')
     stoiImpLocalVsGlobal = None
     if settings.computeLocalEstimate:
         stoiBest = results.enhancementEval.stoi[f'Node{worstNode + 1}']
