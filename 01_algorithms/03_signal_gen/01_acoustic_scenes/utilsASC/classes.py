@@ -28,14 +28,42 @@ class AcousticScenario:
     samplingFreq: float = 16000.                        # Sampling frequency
     numNodes: int = 2                                   # Number of nodes in network
     distBtwSensors: float = 0.05                        # Distance btw. sensors at one node
-    topology: str = 'fully_connected'   # WASN topology type ("fully_connected" or ...TODO)
-    
+    topology: str = 'fully_connected'                   # WASN topology type ("fully_connected" or ...TODO)
 
-    def __post_init__(self):
+    def __post_init__(self, rng=None, seed=None):
+        """Post object initialization function.
+        
+        Parameters
+        ----------
+        rng : np.random.default_range() random generator
+            Random generator.
+        seed : int
+            Seed to create a random generator (only used if `rng is None`).
+        """
         self.numDesiredSources = self.desiredSourceCoords.shape[0]      # number of desired sources
         self.numSensors = self.sensorCoords.shape[0]                    # number of sensors
         self.numNoiseSources = self.noiseSourceCoords.shape[0]          # number of noise sources
         self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]    # number of sensors per node
+        # Address topology
+        if self.topology == 'fully_connected':
+            self.nodeLinks = np.full((self.numNodes, self.numNodes), fill_value=True)
+        elif self.topology == 'no_connection':
+            self.nodeLinks = np.eye(self.numNodes, dtype=bool)
+        elif self.topology == 'tree':
+            raise ValueError('[NOT YET IMPLEMENTED] Tree WASN topology')
+        elif self.topology == 'random':
+            if rng is not None:
+                tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
+            elif seed is not None:
+                rng = np.random.default_rng(seed)
+                tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
+            else:
+                print('/!\\ No random generator provided: creating random WASN topology without seed.')
+                tmp = np.random.randint(2, size=(self.numNodes, self.numNodes), dtype=bool)
+            self.nodeLinks = np.maximum(tmp, tmp.transpose())
+        else:
+            raise ValueError(f'Unavailable WASN topology "{self.topology}".')
+            
         return self
     
     # Save and load
