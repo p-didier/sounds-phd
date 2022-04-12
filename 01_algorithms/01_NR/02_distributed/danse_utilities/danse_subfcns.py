@@ -1,3 +1,4 @@
+import nntplib
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
@@ -637,7 +638,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L):
+def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -653,6 +654,8 @@ def get_events_matrix(timeInstants, N, Ns, L):
         Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap) (Ns < N).
     L : int
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
+    nodeLinks : [Nn x Nn] np.ndarray (bools)
+        Node links matrix. Element `(i,j)` is `True` if node `i` and `j` are connected, `False` otherwise.
     
     Returns
     -------
@@ -660,6 +663,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
         Event instants matrix. One column per event instant.
     fs : [Nn x 1] list of floats
         Sampling frequency of each node.
+    --------------------- vvv UNUSED vvv ---------------------
     initialTimeBiases : [Nn x 1] np.ndarray (floats)
         [s] Initial time difference between first update at node `row index`
         and latest broadcast instant at node `column index` (diagonal elements are
@@ -690,26 +694,36 @@ def get_events_matrix(timeInstants, N, Ns, L):
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
     
-    # Get expected DANSE update instants
-    numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
-    updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
-    #                               ^ note that we only start updating when we have enough samples
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
-    broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    broadcastInstants = np.array([np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)])   # expected broadcast instants
     #                              ^ note that we only start broadcasting when we have enough samples to perform compression
-    
-    # Compute "initial bias" times for each node, per neighbor
-    # -- Note: the first ever broadcast is set to be the _full_ `z` vector, not just its last `L` samples.
-    initialTimeBiases = np.zeros((nNodes, nNodes))
+
+    # Derive first update instants
+    firstUpdateInstants = np.zeros(nNodes)
     for k in range(nNodes):
-        # Check that all nodes have broadcasted at least once before performing any update
-        updateInstants[k] = updateInstants[k][updateInstants[k] >= np.amax([v[0] for v in broadcastInstants])]
-        firstEffectiveUpdate = updateInstants[k][0]
-        for q in range(nNodes):     # loop across other nodes in network (for now: incl. current node)
-            if k != q:
-                passedBroadcastInstants = broadcastInstants[q][broadcastInstants[q] <= firstEffectiveUpdate]
-                initialTimeBiases[k, q] = firstEffectiveUpdate - passedBroadcastInstants[-1]    # time difference between first update of `k` and last broadcast of `q` [s]
+        firstBroadcastsNeighbors = [v[0] for v in broadcastInstants[nodeLinks[k, :]]]
+        firstUpdateInstants[k] = np.amax(firstBroadcastsNeighbors)
+
+    # Get expected DANSE update instants
+    numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
+    updateInstants = [np.arange(firstUpdateInstants[k] * fs[k]/Ns, int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    # updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    #                               ^ note that we only start updating when we have enough samples
+
+    
+    # # Compute "initial bias" times for each node, per neighbor
+    # # -- Note: the first ever broadcast is set to be the _full_ `z` vector, not just its last `L` samples.
+    # initialTimeBiases = np.zeros((nNodes, nNodes))
+    # for k in range(nNodes):
+    #     # Check that all nodes have broadcasted at least once before performing any update
+    #     updateInstants[k] = updateInstants[k][updateInstants[k] >= np.amax([v[0] for v in broadcastInstants])]
+    #     firstEffectiveUpdate = updateInstants[k][0]
+    #     for q in range(nNodes):     # loop across other nodes in network (for now: incl. current node)
+    #         if k != q:
+    #             passedBroadcastInstants = broadcastInstants[q][broadcastInstants[q] <= firstEffectiveUpdate]
+    #             initialTimeBiases[k, q] = firstEffectiveUpdate - passedBroadcastInstants[-1]    # time difference between first update of `k` and last broadcast of `q` [s]
+
 
     # Number of unique update instants across the WASN
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
@@ -789,7 +803,7 @@ def get_events_matrix(timeInstants, N, Ns, L):
         nodesConcerned = []         # reset
         eventTypesConcerned = []    # reset
 
-    return eventInstantsFormatted, fs, initialTimeBiases
+    return eventInstantsFormatted, fs
 
 
 def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):

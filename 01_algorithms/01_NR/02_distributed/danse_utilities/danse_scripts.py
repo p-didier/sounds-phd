@@ -283,10 +283,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # -------------------^^^ Arrays initialization ^^^-------------------
 
     # Prepare events to be considered in main `for`-loop
-    eventsMatrix, fs, initialTimeBiases = subs.get_events_matrix(timeInstants,
+    eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             nExpectedNewSamplesPerFrame,
-                                            settings.broadcastLength)
+                                            settings.broadcastLength,
+                                            asc.nodeLinks)
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = 0   # [s]
@@ -380,15 +381,19 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
                 # --------------------- ^^^ Build local observations vector ^^^ ---------------------
 
-                # Compensate for SROs (/STOs)
+                # Compensate initial time bias (STO)
+                if i[k] == 0 and settings.compensateSTOs:
+                    for q in range(asc.numNodes):
+                        sto = np.floor((settings.STOinducedDelays[q] - settings.STOinducedDelays[k]) * fs[q])
+                        stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
+                        ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q - 1] *= stoPSF   # compensate
+
+                        # if initialTimeBiases[k, q] != 0:
+                        #     sto = initialTimeBiases[k, q] * fs[q]   # [samples]
+                        #     stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
+                        #     ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q] *= stoPSF   # compensate
+                # Compensate SROs
                 if settings.compensateSROs:
-                    if i[k] == 0 and initialTimeBiases[k] != 0:
-                        # Compensate initial time bias (STO)
-                        for q in range(len(SROsEstimates[k])):
-                            sto = initialTimeBiases[k, q] * fs[q]   # [samples]
-                            stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
-                            ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q] *= stoPSF   # compensate
-                    # Apply SRO PSFs
                     ytildeHat[k][:, i[k], :] *= phaseShiftFactors[k]
 
                 # --------------------- vvv Spatial covariance matrices updates vvv ---------------------
