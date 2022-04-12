@@ -49,12 +49,12 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=60,
+    signalDuration=30,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=8,       # broadcast chunk size `L` [samples]
+    broadcastLength=16,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     # SROsppm=[0, 10000, 20000],               # SRO

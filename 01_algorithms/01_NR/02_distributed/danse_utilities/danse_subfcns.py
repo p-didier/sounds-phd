@@ -691,19 +691,6 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     stepBetweenUpdates = Ns / fs  # [s] time it takes for each node to record `Ns` new samples
     updateInstants = np.array([np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)])
     
-    # # Compute "initial bias" times for each node, per neighbor
-    # # -- Note: the first ever broadcast is set to be the _full_ `z` vector, not just its last `L` samples.
-    # initialTimeBiases = np.zeros((nNodes, nNodes))
-    # for k in range(nNodes):
-    #     # Check that all nodes have broadcasted at least once before performing any update
-    #     updateInstants[k] = updateInstants[k][updateInstants[k] >= np.amax([v[0] for v in broadcastInstants])]
-    #     firstEffectiveUpdate = updateInstants[k][0]
-    #     for q in range(nNodes):     # loop across other nodes in network (for now: incl. current node)
-    #         if k != q:
-    #             passedBroadcastInstants = broadcastInstants[q][broadcastInstants[q] <= firstEffectiveUpdate]
-    #             initialTimeBiases[k, q] = firstEffectiveUpdate - passedBroadcastInstants[-1]    # time difference between first update of `k` and last broadcast of `q` [s]
-
-
     # Number of unique update instants across the WASN
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
     # Number of unique broadcast instants across the WASN
@@ -817,7 +804,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         For each node, buffers at current iteration.
     """
     # Check inputs
-    if np.round(t * fs) != np.round(t * fs, 10):
+    if np.round(t * fs) != np.round(t * fs, 9):
         raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
 
     if len(yk) < n:

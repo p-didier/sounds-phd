@@ -124,6 +124,8 @@ class ProgramSettings(object):
         # Check lengths consistency
         if self.broadcastLength > self.stftEffectiveFrameLen:
             raise ValueError(f'Broadcast length ({self.broadcastLength}) is too large for STFT frame size {self.stftWinLength} and {int(self.stftFrameOvlp * 100)}% overlap.')
+        if self.stftEffectiveFrameLen % self.broadcastLength != 0:
+            raise ValueError(f'The broadcast length L should be a divisor of the effective STFT length Ns\n(currently: Ns/L={self.stftEffectiveFrameLen}/{self.broadcastLength}={self.stftEffectiveFrameLen / self.broadcastLength}!=1)') 
         # Check that chunk overlap makes sense
         if self.chunkOverlap >= 1:
             raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.chunkOverlap}).')
@@ -304,19 +306,19 @@ class Signals(object):
 
         # -------- WAVEFORMS -------- 
         delta = np.amax(np.abs(self.sensorSignals))
-        ax.plot(self.timeVector, self.wetSpeech[:, effectiveSensorIdx], label='Desired')
-        ax.plot(self.timeVector, self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
+        ax.plot(self.timeStampsSROs[:, nodeIdx], self.wetSpeech[:, effectiveSensorIdx], label='Desired')
+        ax.plot(self.timeStampsSROs[:, nodeIdx], self.VAD * np.amax(self.wetSpeech[:, effectiveSensorIdx]) * 1.1, 'k-', label='VAD')
         # ax.plot(self.timeVector, self.wetNoise[:, effectiveSensorIdx] - 2*delta, label='Noise-only')
-        ax.plot(self.timeVector, self.sensorSignals[:, effectiveSensorIdx] - 2*delta, label='Noisy')
+        ax.plot(self.timeStampsSROs[:, nodeIdx], self.sensorSignals[:, effectiveSensorIdx] - 2*delta, label='Noisy')
         # -------- Desired signal estimate waveform -------- 
         if desiredSignalsAvailable:        
             # -------- Desired signal _local_ estimate waveform -------- 
             if settings.computeLocalEstimate:
-                ax.plot(self.timeVector, self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
+                ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
                 deltaNextWaveform = 6*delta
             else:
                 deltaNextWaveform = 4*delta
-            ax.plot(self.timeVector, self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
+            ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
         ax.grid()
