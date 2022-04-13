@@ -202,12 +202,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.start()
     
     # Initialization (extracting/defining useful quantities)
-    _, winWOLAanalysis, winWOLAsynthesis, frameSize, nExpectedNewSamplesPerFrame, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
+    _, winWOLAanalysis, winWOLAsynthesis, frameSize, Ns, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
 
-    # -------------------vvv Arrays initialization vvv-------------------
+    # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Arrays initialization ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
     lk = np.zeros(asc.numNodes, dtype=int)          # node-specific broadcast index
     i = np.zeros(asc.numNodes, dtype=int)           # !node-specific! DANSE iteration index
     l = np.zeros(asc.numNodes, dtype=int)           # node-specific frame index
@@ -257,7 +257,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         z.append(np.empty((frameSize, 0), dtype=float))
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
         #
-        phaseShiftFactors.append(np.ones((numFreqLines, dimYTilde[k]), dtype=complex))   # initiate phase shifts as 1's
+        phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         #
         if settings.computeLocalEstimate:
@@ -280,12 +280,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     minNumAutocorrUpdates = np.amax(dimYTilde)  # minimum number of Ryy and Rnn updates before starting updating filter coefficients
     # Booleans
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
-    # -------------------^^^ Arrays initialization ^^^-------------------
+    # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
     eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
-                                            nExpectedNewSamplesPerFrame,
+                                            Ns,
                                             settings.broadcastLength,
                                             asc.nodeLinks)
 
@@ -312,7 +312,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             k = int(nodesConcerned[idxEvent])
             event = eventTypes[idxEvent]
 
-            if event == 'broadcast':
+            if event == 'broadcast':        # <-- data compression + broadcast to neighbour nodes
                 
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
@@ -323,7 +323,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
                 # Perform broadcast -- update all buffers in network
-                zBuffer, _ = subs.broadcast(
+                zBuffer = subs.broadcast(
                             t,
                             k,
                             fs[k],
@@ -336,7 +336,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             zBuffer,
                         )
                     
-            elif event == 'update':
+            elif event == 'update':         # <-- DANSE filter update
+
+                skipUpdate = False  # flag to skip update if needed
 
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
@@ -347,7 +349,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 l[k] += 1
                 if l[k] == 1:
                     idxStart[k] = idxBegChunk
-                elif int(np.floor(t * fs[k])) != frameSize + nExpectedNewSamplesPerFrame * (l[k] - 1) + idxStart[k]:
+                elif int(np.floor(t * fs[k])) != frameSize + Ns * (l[k] - 1) + idxStart[k]:
                     raise ValueError(f'The update timing for node {k+1} does not match its expected frame index.')  # should never be raised -- as long as the inner filter updates at every frame
                 
                 # Compute VAD
@@ -358,17 +360,17 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 else:
                     numUpdatesRnn[k] += 1
                 
-                # --------------------- vvv Build local observations vector vvv ---------------------
+                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 # Process buffers
-                z[k], _ = subs.process_incoming_signals_buffers(
-                    zBuffer[k],
-                    z[k],
-                    neighbourNodes[k],
-                    i[k],
-                    frameSize,
-                    N=nExpectedNewSamplesPerFrame,
-                    L=settings.broadcastLength,
-                    lastExpectedIter=numIterations - 1)
+                z[k], bufferFlags = subs.process_incoming_signals_buffers(
+                                    zBuffer[k],
+                                    z[k],
+                                    neighbourNodes[k],
+                                    i[k],
+                                    frameSize,
+                                    N=Ns,
+                                    L=settings.broadcastLength,
+                                    lastExpectedIter=numIterations - 1)
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -379,38 +381,40 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Go to frequency domain
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
-                # --------------------- ^^^ Build local observations vector ^^^ ---------------------
+                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-                # Compensate initial time bias (STO)        # TODO TODO TODO TODO TODO ADDRESS THIS TODO TODO TODO TODO TODO
-                if i[k] == 0 and settings.compensateSTOs:
-                    for q in range(asc.numNodes):
-                        sto = np.floor((settings.STOinducedDelays[q] - settings.STOinducedDelays[k]) * fs[q])
-                        stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
-                        ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q - 1] *= stoPSF   # compensate
-
-                        # if initialTimeBiases[k, q] != 0:
-                        #     sto = initialTimeBiases[k, q] * fs[q]   # [samples]
-                        #     stoPSF = np.exp( 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * sto)
-                        #     ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q] *= stoPSF   # compensate
                 # Compensate SROs
                 if settings.compensateSROs:
-                    ytildeHat[k][:, i[k], :] *= phaseShiftFactors[k]
+                    # Account for buffer flags
+                    extraPhaseShiftFactor = np.zeros(dimYTilde[k])
+                    for q in range(len(neighbourNodes[k])):
+                        if not np.isnan(bufferFlags[q]):
+                            extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = -1 * bufferFlags[q] * settings.broadcastLength
+                            # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShift = 1` and no additional phase shift is applied
+                            if bufferFlags[q] != 0:
+                                stop = 1
+                        else:
+                            # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
+                            skipUpdate = True
+                    # Complete phase shift factors
+                    phaseShiftFactors[k] += extraPhaseShiftFactor
+                    # Apply phase shift factors
+                    ytildeHat[k][:, i[k], :] *= np.exp(1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
-                # --------------------- vvv Spatial covariance matrices updates vvv ---------------------
-                # Update covariance matrices
+                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                                 Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
                 if settings.computeLocalEstimate:
                     # Local observations only
                     Ryylocal[k], Rnnlocal[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
                                                     Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
-                # --------------------- ^^^ Spatial covariance matrices updates ^^^ ---------------------
+                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
                 
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                 if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
                     startUpdates[k] = True
 
-                if startUpdates[k] and not settings.bypassFilterUpdates:
+                if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
                     # No `for`-loop versions
                     if settings.performGEVD:    # GEVD update
                         wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
@@ -427,9 +431,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
                     if settings.computeLocalEstimate:
                         wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                    if skipUpdate:
+                        print(f'Node {k+1}: {i[k] + 1}↑th update skipped.')
                 if settings.bypassFilterUpdates:
                     print('!! User-forced bypass of filter coefficients updates !!')
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
 
                 # Update external filters (for broadcasting)
                 if t - lastExternalFiltUpdateInstant >= settings.timeBtwExternalFiltUpdates:
@@ -449,10 +456,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Update phase shifts for SRO compensation
                 if settings.compensateSROs:
                     for q in range(len(SROsEstimates[k])):
-                        # Phase Shift Factor
-                        psf = np.exp( +1 * 1j * 2 * np.pi / frameSize * np.arange(numFreqLines) * SROsEstimates[k][q] * l[k] * nExpectedNewSamplesPerFrame)
-                        #                               vvv `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
-                        phaseShiftFactors[k][:, yLocalCurr.shape[-1] + q] = psf
+                        #                               ↓↓↓↓ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   # increment recursively
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
