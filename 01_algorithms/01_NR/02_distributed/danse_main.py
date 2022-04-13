@@ -2,6 +2,7 @@
 # %%
 # ---------------- Imports
 import time
+
 t00 = time.perf_counter()
 from pathlib import Path, PurePath
 import sys
@@ -22,6 +23,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
+from metrics.eval_enhancement import DynamicMetricsParameters as dynParams
 if not any("_third_parties" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_third_parties')
 from playsounds.playsounds import playwavfile
@@ -49,12 +51,12 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=30,
+    signalDuration=10,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=16,       # broadcast chunk size `L` [samples]
+    broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     # SROsppm=[0, 10000, 20000],               # SRO
@@ -63,8 +65,8 @@ mySettings = ProgramSettings(
     # SROsppm=[0, 2000, 12000, 22000, 32000],
     SROsppm=[0, 100],
     # SROsppm=0,
-    compensateSROs=True,                # if True, compensate SROs
-    # compensateSROs=False,                # if True, compensate SROs
+    # compensateSROs=True,                # if True, compensate SROs
+    compensateSROs=False,                # if True, compensate SROs
     estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
     #
     # vvv STOs parameters vvv
@@ -81,7 +83,14 @@ mySettings = ProgramSettings(
     timeBtwExternalFiltUpdates=1,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
-    printouts=PrintoutsParameters(events_parser=True)
+    printouts=PrintoutsParameters(events_parser=True),
+    #
+    dynamicMetricsParams=dynParams(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
+                                    chunkOverlap=0.5,   # [/100%]
+                                    dynamicfwSNRseg=True,
+                                    dynamicPESQ=True,
+                                    dynamicSNR=True,
+                                    dynamicSTOI=True)
     )
 
 # Subfolder for export
@@ -179,11 +188,20 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
         plt.draw()
 
     # Plot performance
-    fig = results.plot_enhancement_metrics()
+    fig1, fig2 = results.plot_enhancement_metrics(plotLocal=False)
     expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * results.signals.fs[0])
-    fig.suptitle(f'Speech enhancement metrics ($\\beta={np.round(settings.expAvgBeta, 4)} \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)')
-    fig.tight_layout()
-    plt.savefig(f'{pathToResults}/enhMetrics.png')
+    fig1.suptitle(f"""Speech enhancement metrics ($\\beta={np.round(settings.expAvgBeta, 4)}
+\Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
+    fig1.tight_layout()
+    fig1.savefig(f'{pathToResults}/enhMetrics.png')
+    if showPlots:
+        plt.draw()
+    # Dynamic metrics
+    fig2.suptitle(f"""Dynamic metrics [{settings.dynamicMetricsParams.chunkDuration}s
+chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\beta={np.round(settings.expAvgBeta, 4)}
+\Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
+    fig2.tight_layout()
+    fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
     if showPlots:
         plt.draw()
 

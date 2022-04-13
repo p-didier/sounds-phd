@@ -13,6 +13,7 @@ if not any("_general_fcts" in s for s in sys.path):
         pathToRoot = pathToRoot.parent
     sys.path.append(f'{pathToRoot}/_general_fcts')
 import class_methods.dataclass_methods as met
+import metrics.eval_enhancement as evenh
 if not any("01_acoustic_scenes" in s for s in sys.path):
     # Find path to root folder
     rootFolder = 'sounds-phd'
@@ -82,6 +83,7 @@ class ProgramSettings(object):
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
+    dynamicMetricsParams: evenh.DynamicMetricsParameters = evenh.DynamicMetricsParameters()   # dynamic objective speech enhancement metrics computation parameters
     # SROs parameters
     SROsppm: list[float] = field(default_factory=list)   # [ppm] sampling rate offsets
     estimateSROs: bool = False              # if True, estimate SROs
@@ -558,31 +560,88 @@ class Results:
         else:
             met.save(self, foldername)
 
-    def plot_enhancement_metrics(self):
-        """Creates a visual representation of DANSE performance results."""
+    def plot_enhancement_metrics(self, plotLocal=False):
+        """Creates a visual representation of DANSE performance results.
+
+        Parameters
+        ----------
+        plotLocal : bool
+            If True, also plot local enhancement metrics.
+        
+        Returns
+        -------
+        fig1 : matplotlib figure handle
+            Figure for batch metrics, computed over entire signals.
+        fig2 : matplotlib figure handle
+            Figure for online (dynamic) metrics, computed over chunks of signals.
+        """
+
         # Useful variables
         barWidth = 1
         numNodes = self.signals.desiredSigEst.shape[1]
         
-        fig = plt.figure(figsize=(10,3))
-        ax = fig.add_subplot(1, 4, 1)   # Unweighted SNR
+        fig1 = plt.figure(figsize=(10,3))
+        ax = fig1.add_subplot(1, 4, 1)   # Unweighted SNR
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.snr)
         ax.set(title='SNR', ylabel='[dB]')
         plt.legend()
         #
-        ax = fig.add_subplot(1, 4, 2)   # fwSNRseg
+        ax = fig1.add_subplot(1, 4, 2)   # fwSNRseg
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.fwSNRseg)
         ax.set(title='fwSNRseg', ylabel='[dB]')
         #
-        ax = fig.add_subplot(1, 4, 3)   # STOI
+        ax = fig1.add_subplot(1, 4, 3)   # STOI
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
         ax.set(title='STOI')
         #
-        ax = fig.add_subplot(1, 4, 4)   # PESQ
+        ax = fig1.add_subplot(1, 4, 4)   # PESQ
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.pesq)
         ax.set(title='PESQ')
 
-        return fig
+        # Check where dynamic metrics were computed
+        flagsDynMetrics = np.zeros(len(fields(self.enhancementEval)), dtype=bool)
+        for ii, field in enumerate(fields(self.enhancementEval)):
+            if getattr(self.enhancementEval, field.name)['Node1'].dynamicFlag:
+                flagsDynMetrics[ii] = True
+
+        nDynMetrics = np.sum(flagsDynMetrics)
+
+        if nDynMetrics > 0:
+            # Prepare subplots for dynamic metrics
+            if nDynMetrics < 4:
+                nRows, nCols = 1, nDynMetrics
+            else:
+                nRows, nCols = 2, int(np.ceil(nDynMetrics / 2))
+            fig2, axes = plt.subplots(nRows, nCols)
+            fig2.set_figheight(2.5 * nRows)
+            fig2.set_figwidth(5 * nCols)
+            axes = axes.flatten()   # flatten axes array for easy indexing
+            
+            # Select dictionary elements
+            dynMetricsNames = [fields(self.enhancementEval)[ii].name\
+                                 for ii in range(len(fields(self.enhancementEval))) if flagsDynMetrics[ii]]
+            dynMetrics = [getattr(self.enhancementEval, n) for n in dynMetricsNames]
+
+            # Plot
+            for ii, dynMetric in enumerate(dynMetrics):
+                for nodeRef, value in dynMetric.items():        # loop over nodes
+                    metric = value.dynamicMetric
+                    idxColor = int(nodeRef[-1]) - 1
+                    axes[ii].plot(metric.timeStamps, metric.before, color=f'C{idxColor}', linestyle='--', label=f'{nodeRef}: Before')
+                    axes[ii].plot(metric.timeStamps, metric.after, color=f'C{idxColor}', linestyle='-',label=f'{nodeRef}: After')
+                    if plotLocal:
+                        axes[ii].plot(metric.timeStamps, metric.afterLocal, color=f'C{idxColor}', linestyle=':',label=f'{nodeRef}: After (local)')
+                axes[ii].grid()
+                axes[ii].set_title(dynMetricsNames[ii])
+                if ii == 0:
+                    axes[ii].legend(loc='lower left', fontsize=8)
+                # if ii >= nCols * nRows / 2: # TODO: only set x label to lower row of plots
+                axes[ii].set_xlabel('$t$ [s]')  
+            plt.tight_layout()
+        else:
+            fig2 = None
+
+        return fig1, fig2
 
         
 def get_stft(x, fs, settings: ProgramSettings):
@@ -667,6 +726,12 @@ def metrics_subplot(numNodes, ax, barWidth, data):
     if flagZeroBar:
         ax.hlines(0, - barWidth/2, numNodes - 1 + barWidth/2, colors='k', linestyles='dashed')     # plot horizontal line at `metric = 0`
 
+
+def dynamic_metric_subplot(dynObject, ref):
+
+    stop = 1
+
+    return None
     
 
 def stft_subplot(ax, t, f, data, vlims, label=''):

@@ -1,4 +1,5 @@
 import sys, time
+from types import DynamicClassAttribute
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -253,6 +254,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     for idxNode in range(numNodes):
         trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
 
+        # Adapt local signal estimate input value to `get_metrics()` function
         if settings.computeLocalEstimate:
             localSig = sigs.desiredSigEstLocal[startIdx:, idxNode]
         else:
@@ -265,10 +267,12 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     sigs.desiredSigEst[startIdx:, idxNode], 
                                     sigs.fs[trueIdxSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
                                     sigs.VAD[startIdx:],
+                                    settings.dynamicMetricsParams,  # dynamic metrics computation parameters
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg,
-                                    localSig, 
+                                    localSig,
                                     )
+
         snr[f'Node{idxNode + 1}'] = out0
         fwSNRseg[f'Node{idxNode + 1}'] = out1
         stoi[f'Node{idxNode + 1}'] = out2
@@ -404,12 +408,12 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     """
     # Prepare signals for Fourier transforms
     y, t, nadd = prep_for_ffts(signals, asc, settings)
-    
+
     # DANSE it up
     desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
-        desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
+        desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
         desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:

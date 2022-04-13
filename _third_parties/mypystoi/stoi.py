@@ -166,7 +166,7 @@ def stoi_any_fs(x, y, fs_sig, extended=False):
     elif fs_sig < FS:
         # Problematic: frequency range of critical bands may not be preserved -- see taal2011a footnote page 2.
         winLength = int(np.floor(winDur * fs_sig))
-        print(f'/!\ Sampling frequency lower than 10 kHz: Frequency range of critical bands may not be preserved.')   
+        # print(f'/!\ Sampling frequency lower than 10 kHz: Frequency range of critical bands may not be preserved.')   
     else:
         winLength = N_FRAME
         # x = utils.resample_oct(x, FS, fs_sig)

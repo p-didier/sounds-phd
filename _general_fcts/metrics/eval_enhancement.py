@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+from bleach import clean
 import numpy as np
 import sys
 import scipy.signal as sig
 from scipy.signal import stft
 from pathlib import Path, PurePath
+
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -24,14 +26,50 @@ if f'{pathToRoot}/_third_parties' not in sys.path:
 @dataclass
 class Metric:
     """Class for storing objective speech enhancement metrics"""
-    before: float = 0.      # metric value before enhancement
-    after: float = 0.       # metric value after enhancement
-    diff: float = 0.        # difference between before and after enhancement
-    afterLocal: float = 0.  # metric value after _local_ enhancement (only using local sensors )
-    diffLocal: float = 0.   # difference between before and after local enhancement
+    before: float = 0.          # metric value before enhancement
+    after: float = 0.           # metric value after enhancement
+    diff: float = 0.            # difference between before and after enhancement
+    afterLocal: float = 0.      # metric value after _local_ enhancement (only using local sensors )
+    diffLocal: float = 0.       # difference between before and after local enhancement
+    dynamicFlag: bool = False   # True if a dynamic version of the metric was computed
+
+    def import_dynamic_metric(self, dynObject):
+        self.dynamicMetric = dynObject
+        self.dynamicFlag = True     # set flag
+        return self
 
 
-def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
+class DynamicMetricsParameters:
+    """Parameters for computing objective speech enhancement metrics
+    dynamically as the signal comes in ("online" fashion)"""
+    def __init__(self, chunkDuration=1., chunkOverlap=0.5, dynamicSNR=False, dynamicSTOI=False, dynamicfwSNRseg=False, dynamicPESQ=False):
+        self.chunkDuration = chunkDuration         # [s] duration of the signal chunk over which to compute the metrics
+        self.chunkOverlap = chunkOverlap         # [/100%] percentage overlap between consecutive signal chunks
+        # flags
+        self.dynamicSNR = dynamicSNR         # if True, compute SNR dynamically
+        self.dynamicSTOI = dynamicSTOI        # if True, compute STOI dynamically
+        self.dynamicfwSNRseg = dynamicfwSNRseg    # if True, compute fwSNRseg dynamically
+        self.dynamicPESQ = dynamicPESQ        # if True, compute PESQ dynamically
+
+    def get_chunk_size(self, fs):
+        self.chunkSize = int(np.floor(self.chunkDuration * fs))
+
+
+class DynamicMetric:
+    """Class for storing dynamic objective speech enhancement metrics"""
+    def __init__(self, totalSigLength, chunkSize, chunkOverlap):
+        nChunks = int(np.floor(totalSigLength / (chunkSize * (1 - chunkOverlap))))
+        self.before = np.zeros(nChunks)      # dynamic metric value before enhancement
+        self.after = np.zeros(nChunks)       # dynamic metric value after enhancement
+        self.diff = np.zeros(nChunks)        # dynamic difference between before and after enhancement
+        self.afterLocal = np.zeros(nChunks)  # dynamic metric value after _local_ enhancement (only using local sensors )
+        self.diffLocal = np.zeros(nChunks)   # dynamic difference between before and after local enhancement
+        self.timeStamps = np.zeros(nChunks)  # [s] true time stamps associated to each chunk 
+
+
+
+
+def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
@@ -45,6 +83,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
         Sampling frequency [samples/s].
     VAD : [N x 1] np.ndarray (float)
         Voice Activity Detector (1: voice + noise; 0: noise only).
+    dynamic : DynamicMetricsParameters object
+        Parameters for dynamic metrics estimation
     gammafwSNRseg : float
         Gamma exponent for fwSNRseg computation.
     frameLen : float
@@ -103,6 +143,7 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
             mode = 'nb'  # narrowband PESQ
         elif fs == 16e3:
             mode = 'wb'  # wideband PESQ
+            
         myPesq.before = pesq(fs, cleanSignal, noisySignal, mode)
         myPesq.after = pesq(fs, cleanSignal, enhancedSignal, mode)
         myPesq.diff = myPesq.after - myPesq.before
@@ -112,44 +153,143 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, gammafwSNRseg
     else:
         print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
+    # Compute dynamic metrics
+    dynamicMetricsFunctions = []    # list function objects to be used
+    if dynamic.dynamicSNR:
+        dynamicMetricsFunctions.append(get_snr)
+    if dynamic.dynamicfwSNRseg:
+        dynamicMetricsFunctions.append(get_fwsnrseg)
+    if dynamic.dynamicSTOI:
+        dynamicMetricsFunctions.append(stoi_fcn)
+    if dynamic.dynamicPESQ:
+        dynamicMetricsFunctions.append(pesq)
+
+    dynMetrics = get_dynamic_metric(dynamicMetricsFunctions,
+                                    cleanSignal,
+                                    noisySignal,
+                                    enhancedSignal,
+                                    fs,
+                                    VAD,
+                                    dynamic,
+                                    gammafwSNRseg,
+                                    frameLen,
+                                    enhancedSignalLocal)
+
+    # Store dynamic metrics
+    for key, value in dynMetrics.items():
+        if key == 'get_snr':
+            snr.import_dynamic_metric(value)
+        elif key == 'get_fwsnrseg':
+            fwSNRseg.import_dynamic_metric(value)
+        elif 'stoi' in key:
+            myStoi.import_dynamic_metric(value)
+        elif 'pesq' in key:
+            myPesq.import_dynamic_metric(value)
+
     return snr, fwSNRseg, myStoi, myPesq
 
 
-def eval(clean_speech, enhanced_or_noisy_speech, Fs, VAD, gamma_fwSNRseg=0.2, frameLen=0.03, onlySTOI=False):
-
-    # Check dimensionalities
-    if clean_speech.shape != enhanced_or_noisy_speech.shape:
-        raise ValueError('The input array shapes do not match')
-    if len(clean_speech.shape) == 1:
-        clean_speech = clean_speech[:, np.newaxis()]
-    if len(enhanced_or_noisy_speech.shape) == 1:
-        enhanced_or_noisy_speech = enhanced_or_noisy_speech[:, np.newaxis()]
-    if isinstance(gamma_fwSNRseg, float):
-        gamma_fwSNRseg = [gamma_fwSNRseg]
-    if isinstance(frameLen, float):
-        frameLen = [frameLen]
-
-    # Number of channels to evaluate
-    nChannels = clean_speech.shape[1]
-
-    fwSNRseg = np.zeros((nChannels, len(gamma_fwSNRseg), len(frameLen)))
-    stoi = np.zeros(nChannels)
-    sisnr = np.zeros(nChannels)
-    for ii in range(nChannels):
-        if not onlySTOI:
-            # Frequency-weight segmental SNR
-            for jj, gamma in enumerate(gamma_fwSNRseg):
-                for kk, lenf in enumerate(frameLen):
-                    print('Estimating fwSNRseg for channel %i, for gamma=%.2f and a frame length of %.2f s.' % (ii+1, gamma, lenf))
-                    fwSNRseg[ii,jj,kk] = get_fwsnrseg(clean_speech[:,ii], enhanced_or_noisy_speech[:,ii], Fs, frameLen=lenf, gamma=gamma)
-            # Speech-Intelligibility-weighted SNR (SI-SNR)
-            print('Estimating SI-SNR for channel %i.' % (ii+1))
-            sisnr[ii] = get_sisnr(enhanced_or_noisy_speech[:,ii], Fs, VAD)
-        # Short-Time Objective Intelligibility (STOI)
-        print('Estimating STOI for channel %i.' % (ii+1))
-        stoi[ii] = stoi_fcn(clean_speech[:,ii], enhanced_or_noisy_speech[:,ii], Fs)
+def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
+    """Computes a given speech enhancement objective metric dynamically over
+    a long signal, to observe the evolution of that metric over time.
     
-    return fwSNRseg,sisnr,stoi
+    Parameters
+    ----------
+    fcn : function object or list of function objects
+        Function(s) to use to compute the desired metric.
+    __other parameters : see `get_metrics()`
+    
+    Returns
+    -------
+    dynObjects : dict of DynamicMetric objects
+        Dynamic metric(s).
+    """
+
+    # Flag to signal presence of a local signal estimate
+    flagLocal = enhancedSignalLocal != [] and enhancedSignalLocal.shape == enhancedSignal.shape
+
+    # Pre-process inputs
+    if not isinstance(fcns, list):
+        fcns = [fcns]   # make sure `fcns` is a list
+
+    # Get useful values
+    dynamic.get_chunk_size(fs)                          # derive chunk size
+
+    # Initialize dynamic metric objects
+    dynObjects = dict([(s.__name__, DynamicMetric(totalSigLength=cleanSignal.shape[0],
+                                                chunkSize=dynamic.chunkSize,
+                                                chunkOverlap=dynamic.chunkOverlap)) for s in fcns])
+
+    c = 0
+    while 1:    # loop over signal, chunk by chunk 
+        i0 = int(c * dynamic.chunkSize * (1 - dynamic.chunkOverlap))
+        i1 = int(i0 + dynamic.chunkSize)
+        if i1 > cleanSignal.shape[0]:
+            break   # end `while`-loop
+
+        for idxFcn in range(len(fcns)):
+
+            fcn = fcns[idxFcn]  # select current function object
+
+            ref = fcn.__name__  # function reference (name)
+
+            if ref == 'get_snr':           # Unweighted SNR
+                dynObjects[ref].before[c] = fcn(noisySignal[i0:i1], VAD[i0:i1])
+                dynObjects[ref].after[c] = fcn(enhancedSignal[i0:i1], VAD[i0:i1])
+                if flagLocal:
+                    dynObjects[ref].afterLocal[c] = fcn(enhancedSignalLocal[i0:i1], VAD[i0:i1])
+            elif ref == 'get_fwsnrseg':    # fwSNRseg
+                tmp = fcn(cleanSignal[i0:i1], noisySignal[i0:i1], fs, frameLen, gammafwSNRseg)
+                dynObjects[ref].before[c] = np.mean(tmp)
+                tmp = fcn(cleanSignal[i0:i1], enhancedSignal[i0:i1], fs, frameLen, gammafwSNRseg)
+                dynObjects[ref].after[c] = np.mean(tmp)
+                if flagLocal:   
+                    tmp = fcn(cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], fs, frameLen, gammafwSNRseg)
+                    dynObjects[ref].afterLocal[c] = np.mean(tmp)
+            elif 'stoi' in ref:            # STOI
+                dynObjects[ref].before[c] = fcn(cleanSignal[i0:i1], noisySignal[i0:i1], fs)
+                dynObjects[ref].after[c] = fcn(cleanSignal[i0:i1], enhancedSignal[i0:i1], fs)
+                if flagLocal:
+                    dynObjects[ref].afterLocal[c] = fcn(cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], fs)
+            elif 'pesq' in ref:            # PESQ
+                if fs in [8e3, 16e3]:
+                    if fs == 8e3:
+                        mode = 'nb'  # narrowband
+                    elif fs == 16e3:
+                        mode = 'wb'  # wideband
+                        
+                    try:
+                        tmp = fcn(fs, cleanSignal[i0:i1], noisySignal[i0:i1], mode)
+                    except RuntimeError:
+                        print(f'Dynamic PESQ computation over {dynamic.chunkDuration}s chunks: "NoUtterancesError". Keeping `myPesq` dynamic attributes as 0.')
+                    else:
+                        dynObjects[ref].before[c] = fcn(fs, cleanSignal[i0:i1], noisySignal[i0:i1], mode)
+                        dynObjects[ref].after[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignal[i0:i1], mode)
+                        if flagLocal:
+                            dynObjects[ref].afterLocal[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], mode)
+                else:
+                    print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
+
+        c += 1     # increment chunk index
+
+        # Emergency stop of `while`-loop
+        if c > 2 * int(np.floor(cleanSignal.shape[0] / (dynamic.chunkSize * (1 - dynamic.chunkOverlap)))):
+            raise ValueError(f'Seemingly infinite while-loop bug while computing dynamic metric for function "{fcn.__name__}".')
+
+    for idxFcn in range(len(fcns)):
+        ref = fcns[idxFcn].__name__  # function reference (name)
+        # Compute differences
+        dynObjects[ref].diff = dynObjects[ref].after - dynObjects[ref].before
+        if flagLocal:
+            dynObjects[ref].diffLocal = dynObjects[ref].afterLocal - dynObjects[ref].before
+
+        # Include time stamps
+        timeShift = dynamic.chunkDuration * (1 - dynamic.chunkOverlap)
+        dynObjects[ref].timeStamps = np.arange(start=timeShift, stop=cleanSignal.shape[0] / fs, step=timeShift)
+
+    stop = 1
+
+    return dynObjects
 
 
 def get_sisnr(x, Fs, VAD):
@@ -192,15 +332,6 @@ def getSNR(timeDomainSignal, VAD):
     # Number of time frames where VAD is active/inactive
     Ls = np.count_nonzero(VAD)
     Ln = len(VAD) - Ls
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(timeDomainSignal)
-    # ax.plot(VAD * np.amax(timeDomainSignal), 'k')
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
 
     if Ls > 0 and Ln > 0:
         noisePower = np.mean(np.power(timeDomainSignal[VAD == 0], 2))
