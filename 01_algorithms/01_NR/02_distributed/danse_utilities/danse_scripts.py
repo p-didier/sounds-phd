@@ -225,6 +225,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
+    residualSROs = []                               # residual SROs, for each node, across DANSE iterations
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
@@ -259,6 +260,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
+        residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -389,8 +391,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     extraPhaseShiftFactor = np.zeros(dimYTilde[k])
                     for q in range(len(neighbourNodes[k])):
                         if not np.isnan(bufferFlags[q]):
-                            extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = -1 * bufferFlags[q] * settings.broadcastLength
-                            # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShift = 1` and no additional phase shift is applied
+                            extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[q] * settings.broadcastLength
+                            # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
                             if bufferFlags[q] != 0:
                                 stop = 1
                         else:
@@ -399,7 +401,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Complete phase shift factors
                     phaseShiftFactors[k] += extraPhaseShiftFactor
                     # Apply phase shift factors
-                    ytildeHat[k][:, i[k], :] *= np.exp(1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
+                    ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
@@ -437,7 +439,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     print('!! User-forced bypass of filter coefficients updates !!')
 
 
-
                 # Update external filters (for broadcasting)
                 if t - lastExternalFiltUpdateInstant >= settings.timeBtwExternalFiltUpdates:
                     wTildeExternal[k] = (1 - alphaExternalFilters) * wTildeExternal[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
@@ -449,15 +450,43 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # Update SRO estimates
                 if settings.estimateSROs:
-                    raise ValueError('[NOT YET IMPLEMENTED] SRO estimation')    # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+
+                    residualSROs[k][:, i[k]] = subs.residual_sro_estimation(
+                                        wPos=wTilde[k][:, i[k] + 1, :],         # a posteriori estimate
+                                        wPri=wTilde[k][:, i[k], :],             # a priori estimate
+                                        nLocalSensors=yLocalCurr.shape[-1],
+                                        N=frameSize,
+                                        Ns=Ns
+                                        )
+
+
+                    # if k == 0 and i[k] == 0:
+                    #     fig = plt.figure(figsize=(8,4))
+                    #     ax = fig.add_subplot(111)
+                    # ax.plot(np.abs(phikappa))
+                    # ax.hlines(np.mean(np.abs(phikappa)), xmin=0, xmax=len(phikappa), color='k')
+                    # ax.set_title(f'$\\angle(w_{{pri}}w_{{pos}}^\\ast)$')
+                    # # draw the plot
+                    # plt.draw() 
+                    # plt.pause(0.01)
+
+                    # # start removing points if you don't want all shown
+                    # if i[k] >= 0:
+                    #     # ax.lines[0].remove()
+                    #     ax.clear()
+
+
+                    # SROsEstimates[k] = np.zeros(len(neighbourNodes[k]))  # TODO
+                    SROsEstimates[k] = (settings.SROsppm[k] - settings.SROsppm[neighbourNodes[k]]) * 1e-6    # no data-based dynamic SRO estimation: use oracle knowledge
                 else:
-                    SROsEstimates[k] = (settings.SROsppm[neighbourNodes[k]] - settings.SROsppm[k]) * 1e-6    # no data-based dynamic SRO estimation: use oracle knowledge
+                    SROsEstimates[k] = (settings.SROsppm[k] - settings.SROsppm[neighbourNodes[k]]) * 1e-6    # no data-based dynamic SRO estimation: use oracle knowledge
 
                 # Update phase shifts for SRO compensation
                 if settings.compensateSROs:
-                    for q in range(len(SROsEstimates[k])):
-                        #                               ↓↓↓↓ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   # increment recursively
+                    for q in range(len(neighbourNodes[k])):
+                        # Increment phase shift factor recursively....
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   
+                        #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
@@ -481,7 +510,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
-    print(f'(Real-time processing factor: {np.round(masterClock[-1], 2) / dur})')
+    print(f'(Real-time processing factor: {np.round(masterClock[-1] / dur, 4)})')
 
     # Export empty array if local desired signal estimate was not computed
     if (dLocal == 0).all():
@@ -490,6 +519,28 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Profiling
     profiler.stop()
     profiler.print()
+    
+
+    fig = plt.figure(figsize=(6,4))
+    for ii in range(len(residualSROs)):
+        ax = fig.add_subplot(len(residualSROs) * 100 + 10 + ii + 1)
+        for jj in range(residualSROs[ii].shape[0]):
+            if jj >= asc.numSensorPerNode[ii]:
+                lab = f'Neighbor #{jj+1 - asc.numSensorPerNode[ii]}'
+                ax.plot(residualSROs[ii][jj, :].T * 10 ** 6, label=lab)
+                # Show actual relative SRO
+                trueSRO = (SROsEstimates[ii][jj - asc.numSensorPerNode[ii]]) * 10 ** 6
+                ax.hlines(trueSRO, xmin=0, xmax=residualSROs[ii].shape[1], color='k')
+        ax.grid()
+        ax.set_ylabel('Residual SRO [ppm]')
+        ax.set_title(f"Node {ii+1}'s estimates")
+        ax.legend()
+        # ax.set_ylim([-100, 100])
+    ax.set_xlabel('DANSE iteration i')
+    plt.tight_layout()	
+    plt.show()
+
     stop = 1
+
 
     return d, dLocal

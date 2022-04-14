@@ -1,4 +1,4 @@
-import nntplib
+
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
@@ -354,13 +354,13 @@ def danse_compression(yq, wHat, n):
         wHatFull = wHatFull[:int(nTotal/2 + 1)]
         yqHat = yqHat[:int(nTotal/2 + 1)]
         # Apply linear combination to form compressed signal
-        zqHat = wHatFull * yqHat     # single sensor = simple element-wise multiplication
+        zqHat = wHatFull.conj() * yqHat     # single sensor = simple element-wise multiplication
     else:
         # Keep only positive frequencies
         wHatFull = wHatFull[:int(nTotal/2 + 1), :]
         yqHat = yqHat[:int(nTotal/2 + 1), :]
         # Apply linear combination to form compressed signal
-        zqHat = np.einsum('ij,ij->i', wHatFull, yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+        zqHat = np.einsum('ij,ij->i', wHatFull.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
 
     # Go back to time domain 
     zq = back_to_time_domain(zqHat, nTotal)
@@ -419,7 +419,7 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
                 # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                 # Interpretation: Node `q` samples slower than node `k`. 
                 # Response: ...
-                raise ValueError('NOT IMPLEMENTED YET: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
+                raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
             elif (frameSize - Bq) % L == 0 and Bq > frameSize:
                 # Node `q` has already transmitted too much data to node `k`.
                 # Interpretation: Node `q` samples faster than node `k`.
@@ -431,20 +431,19 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
             if Bq == N:             # case 1: no broadcast frame mismatch between node `k` and node `q`
                 pass
             elif (N - Bq) % L == 0 and Bq < N:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
-                print(f'[-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{int(np.abs((N - Bq) / L))} broadcast(s)')
-                bufferFlags[idxq] = -1 * int(np.abs((N - Bq) / L))      # raise negative flag
+                nMissingBroadcasts = int(np.abs((N - Bq) / L))
+                print(f'[b-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
             elif (N - Bq) % L == 0 and Bq > N:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
-                print(f'[+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{int(np.abs((N - Bq) / L))} broadcasts(s)')
-                bufferFlags[idxq] = +1 * int(np.abs((N - Bq) / L))       # raise positive flag
+                nExtraBroadcasts = int(np.abs((N - Bq) / L))
+                print(f'[b+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
             else:
                 if (N - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
-                    print('[!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
+                    print('[b!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
                     bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
                 else:
-                    if (N - Bq) % L == 0:
-                        raise ValueError(f'NOT IMPLEMENTED YET: too large SRO, >1 broadcast length over- or under-flow.')
-                    else:
-                        raise ValueError(f'ERROR: Unexpected buffer size for neighbor node q={neighs[idxq]+1}.')
+                    raise ValueError(f'Unexpected buffer size ({Bq} samples, with L={L} and N={N}) for neighbor node q={neighs[idxq]+1}.')
             # Build current buffer
             if frameSize - Bq > 0:
                 zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
@@ -818,7 +817,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
 
         lk[k] += 1  # increment local broadcast index
 
-    return zBuffer, zLocal
+    return zBuffer
 
 
 def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
@@ -852,3 +851,55 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
         Rnn = beta * Rnn + (1 - beta) * yyH  # update noise-only matrix
 
     return Ryy, Rnn
+
+
+def residual_sro_estimation(wPos, wPri, nLocalSensors, N, Ns):
+    """Estimates residual SRO using the residuals phase technique.
+    
+    Parameters
+    ----------
+    wPos : [N x M] np.ndarray (complex)
+        A posteriori (iteration `i + 1`) local filter estimates.
+    wPri : [N x M] np.ndarray (complex)
+        A priori (iteration `i`) local filter estimates.
+    nLocalSensors : int
+        Number of local sensors at current node.
+    N : int
+        Processing frame length (== DANSE DFT size).
+    Ns : int
+        Number of new samples at each new frame, counting overlap (`Ns = N * (1 - O)`, where `O` is the amount of overlap [/100%])
+
+    Returns
+    -------
+    residualSROs : [M x 1] np.ndarray (float)
+        Estimated residual SROs for each node.
+        -- `nLocalSensors` first elements of output should be zero (no intra-node SROs)
+    """
+
+    # Check correct input orientation
+    if wPos.shape[0] < wPos.shape[1]:
+        wPos = wPos.T
+    if wPri.shape[0] < wPri.shape[1]:
+        wPri = wPri.T
+    # Create useful explicit variables
+    numFreqLines = wPos.shape[0]
+    dimYTilde = wPos.shape[1]
+    
+
+    # Compute "residuals angle" matrix
+    phi = np.angle(wPri * wPos.conj())      # see LaTeX journal 2022 week 02
+    phi[:, :nLocalSensors] = 0              # NOTE: force a 0 residual at the local sensors (no intra-node SRO)
+
+    # Create `kappa` frequency bins vector
+    kappa = 2 * np.pi / N * Ns * np.arange(numFreqLines)  # TODO: check if that is correct -- Eq. (3), week 02 in LaTeX journal 2022
+
+    # Estimate residual SRO as least-square solution to system of equation across frequency bins
+    residualSROs = np.zeros(dimYTilde)
+    for q in range(dimYTilde):
+        residualSROs[q] = np.dot(kappa, phi[:, q]) / np.dot(kappa, kappa)
+
+
+    stop = 1
+
+    return residualSROs#, phi[:, -1] * kappa / np.dot(kappa, kappa)
+
