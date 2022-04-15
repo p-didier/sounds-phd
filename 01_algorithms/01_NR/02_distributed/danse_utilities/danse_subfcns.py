@@ -1,4 +1,5 @@
 
+from turtle import update
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
@@ -191,6 +192,8 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
         GEVD-DANSE filter coefficients.
     Qmat : [M x N x N] np.ndarray (complex)
         Hermitian conjugate inverse of the generalized eigenvectors matrix of the pencil {Ryy, Rnn}.
+    Xmat : [M x N x N] np.ndarray (complex)
+        Qeneralized eigenvectors matrix of the pencil {Ryy, Rnn}.
     """
     # ------------ for-loop-free estimate ------------
     n = Ryy.shape[-1]
@@ -338,6 +341,16 @@ def danse_compression(yq, wHat, n):
     wIR = back_to_time_domain(wHat, n, axis=0)      # TODO: 2022/03/25 -- the IR is not causal (increasing amplitude at the tail) [see Word journal week12 FRI]
     wIR = np.real_if_close(wIR)
 
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(wIR)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+
+
     # Append zeros for OLS processing (matching input signal chunk length)
     nTotal = yq.shape[0]
     if flagSingleSensor:
@@ -368,6 +381,8 @@ def danse_compression(yq, wHat, n):
 
     # Discard oldest (incorrect) samples
     zq = zq[n:]
+
+    stop = 1
 
     return zq
 
@@ -620,7 +635,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
+def get_events_matrix(timeInstants, N, Ns, L, nodeLinks, fs):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -638,10 +653,12 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
     nodeLinks : [Nn x Nn] np.ndarray (bools)
         Node links matrix. Element `(i,j)` is `True` if node `i` and `j` are connected, `False` otherwise.
+    fs : list of floats
+        Sampling frequency of each node.
     
     Returns
     -------
-    eventInstants : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
+    outputEvents : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
         Event instants matrix. One column per event instant.
     fs : [Nn x 1] list of floats
         Sampling frequency of each node.
@@ -664,33 +681,56 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     # Number of nodes
     nNodes = timeInstants.shape[1]
     
-    # Check for clock jitter and save sampling frequencies
+    # Check for clock jitter and save sampling frequencies -- TODO
     deltas = np.diff(timeInstants, axis=0)
     for k in range(nNodes):
         precision = int(np.ceil(np.abs(np.log10(np.mean(deltas[:, k]) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
         if len(np.unique(np.round(deltas[:, k], precision))) > 1:
             raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas[:, k]))} different sample intervals detected for node {k+1}.')
-    fs = 1 / deltas[0, :]
 
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
-    
+
     # Get expected broadcast instants
     initialBroadcasts = N / fs      # [s] first instant at which each node has recorded its first `N` samples after network start-up
     stepBetweenBroadcasts = L / fs  # [s] time it takes for each node to record `L` new samples
-    broadcastInstants = np.array([np.arange(start=initialBroadcasts[k], stop=Ttot[k], step=stepBetweenBroadcasts[k]) for k in range(nNodes)])
+    broadcastInstants = [np.arange(start=initialBroadcasts[k], stop=Ttot[k], step=stepBetweenBroadcasts[k]) for k in range(nNodes)]
 
     # Derive first update instants
     initialUpdates = np.zeros(nNodes)
     for k in range(nNodes):
-        firstBroadcastsNeighbors = [v[0] for v in broadcastInstants[nodeLinks[k, :]]]
+        firstBroadcastsNeighbors = [v[0] for v in np.array(broadcastInstants)[nodeLinks[k, :]]]
         initialUpdates[k] = np.amax(firstBroadcastsNeighbors)
 
     # Get expected DANSE update instants
     stepBetweenUpdates = Ns / fs  # [s] time it takes for each node to record `Ns` new samples
-    updateInstants = np.array([np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)])
+    updateInstants = [np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)]
+
+    # Build event matrix
+    outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)
+
+    return outputEvents
+
+
+def build_events_matrix(updateInstants, broadcastInstants, nNodes):
+    """Sub-function of `get_events_matrix`, building the events matrix
+    from the update and broadcast instants.
     
-    # Number of unique update instants across the WASN
+    Parameters
+    ----------
+    updateInstants : list of np.ndarrays (floats)
+        Update instants per node [s].
+    broadcastInstants : list of np.ndarrays (floats)
+        Broadcast instants per node [s].
+    nNodes : int
+        Number of nodes in the network.
+
+    Returns
+    -------
+    outputEvents : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
+        Event instants matrix. One column per event instant.
+    """
+
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
     # Number of unique broadcast instants across the WASN
     numUniqueBroadcastInstants = sum([len(np.unique(broadcastInstants[k])) for k in range(nNodes)])
@@ -703,13 +743,15 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     for k in range(nNodes):
         idxStart_u = sum([len(updateInstants[q]) for q in range(k)])
         idxEnd_u = idxStart_u + len(updateInstants[k])
-        flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = updateInstants[k]
+        flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = np.round(updateInstants[k], 7)
+        # flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = updateInstants[k]
         flattenedUpdateInstants[idxStart_u:idxEnd_u, 1] = k
         flattenedUpdateInstants[:, 2] = 1    # event reference "1" for updates
 
         idxStart_b = sum([len(broadcastInstants[q]) for q in range(k)])
         idxEnd_b = idxStart_b + len(broadcastInstants[k])
-        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = broadcastInstants[k]
+        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = np.round(broadcastInstants[k], 7)
+        # flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = broadcastInstants[k]
         flattenedBroadcastInstants[idxStart_b:idxEnd_b, 1] = k
         flattenedBroadcastInstants[:, 2] = 0    # event reference "0" for broadcasts
     # Combine
@@ -718,7 +760,7 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     idxSort = np.argsort(eventInstants[:, 0], axis=0)
     eventInstants = eventInstants[idxSort, :]
     # Group
-    eventInstantsFormatted = []
+    outputEvents = []
     eventIdx = 0    # init while-loop
     nodesConcerned = []             # init
     eventTypesConcerned = []        # init
@@ -728,14 +770,14 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
         nodesConcerned.append(int(eventInstants[eventIdx, 1]))
         eventTypesConcerned.append(int(eventInstants[eventIdx, 2]))
 
-        if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
+        if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be grouped with the current instant
             nextInstant = eventInstants[eventIdx + 1, 0]
             while currInstant == nextInstant:
                 eventIdx += 1
                 currInstant = eventInstants[eventIdx, 0]
                 nodesConcerned.append(int(eventInstants[eventIdx, 1]))
                 eventTypesConcerned.append(int(eventInstants[eventIdx, 2]))
-                if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be groued with the current instant
+                if eventIdx < numEventInstants - 1:   # check whether the next instant is the same and should be grouped with the current instant
                     nextInstant = eventInstants[eventIdx + 1, 0]
                 else:
                     eventIdx += 1
@@ -764,11 +806,11 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
         eventTypesConcerned = eventTypesConcerned[indices]
 
         # Build events matrix
-        eventInstantsFormatted.append(np.array([currInstant, nodesConcerned, eventTypesConcerned], dtype=object))
+        outputEvents.append(np.array([currInstant, nodesConcerned, eventTypesConcerned], dtype=object))
         nodesConcerned = []         # reset
         eventTypesConcerned = []    # reset
 
-    return eventInstantsFormatted, fs
+    return outputEvents
 
 
 def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
@@ -853,15 +895,15 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
     return Ryy, Rnn
 
 
-def residual_sro_estimation(wPos, wPri, nLocalSensors, N, Ns):
+def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
     """Estimates residual SRO using the residuals phase technique.
     
     Parameters
     ----------
-    wPos : [N x M] np.ndarray (complex)
-        A posteriori (iteration `i + 1`) local filter estimates.
-    wPri : [N x M] np.ndarray (complex)
-        A priori (iteration `i`) local filter estimates.
+    resPos : [N x M] np.ndarray (complex)
+        A posteriori (iteration `i + 1`) residuals for every frequency bin and every element of $\\tilde{y}$.
+    resPri : [N x M] np.ndarray (complex)
+        A priori (iteration `i`) residuals for every frequency bin and every element of $\\tilde{y}$.
     nLocalSensors : int
         Number of local sensors at current node.
     N : int
@@ -877,17 +919,17 @@ def residual_sro_estimation(wPos, wPri, nLocalSensors, N, Ns):
     """
 
     # Check correct input orientation
-    if wPos.shape[0] < wPos.shape[1]:
-        wPos = wPos.T
-    if wPri.shape[0] < wPri.shape[1]:
-        wPri = wPri.T
+    if resPos.shape[0] < resPos.shape[1]:
+        resPos = resPos.T
+    if resPri.shape[0] < resPri.shape[1]:
+        resPri = resPri.T
     # Create useful explicit variables
-    numFreqLines = wPos.shape[0]
-    dimYTilde = wPos.shape[1]
+    numFreqLines = resPos.shape[0]
+    dimYTilde = resPos.shape[1]
     
 
     # Compute "residuals angle" matrix
-    phi = np.angle(wPri * wPos.conj())      # see LaTeX journal 2022 week 02
+    phi = np.angle(resPri * resPos.conj())      # see LaTeX journal 2022 week 02
     phi[:, :nLocalSensors] = 0              # NOTE: force a 0 residual at the local sensors (no intra-node SRO)
 
     # Create `kappa` frequency bins vector
@@ -901,5 +943,5 @@ def residual_sro_estimation(wPos, wPri, nLocalSensors, N, Ns):
 
     stop = 1
 
-    return residualSROs#, phi[:, -1] * kappa / np.dot(kappa, kappa)
+    return residualSROs
 
