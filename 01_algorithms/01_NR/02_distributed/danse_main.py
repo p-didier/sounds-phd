@@ -40,18 +40,20 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 3]_Nss1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS3_RT500ms',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_allNodesInSamePosition_anechoic',
     #
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
+    # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=10,
+    signalDuration=20,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
@@ -63,45 +65,49 @@ mySettings = ProgramSettings(
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
-    SROsppm=[0, 100],
-    # SROsppm=0,
+    # SROsppm=[0, 100],
+    # SROsppm=[0, 500, 1000],
+    # SROsppm=[100, 0],
+    SROsppm=0,
     # compensateSROs=True,                # if True, compensate SROs
-    compensateSROs=False,                # if True, compensate SROs
-    estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
+    compensateSROs=False,               # if True, compensate SROs
+    estimateSROs=True,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
+    # estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
     #
     # vvv STOs parameters vvv
-    # STOinducedDelays=[0, 0.1],         # [s]
-    # compensateSTOs=False,                # if True, compensate STOs
-    compensateSTOs=True,                # if True, compensate STOs
+    # STOinducedDelays=[0, 0.1],          # [s]
+    # compensateSTOs=False,               # if True, compensate STOs
+    # compensateSTOs=True,                # if True, compensate STOs
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
-    referenceSensor=0,
-    computeLocalEstimate=True,
-    performGEVD=1,
+    referenceSensor=0,                  # index of reference sensor at each node (same for every node)
+    computeLocalEstimate=True,          # if True, also compute and store the local estimate (as if there was no cooperation between nodes)
+    performGEVD=1,                      # if True, perform GEVD-DANSE
     # bypassFilterUpdates=True,
-    timeBtwExternalFiltUpdates=1,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=2,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
-    printouts=PrintoutsParameters(events_parser=True),
+    printouts=PrintoutsParameters(events_parser=True,
+                                    externalFilterUpdates=True),
     #
     dynamicMetricsParams=dynParams(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]
                                     dynamicfwSNRseg=True,
-                                    dynamicPESQ=True,
-                                    dynamicSNR=True,
-                                    dynamicSTOI=True)
+                                    dynamicSNR=True)
     )
 
 # Subfolder for export
 subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySettings.acousticScenarioPath).parent.name}'
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
-experimentName = f'{[int(sro) for sro in mySettings.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
-if mySettings.compensateSROs:
-    experimentName += '_comp'
-else:
-    experimentName += '_nocomp'
+experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
+if (np.array(mySettings.SROsppm) != 0).any():
+    if mySettings.compensateSROs:
+        experimentName += '_comp'
+    else:
+        experimentName += '_nocomp'
 
 exportPath = f'{Path(__file__).parent}/res/{subfolder}/{experimentName}'
 lightExport = True          # <-- set to True to not export whole signals in pkl.gz archives
@@ -148,8 +154,17 @@ def main(mySettings: ProgramSettings, exportPath, showPlots=1, lightExport=True)
                 wipe_folder(exportPath)     # wipe export folder    
             results.save(exportPath, lightExport)        # save results
             mySettings.save(exportPath)     # save settings
-            # Post-process
-            get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
+            # Post-process - Speech enhancement metrics, figures, sounds
+            flagFigsAndSound = True
+            if not np.array(['speech' in s for s in mySettings.desiredSignalFile]).any():   # check that we are dealing with speech
+                inp = input(f"""No "speech" sub-string detected in `desiredSignalFile` paths.
+                        --> Possibly not using an actual speech target signal.
+                        --> Compute intelligibility metrics (+ figs/wavs export) anyway? [y]/n  """)
+                if inp not in ['y', 'Y']:
+                    print('Not computing intelligibility metrics (+ figs/wavs export).')
+                    flagFigsAndSound = False
+            if flagFigsAndSound:
+                get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
         else:
             print('FILTER UPDATES WERE BYPASSED. NO EXPORT, NO RESULTS VISUALIZATION.')
 

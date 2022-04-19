@@ -312,6 +312,61 @@ def back_to_time_domain(x, n, axis=0):
     return xout
 
 
+def danse_compression_freq_domain(yq, wHat):
+    """Performs local signals compression in the frequency domain. TODO:
+
+    Parameters
+    ----------
+    yq : [N x nSensors] np.ndarray (real)
+        Local sensor signals.
+    wHat : [N/2 x nSensors] np.ndarray (real or complex)
+        Frequency-domain local filter estimate (from latest DANSE iteration).
+    
+    Returns
+    -------
+    zqHat : [N/2 x 1] np.ndarray (complex)
+        Frequency-domain compressed signal for current frame.
+    """
+
+    # Check for single-sensor case
+    flagSingleSensor = False
+    if wHat.shape[-1] == 1:
+        wHat = np.squeeze(wHat)
+        yq = np.squeeze(yq)
+        flagSingleSensor = True
+    
+    # Transfer local observations to frequency domain
+    n = len(yq)     # FFT order
+    yqHat = np.fft.fft(np.squeeze(yq), n, axis=0)
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(211)
+    # ax.plot(yq)
+    # ax.grid()
+    # ax = fig.add_subplot(212)
+    # ax.plot(20 * np.log10(np.abs(yqHat)))
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+
+    if flagSingleSensor:
+        # Keep only positive frequencies
+        yqHat = yqHat[:int(n/2 + 1)]
+        # Apply linear combination to form compressed signal
+        zqHat = wHat.conj() * yqHat     # single sensor = simple element-wise multiplication
+        # zqHat = wHat * yqHat     # single sensor = simple element-wise multiplication
+    else:
+        # Keep only positive frequencies
+        yqHat = yqHat[:int(n/2 + 1), :]
+        # Apply linear combination to form compressed signal
+        zqHat = np.einsum('ij,ij->i', wHat.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+        # zqHat = np.einsum('ij,ij->i', wHat, yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+
+    return zqHat
+
+
 def danse_compression(yq, wHat, n):
     """Performs local signals compression according to DANSE theory [1].
     
@@ -341,6 +396,10 @@ def danse_compression(yq, wHat, n):
     wIR = back_to_time_domain(wHat, n, axis=0)      # TODO: 2022/03/25 -- the IR is not causal (increasing amplitude at the tail) [see Word journal week12 FRI]
     wIR = np.real_if_close(wIR)
 
+    # GcOLS = np.zeros((n, n))
+    # GcOLS[:int(n/2), :int(n/2)] = np.eye(int(n/2))  	
+    # wHatFull = np.fft.fft(GcOLS @ wIR, n, axis=0)
+
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(8,4))
     # ax = fig.add_subplot(111)
@@ -348,8 +407,6 @@ def danse_compression(yq, wHat, n):
     # ax.grid()
     # plt.tight_layout()	
     # plt.show()
-
-
 
     # Append zeros for OLS processing (matching input signal chunk length)
     nTotal = yq.shape[0]
@@ -380,14 +437,14 @@ def danse_compression(yq, wHat, n):
     zq = np.real_if_close(zq)
 
     # Discard oldest (incorrect) samples
-    zq = zq[n:]
+    zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
 
     stop = 1
 
     return zq
 
 
-def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, N, L, lastExpectedIter):
+def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, Ns, L, lastExpectedIter, broadcastDomain):
     """When called, processes the incoming data from other nodes, as stored in local node's buffers.
     Called whenever a DANSE update can be performed (`N` new local samples were captured since last update).
     
@@ -403,7 +460,7 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
         DANSE iteration index at node `k`.
     frameSize : int
         Size of FFT / DANSE update frame.
-    N : int
+    Ns : int
         Expected number of new (never seen before) samples at every DANSE update.
     L: int
         Number of samples expected to be transmitted per broadcast.
@@ -420,50 +477,74 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
         Value NaN: last iteration, lack of samples due to cumulated SRO.
     """
 
-    zk = np.empty((frameSize, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
+    # Number of frequency lines expected (for freq.-domain processing)
+    nExpectedFreqLines = int(frameSize / 2 + 1)
+
+    if broadcastDomain == 't':
+        zk = np.empty((frameSize, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
+    elif broadcastDomain == 'f':
+        zk = np.empty((nExpectedFreqLines, 0), dtype=complex)
     bufferFlags = np.zeros(len(neighs))    # flags (positive: +1; negative: -1; or none: 0) -- indicate buffer over- or under-flow
 
     for idxq in range(len(neighs)):
+        
         Bq = len(zBufferk[idxq])  # buffer size for neighbour node `q`
-        if ik == 0: # first DANSE iteration case -- we are expecting an abnormally full buffer, with an entire DANSE chunk size inside of it
-            if Bq == frameSize: 
-                # There is no significant SRO between node `k` and `q`.
-                # Response: node `k` uses all samples in the `q`^th buffer.
-                zCurrBuffer = zBufferk[idxq]
-            elif (frameSize - Bq) % L == 0 and Bq < frameSize:
-                # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
-                # Interpretation: Node `q` samples slower than node `k`. 
-                # Response: ...
-                raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
-            elif (frameSize - Bq) % L == 0 and Bq > frameSize:
-                # Node `q` has already transmitted too much data to node `k`.
-                # Interpretation: Node `q` samples faster than node `k`.
-                # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
-                bufferFlags[idxq] = +1 * int((frameSize - Bq) / L)      # raise negative flag
-                zCurrBuffer = zBufferk[idxq][-frameSize:]
+        if broadcastDomain == 't':
+            if ik == 0: # first DANSE iteration case -- we are expecting an abnormally full buffer, with an entire DANSE chunk size inside of it
+                if Bq == frameSize: 
+                    # There is no significant SRO between node `k` and `q`.
+                    # Response: node `k` uses all samples in the `q`^th buffer.
+                    zCurrBuffer = zBufferk[idxq]
+                elif (frameSize - Bq) % L == 0 and Bq < frameSize:
+                    # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
+                    # Interpretation: Node `q` samples slower than node `k`. 
+                    # Response: ...
+                    raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
+                elif (frameSize - Bq) % L == 0 and Bq > frameSize:
+                    # Node `q` has already transmitted too much data to node `k`.
+                    # Interpretation: Node `q` samples faster than node `k`.
+                    # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
+                    bufferFlags[idxq] = +1 * int((frameSize - Bq) / L)      # raise negative flag
+                    zCurrBuffer = zBufferk[idxq][-frameSize:]
 
-        else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
-            if Bq == N:             # case 1: no broadcast frame mismatch between node `k` and node `q`
-                pass
-            elif (N - Bq) % L == 0 and Bq < N:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
-                nMissingBroadcasts = int(np.abs((N - Bq) / L))
-                print(f'[b-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
-                bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
-            elif (N - Bq) % L == 0 and Bq > N:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
-                nExtraBroadcasts = int(np.abs((N - Bq) / L))
-                print(f'[b+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
-                bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
-            else:
-                if (N - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
-                    print('[b!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
-                    bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
+            else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
+                if Bq == Ns:             # case 1: no broadcast frame mismatch between node `k` and node `q`
+                    pass
+                elif (Ns - Bq) % L == 0 and Bq < Ns:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
+                    nMissingBroadcasts = int(np.abs((Ns - Bq) / L))
+                    print(f'[b-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
+                elif (Ns - Bq) % L == 0 and Bq > Ns:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
+                    nExtraBroadcasts = int(np.abs((Ns - Bq) / L))
+                    print(f'[b+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                    bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
                 else:
-                    raise ValueError(f'Unexpected buffer size ({Bq} samples, with L={L} and N={N}) for neighbor node q={neighs[idxq]+1}.')
-            # Build current buffer
-            if frameSize - Bq > 0:
+                    if (Ns - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
+                        print('[b!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
+                        bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
+                    else:
+                        raise ValueError(f'Unexpected buffer size ({Bq} samples, with L={L} and N={Ns}) for neighbor node q={neighs[idxq]+1}.')
+                # Build current buffer
+                if frameSize - Bq > 0:
+                    zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
+                else:   # special case: no overlap btw. consecutive frames
+                    zCurrBuffer = zBufferk[idxq]
+            
+        elif broadcastDomain == 'f':
+            
+            if Bq == 0:     # empty buffer -- SRO-induced issue
+                raise ValueError('[NOT YET IMPLEMENTED]')
                 zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
-            else:   # special case: no overlap btw. consecutive frames
+            
+            elif Bq > nExpectedFreqLines:     # too full buffer -- SRO-induced issue
+                raise ValueError('[NOT YET IMPLEMENTED]')
+                zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
+            
+            elif Bq == nExpectedFreqLines:     # correctly filled-in buffer
+                # if ik == 0: # first DANSE iteration case -- we are expecting an abnormally full buffer, with an entire DANSE chunk size inside of it
                 zCurrBuffer = zBufferk[idxq]
+                # else:
+                #     zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
 
         # Stack compressed signals
         zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
@@ -541,6 +622,38 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
     return broadcastFlag, compressStarted
 
 
+def fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalK):
+    """Fills neighbors nodes' buffers, using frequency domain data.
+    Data comes from compression via function `danse_compression_freq_domain`.
+    
+        Parameters
+    ----------
+    k : int
+        Current node index.
+    neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists (int)
+        Network indices of neighbours, per node.
+    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays (float)
+        Compressed signals buffers for each node and its neighbours.
+    zLocal : [N x 1] np.ndarray (float)
+        Latest compressed local signals to be broadcasted from node `k`.
+
+    Returns
+    -------
+    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [N x 1] np.ndarrays (complex)
+        Updated compressed signals buffers for each node and its neighbours.
+    """
+
+    # Loop over neighbors of `k`
+    for idxq in range(len(neighbourNodes[k])):
+        q = neighbourNodes[k][idxq]                 # network-wide index of node `q` (one of node `k`'s neighbors)
+        idxKforNeighborQ = [i for i, x in enumerate(neighbourNodes[q]) if x == k]
+        idxKforNeighborQ = idxKforNeighborQ[0]      # node `k`'s "neighbor index", from node `q`'s perspective
+        # Fill in neighbor's buffer
+        zBuffer[q][idxKforNeighborQ] = zLocalK
+        
+    return zBuffer
+
+
 def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocalK, L):
     """Fill in buffers -- simulating broadcast of compressed signals
     from one node (`k`) to its neighbours.
@@ -549,23 +662,22 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocalK, L):
     ----------
     k : int
         Current node index.
-    neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists of ints
+    neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists (int)
         Network indices of neighbours, per node.
-    lk : [numNodes x 1] list of ints
+    lk : [numNodes x 1] list (int)
         Broadcast index per node.
-    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays of floats
+    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays (float)
         Compressed signals buffers for each node and its neighbours.
-    zLocal : [n x 1] np.ndarray of floats
+    zLocal : [N x 1] np.ndarray (float)
         Latest compressed local signals to be broadcasted from node `k`.
     L : int
         Broadcast chunk length.
 
     Returns
     -------
-    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays of floats
+    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays (float)
         Updated compressed signals buffers for each node and its neighbours.
     """
-
 
     # Loop over neighbors of `k`
     for idxq in range(len(neighbourNodes[k])):
@@ -813,7 +925,7 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
     return outputEvents
 
 
-def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
+def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomain):
     """Performs the broadcast of data from node `k` to its neighbours.
     
     Parameters
@@ -852,10 +964,17 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer):
         print('Cannot perform compression: not enough local signals samples.')
 
     else:
-        # Compress current data chunk in the frequency domain
-        zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)        # local compressed signals
+        if broadcastDomain == 't':
+            # Compress current data chunk in the frequency domain
+            zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)              # local compressed signals
 
-        zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+            zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
+
+        elif broadcastDomain == 'f':
+            # Frequency-domain broadcasting
+            zLocalHat = danse_compression_freq_domain(yk, w[:, :yk.shape[-1]])  # local compressed signals (freq.-domain)
+
+            zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat)  
 
         lk[k] += 1  # increment local broadcast index
 

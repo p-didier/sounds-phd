@@ -147,7 +147,8 @@ class ASCProgramSettings:
     seed: int = 12345                               # seed for random generator
     specialCase: str = ''                           # flag for special cases: '' or 'none' --> no special case;
                                                     # 'allNodesInSamePosition': all nodes and sensors are placed at the same position in space.
-    
+    topology: str = 'fully_connected'               # WASN topology type ("fully_connected" or ...TODO)
+
     def load(self, filename: str, silent=False):
         return met.load(self, filename, silent)
     def save(self, filename: str):

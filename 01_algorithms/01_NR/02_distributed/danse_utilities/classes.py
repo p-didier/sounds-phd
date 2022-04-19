@@ -78,6 +78,7 @@ class ProgramSettings(object):
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
+    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
     # Broadcasting parameters
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     # Speech enhancement metrics parameters
@@ -101,10 +102,19 @@ class ProgramSettings(object):
         # Create new attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.samplingFrequency / self.stftEffectiveFrameLen))
-        # Checks on class attributes
+        # Check for frequency-domain broadcasting option
+        if self.broadcastDomain == 'f':
+            if self.broadcastLength != self.stftWinLength / 2:
+                val = input(f'Frequency-domain broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
+                if val in ['y', 'Y']:
+                    self.broadcastLength = self.stftWinLength / 2
+                else:
+                    raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
+        elif self.broadcastDomain != 't':
+            raise ValueError(f'The broadcasting domain must be "t" or "f" (current value: "{self.broadcastDomain}").')
+        # Adapt formats
         self.SROsppm = sto_sro_formatting(self.SROsppm)
         self.STOinducedDelays = sto_sro_formatting(self.STOinducedDelays)
-        # Adapt formats
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
         if not isinstance(self.noiseSignalFile, list):
@@ -443,26 +453,26 @@ class Signals(object):
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Best: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
+        plt.title(f'Best: Node {bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Worst: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
+        plt.title(f'Worst: Node {worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: N{bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
+            plt.title(f'Local estimate: Node {bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: N{worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
+            plt.title(f'Local estimate: Node {worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             colorb.set_label('[dB]')
         plt.tight_layout()

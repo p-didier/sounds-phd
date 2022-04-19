@@ -43,13 +43,13 @@ class DynamicMetricsParameters:
     """Parameters for computing objective speech enhancement metrics
     dynamically as the signal comes in ("online" fashion)"""
     def __init__(self, chunkDuration=1., chunkOverlap=0.5, dynamicSNR=False, dynamicSTOI=False, dynamicfwSNRseg=False, dynamicPESQ=False):
-        self.chunkDuration = chunkDuration         # [s] duration of the signal chunk over which to compute the metrics
-        self.chunkOverlap = chunkOverlap         # [/100%] percentage overlap between consecutive signal chunks
+        self.chunkDuration = chunkDuration          # [s] duration of the signal chunk over which to compute the metrics
+        self.chunkOverlap = chunkOverlap            # [/100%] percentage overlap between consecutive signal chunks
         # flags
-        self.dynamicSNR = dynamicSNR         # if True, compute SNR dynamically
-        self.dynamicSTOI = dynamicSTOI        # if True, compute STOI dynamically
-        self.dynamicfwSNRseg = dynamicfwSNRseg    # if True, compute fwSNRseg dynamically
-        self.dynamicPESQ = dynamicPESQ        # if True, compute PESQ dynamically
+        self.dynamicSNR = dynamicSNR                # if True, compute SNR dynamically
+        self.dynamicSTOI = dynamicSTOI              # if True, compute STOI dynamically
+        self.dynamicfwSNRseg = dynamicfwSNRseg      # if True, compute fwSNRseg dynamically
+        self.dynamicPESQ = dynamicPESQ              # if True, compute PESQ dynamically
 
     def get_chunk_size(self, fs):
         self.chunkSize = int(np.floor(self.chunkDuration * fs))
@@ -59,12 +59,12 @@ class DynamicMetric:
     """Class for storing dynamic objective speech enhancement metrics"""
     def __init__(self, totalSigLength, chunkSize, chunkOverlap):
         nChunks = int(np.floor(totalSigLength / (chunkSize * (1 - chunkOverlap))))
-        self.before = np.zeros(nChunks)      # dynamic metric value before enhancement
-        self.after = np.zeros(nChunks)       # dynamic metric value after enhancement
-        self.diff = np.zeros(nChunks)        # dynamic difference between before and after enhancement
-        self.afterLocal = np.zeros(nChunks)  # dynamic metric value after _local_ enhancement (only using local sensors )
-        self.diffLocal = np.zeros(nChunks)   # dynamic difference between before and after local enhancement
-        self.timeStamps = np.zeros(nChunks)  # [s] true time stamps associated to each chunk 
+        self.before = np.zeros(nChunks)         # dynamic metric value before enhancement
+        self.after = np.zeros(nChunks)          # dynamic metric value after enhancement
+        self.diff = np.zeros(nChunks)           # dynamic difference between before and after enhancement
+        self.afterLocal = np.zeros(nChunks)     # dynamic metric value after _local_ enhancement (only using local sensors )
+        self.diffLocal = np.zeros(nChunks)      # dynamic difference between before and after local enhancement
+        self.timeStamps = np.zeros(nChunks)     # [s] true time stamps associated to each chunk 
 
 
 
@@ -217,8 +217,8 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
 
     # Initialize dynamic metric objects
     dynObjects = dict([(s.__name__, DynamicMetric(totalSigLength=cleanSignal.shape[0],
-                                                chunkSize=dynamic.chunkSize,
-                                                chunkOverlap=dynamic.chunkOverlap)) for s in fcns])
+                                                    chunkSize=dynamic.chunkSize,
+                                                    chunkOverlap=dynamic.chunkOverlap)) for s in fcns])
 
     c = 0
     while 1:    # loop over signal, chunk by chunk 
@@ -268,7 +268,7 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
                         if flagLocal:
                             dynObjects[ref].afterLocal[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], mode)
                 else:
-                    print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
+                    print(f'Cannot calculate PESQ for fs != 16kHz or 8kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
         c += 1     # increment chunk index
 
