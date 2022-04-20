@@ -29,7 +29,6 @@ class PrintoutsParameters:
     danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
 
-
 @dataclass
 class SamplingRateOffsets:
     """Sampling rate/time offsets class, containing all necessary info for
@@ -603,6 +602,7 @@ class Results:
         ax = fig1.add_subplot(1, 4, 3)   # STOI
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
         ax.set(title='STOI')
+        ax.set_ylim([0, 1])
         #
         ax = fig1.add_subplot(1, 4, 4)   # PESQ
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.pesq)

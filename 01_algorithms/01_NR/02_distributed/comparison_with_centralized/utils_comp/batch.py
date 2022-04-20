@@ -36,6 +36,15 @@ def gevd_mwf_batch(signals: Signals, asc: AcousticScenario, settings: ProgramSet
     Dfilt
     """
 
+    # y = np.zeros((signals.sensorSignals.shape[0], signals.numNodes))
+    # for ii in range(signals.numNodes):
+    #     tags = asc.sensorToNodeTags == ii+1
+    #     idx = 0   # default
+    #     for jj in range(len(tags)):
+    #         if tags[jj] == True:
+    #             idx = jj
+    #     y[:, ii] = signals.sensorSignals[:, idx]
+
     y = signals.sensorSignals
 
     # fig = plt.figure(figsize=(8,4))
@@ -45,7 +54,6 @@ def gevd_mwf_batch(signals: Signals, asc: AcousticScenario, settings: ProgramSet
     # ax.grid()
     # plt.tight_layout()	
     # plt.show()
-
 
     # Get STFTs
     for k in range(y.shape[-1]):

@@ -1,9 +1,9 @@
 
-from turtle import update
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
 from . import classes
+from danse_utilities.events_manager import *
 
 
 def danse_init(yin, settings: classes.ProgramSettings, asc):
@@ -439,6 +439,16 @@ def danse_compression(yq, wHat, n):
     # Discard oldest (incorrect) samples
     zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
 
+    
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(yq[int(len(yq)/2):])
+    # ax.plot(zq)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
     stop = 1
 
     return zq
@@ -793,35 +803,56 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks, fs):
     # Number of nodes
     nNodes = timeInstants.shape[1]
     
-    # Check for clock jitter and save sampling frequencies -- TODO
-    deltas = np.diff(timeInstants, axis=0)
+    # # Check for clock jitter and save sampling frequencies -- TODO
+    # deltas = np.diff(timeInstants, axis=0)
+    # for k in range(nNodes):
+    #     precision = int(np.ceil(np.abs(np.log10(np.mean(deltas[:, k]) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
+    #     if len(np.unique(np.round(deltas[:, k], precision))) > 1:
+    #         raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas[:, k]))} different sample intervals detected for node {k+1}.')
+
+    # Check for clock jitter and save sampling frequencies
+    fs = np.zeros(nNodes)
     for k in range(nNodes):
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas[:, k]) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
-        if len(np.unique(np.round(deltas[:, k], precision))) > 1:
-            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas[:, k]))} different sample intervals detected for node {k+1}.')
+        deltas = np.diff(timeInstants[:, k])
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
+        if len(np.unique(np.round(deltas, precision))) > 1:
+            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
+        fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
 
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
 
-    # Get expected broadcast instants
-    initialBroadcasts = N / fs      # [s] first instant at which each node has recorded its first `N` samples after network start-up
-    stepBetweenBroadcasts = L / fs  # [s] time it takes for each node to record `L` new samples
-    broadcastInstants = [np.arange(start=initialBroadcasts[k], stop=Ttot[k], step=stepBetweenBroadcasts[k]) for k in range(nNodes)]
-
-    # Derive first update instants
-    initialUpdates = np.zeros(nNodes)
-    for k in range(nNodes):
-        firstBroadcastsNeighbors = [v[0] for v in np.array(broadcastInstants)[nodeLinks[k, :]]]
-        initialUpdates[k] = np.amax(firstBroadcastsNeighbors)
-
     # Get expected DANSE update instants
-    stepBetweenUpdates = Ns / fs  # [s] time it takes for each node to record `Ns` new samples
-    updateInstants = [np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)]
+    numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
+    updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    #                               ^ note that we only start updating when we have enough samples
+    # Get expected broadcast instants
+    numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
+    broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    #                              ^ note that we only start broadcasting when we have enough samples to perform compression
+    # Ensure that all nodes have broadcasted at least once before performing any update
+    minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
+    for k in range(nNodes):
+        updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
+    
+    # # Get expected broadcast instants
+    # initialBroadcasts = N / fs      # [s] first instant at which each node has recorded its first `N` samples after network start-up
+    # stepBetweenBroadcasts = L / fs  # [s] time it takes for each node to record `L` new samples
+    # broadcastInstants = [np.arange(start=initialBroadcasts[k], stop=Ttot[k], step=stepBetweenBroadcasts[k]) for k in range(nNodes)]
+
+    # # Derive first update instants
+    # initialUpdates = np.zeros(nNodes)
+    # for k in range(nNodes):
+    #     firstBroadcastsNeighbors = [v[0] for v in np.array(broadcastInstants)[nodeLinks[k, :]]]
+    #     initialUpdates[k] = np.amax(firstBroadcastsNeighbors)
+    # # Get expected DANSE update instants
+    # stepBetweenUpdates = Ns / fs  # [s] time it takes for each node to record `Ns` new samples
+    # updateInstants = [np.arange(start=initialUpdates[k], stop=Ttot[k], step=stepBetweenUpdates[k]) for k in range(nNodes)]
 
     # Build event matrix
     outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)
 
-    return outputEvents
+    return outputEvents, fs
 
 
 def build_events_matrix(updateInstants, broadcastInstants, nNodes):
@@ -855,15 +886,13 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
     for k in range(nNodes):
         idxStart_u = sum([len(updateInstants[q]) for q in range(k)])
         idxEnd_u = idxStart_u + len(updateInstants[k])
-        flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = np.round(updateInstants[k], 7)
-        # flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = updateInstants[k]
+        flattenedUpdateInstants[idxStart_u:idxEnd_u, 0] = updateInstants[k]
         flattenedUpdateInstants[idxStart_u:idxEnd_u, 1] = k
         flattenedUpdateInstants[:, 2] = 1    # event reference "1" for updates
 
         idxStart_b = sum([len(broadcastInstants[q]) for q in range(k)])
         idxEnd_b = idxStart_b + len(broadcastInstants[k])
-        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = np.round(broadcastInstants[k], 7)
-        # flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = broadcastInstants[k]
+        flattenedBroadcastInstants[idxStart_b:idxEnd_b, 0] = broadcastInstants[k]
         flattenedBroadcastInstants[idxStart_b:idxEnd_b, 1] = k
         flattenedBroadcastInstants[:, 2] = 0    # event reference "0" for broadcasts
     # Combine
@@ -1004,6 +1033,10 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
     Rnn : [N x M x M] np.ndarray (real or complex)
         New Rnn matrices (for each time frame /or/ each frequency line).
     """
+
+    # yyH = np.zeros((y.shape[0], y.shape[1], y.shape[1]))
+    # for kappa in range(y.shape[0]):
+    #     yyH[kappa, :, :] = y[kappa, :] @ y[kappa, :].conj().T
 
     yyH = np.einsum('ij,ik->ijk', y, y.conj())
     if vad:

@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path, PurePath
+from threading import local
 import matplotlib.pyplot as plt
 import numpy as np
 #
@@ -31,6 +32,7 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[1, 2, 3]_Ns1_Nn1/AS3_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS3_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[4, 5, 6, 5, 4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J1Mk[4]_Ns1_Nn1/AS1_anechoic',
@@ -53,16 +55,16 @@ mySettings = ProgramSettings(
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
-    # timeBtwExternalFiltUpdates=1,       # [s] minimum time between 2 consecutive filter update at a node 
+    # timeBtwExternalFiltUpdates=3,       # [s] minimum time between 2 consecutive filter update at a node 
     # timeBtwExternalFiltUpdates=0,       # [s] minimum time between 2 consecutive filter update at a node 
     timeBtwExternalFiltUpdates=np.Inf,       # [s] minimum time between 2 consecutive filter update at a node
     #
-    # broadcastDomain='t',
-    broadcastDomain='f',
+    broadcastDomain='t',
+    # broadcastDomain='f',
     #
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
-                                    externalFilterUpdates=False),
+                                externalFilterUpdates=False),
     )
 
 # SIMULATIONMODE_MWF = 'online'
@@ -99,8 +101,10 @@ def main(settings):
 
 
     for ii in range(asc.numNodes):
-        Ystft, _, _ = get_stft(mySignals.sensorSignals[:, ii], mySignals.fs, settings)
-
+        localData = mySignals.sensorSignals[:, asc.sensorToNodeTags == ii+1]
+        if localData.ndim == 2:
+            localData = localData[:, 0]
+        Ystft, _, _ = get_stft(localData, mySignals.fs, settings)
         # Get colorbar limits
         climHigh = np.amax(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0])), 20*np.log10(np.abs(Ystft[:,:,0]))), axis=0))
         climLow = np.amin(np.concatenate((20*np.log10(np.abs(DfiltGEVD)), 20*np.log10(np.abs(DfiltDANSE[:,:,0])), 20*np.log10(np.abs(Ystft[:,:,0]))), axis=0))
@@ -136,6 +140,7 @@ def main(settings):
         plt.colorbar(mapp)
         plt.title(f'After GEVD-DANSE (rank {settings.GEVDrank})')
         #
+        plt.suptitle(f'Node {ii+1} ({asc.numSensorPerNode[ii]} sensors)')
         plt.tight_layout()	
     plt.show()
 

@@ -43,7 +43,8 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS3_RT500ms',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS10_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_allNodesInSamePosition_anechoic',
@@ -57,8 +58,8 @@ mySettings = ProgramSettings(
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
-    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=8,       # broadcast chunk size `L` [samples]
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     # SROsppm=[0, 10000, 20000],               # SRO
@@ -67,8 +68,8 @@ mySettings = ProgramSettings(
     # SROsppm=[0, 2000, 12000, 22000, 32000],
     # SROsppm=[0, 100],
     # SROsppm=[0, 500, 1000],
-    # SROsppm=[100, 0],
-    SROsppm=0,
+    SROsppm=[5, 0],
+    # SROsppm=0,
     # compensateSROs=True,                # if True, compensate SROs
     compensateSROs=False,               # if True, compensate SROs
     estimateSROs=True,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
@@ -85,8 +86,9 @@ mySettings = ProgramSettings(
     computeLocalEstimate=True,          # if True, also compute and store the local estimate (as if there was no cooperation between nodes)
     performGEVD=1,                      # if True, perform GEVD-DANSE
     # bypassFilterUpdates=True,
-    timeBtwExternalFiltUpdates=2,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    broadcastDomain='t',
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
@@ -156,7 +158,7 @@ def main(mySettings: ProgramSettings, exportPath, showPlots=1, lightExport=True)
             mySettings.save(exportPath)     # save settings
             # Post-process - Speech enhancement metrics, figures, sounds
             flagFigsAndSound = True
-            if not np.array(['speech' in s for s in mySettings.desiredSignalFile]).any():   # check that we are dealing with speech
+            if not np.array(['speech' in str(s) for s in mySettings.desiredSignalFile]).any():   # check that we are dealing with speech
                 inp = input(f"""No "speech" sub-string detected in `desiredSignalFile` paths.
                         --> Possibly not using an actual speech target signal.
                         --> Compute intelligibility metrics (+ figs/wavs export) anyway? [y]/n  """)
@@ -211,14 +213,15 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
     fig1.savefig(f'{pathToResults}/enhMetrics.png')
     if showPlots:
         plt.draw()
-    # Dynamic metrics
-    fig2.suptitle(f"""Dynamic metrics [{settings.dynamicMetricsParams.chunkDuration}s
+    if fig2 is not None:
+        # Dynamic metrics
+        fig2.suptitle(f"""Dynamic metrics [{settings.dynamicMetricsParams.chunkDuration}s
 chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\beta={np.round(settings.expAvgBeta, 4)}
 \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
-    fig2.tight_layout()
-    fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
-    if showPlots:
-        plt.draw()
+        fig2.tight_layout()
+        fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
+        if showPlots:
+            plt.draw()
 
     # Plot best performance node (in terms of STOI)
     maxSTOI = -9999999

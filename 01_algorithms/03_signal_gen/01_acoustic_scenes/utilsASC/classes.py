@@ -156,6 +156,8 @@ class ASCProgramSettings:
     
     def __post_init__(self):
         """Initial program settings checks"""
+        # Adapt minimum distance to walls
+        self.minDistFromWalls += self.sensorSeparation
         if isinstance(self.numSensorPerNode, int):  # case where all nodes have the same number of sensors
             self.numSensorPerNode = np.full((self.numNodes,), self.numSensorPerNode)
         elif len(self.numSensorPerNode) == 1:       # case where all nodes have the same number of sensors

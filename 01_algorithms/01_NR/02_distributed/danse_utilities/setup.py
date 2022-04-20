@@ -415,8 +415,8 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        # desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
-        desiredSigEst, desiredSigEstLocal = danse_scripts.simpler_danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
+        desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
+        # desiredSigEst, desiredSigEstLocal = danse_scripts.simpler_danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
