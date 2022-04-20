@@ -12,10 +12,6 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}/_general_fcts')
 
 # ------------------------------- PARAMETERS ----------------------------------
-testType = 'basic_performance_srofree'
-testType = 'sro_effect'
-# testType = 'sro_compensation'
-
 exportBasePath = f'{Path(__file__).parent}/res/testing_SROs/automated'
 
 # Build testing parameters object
@@ -23,7 +19,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS2_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_RT500ms'],
@@ -39,23 +35,18 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # possibleSROs=[int(ii) for ii in np.logspace(0, np.log10(32000), num=20)],
     # possibleSROs=[32000],
     nodeUpdating='simultaneous',
-    timeBtwExternalFiltUpdates=1,
-    broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
-    # broadcastLength=512,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    # timeBtwExternalFiltUpdates=1,
+    timeBtwExternalFiltUpdates=np.Inf,
+    # broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=512,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
 )
-# -----------------------------------------------------------------------------
 
-def main(type, danseTestingParams, exportBasePath):
-    """Test type selection -- redirection towards testing functions"""
 
-    if type == 'basic_performance_srofree':     # basic (GEVD-)DANSE performance, synchronized network, no SROs
-        danseTestingParams.possibleSROs = [0]
-    elif type == 'sro_effect':
-        sro_testing.go(danseTestingParams, exportBasePath)
-    elif type == 'sro_compensation':
-        pass
+def main():
+    """Main wrapper"""
+    sro_testing.go(danseTestingParams, exportBasePath)
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
 if __name__ == '__main__':
-    sys.exit(main(testType, danseTestingParams, exportBasePath))
+    sys.exit(main())
 # ------------------------------------------------------------------------------------
