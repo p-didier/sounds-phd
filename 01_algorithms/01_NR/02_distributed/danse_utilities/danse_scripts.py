@@ -164,7 +164,7 @@ def danse_sequential(yin, asc, settings: classes.ProgramSettings, oVAD):
     return d
 
 
-def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, timeInstants, masterClockNodeIdx, fs):
+def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings, oVAD, timeInstants, masterClockNodeIdx):
     """Wrapper for Simultaneous-Node-Updating DANSE (rs-DANSE) [2].
 
     Parameters
@@ -180,9 +180,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     timeInstants : [Nt x Nn] np.ndarray of floats
         Time instants corresponding to the samples of each of the Nn nodes in the network. 
     masterClockNodeIdx : int
-        Index of node to be used as "master clock" (0 ppm SRO). 
-    fs : list of floats
-        Sampling frequency of each node.
+        Index of node to be used as "master clock" (0 ppm SRO).
 
     Returns
     -------
@@ -289,20 +287,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
-    eventsMatrix = subs.get_events_matrix(timeInstants,
+    eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             Ns,
                                             settings.broadcastLength,
-                                            asc.nodeLinks,
-                                            fs=fs
+                                            asc.nodeLinks
                                             )
 
-
-    
     zFull = []
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
-
 
 
     # External filter updates (for broadcasting)
@@ -425,8 +419,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         if not np.isnan(bufferFlags[q]):
                             extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[q] * settings.broadcastLength
                             # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
-                            if bufferFlags[q] != 0:
-                                stop = 1
                         else:
                             # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
                             skipUpdate = True
@@ -522,46 +514,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 
                 # Increment DANSE iteration index
                 i[k] += 1
-                
-                # if k == 0:
-                #     # Dynamic plotting (updating at every DANSE update)
-                #     # of yk, yq, zq, and dk
-                #     if i[k] == 1:
-                #         fig = plt.figure(figsize=(8,4))
-                #         ax1 = fig.add_subplot(211)
-                #         ax2 = fig.add_subplot(212)
-                #     #
-                #     if settings.broadcastDomain == 't':
-                #         ax1.plot(masterClock[:len(zFull[k])], zFull[k])
-                #         ax1.set_ylim([-1,1])  
-                #         ax1.set_title('z')
-                #     elif settings.broadcastDomain == 'f':
-                #         ax1.plot(20 * np.log10(np.abs(yLocalHatCurr[:numFreqLines, :])), label='Local sensor data yk')
-                #         ax1.plot(20 * np.log10(np.abs(dhatCurr)), label='Enhanced signal dk')
-                #         ax1.set_ylim([-100,0])  
-                #         ax1.set_title('Local')
-                #         ax1.legend()
-                #     ax1.grid()
-                #     #
-                #     if settings.broadcastDomain == 't':
-                #         ax2.plot(masterClock[:len(zFull[k])], yin[Ns:idxEndChunk, asc.sensorToNodeTags == k+1])
-                #         ax2.set_ylim([-1,1])
-                #         ax2.set_title('y')
-                #     elif settings.broadcastDomain == 'f':
-                #         yNeighborCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags != k+1]
-                #         yNeighborHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yNeighborCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                #         ax2.plot(20 * np.log10(np.abs(yNeighborHatCurr[:numFreqLines, :])), label='Neighbor sensor data yq')
-                #         ax2.plot(20 * np.log10(np.abs(1 / winWOLAanalysis.sum() * z[k])), label='Compressed neighbor data: zq')
-                #         ax2.set_ylim([-100,0])
-                #         ax2.set_title('Neighbor')
-                #         ax2.legend()
-                #     ax2.grid()
-                #     # draw the plot
-                #     plt.draw() 
-                #     plt.pause(0.01)
-                #     ax1.clear()
-                #     ax2.clear()
-    
+
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
@@ -631,7 +584,7 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
 
     # Hard-coded parameters
     alphaExternalFilters = 0.7      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
-    # alphaExternalFilters = 1      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
+    # alphaExternalFilters = 0.5      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
 
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis, frameSize, Ns, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
@@ -646,6 +599,7 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
+    wTildeExternalTarget = []                       # target external filter coefficients -- values towards which `wTildeExternal` slowly converge between each external filter update
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     ryd = []                                        # cross-correlation between observations and estimations
@@ -661,7 +615,6 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
-    idxStart = np.zeros(asc.numNodes, dtype=int)    # node-specific index of the first sample used in computations
     if settings.computeLocalEstimate:
         wLocal = []                                     # filter coefficients - using only local observations (not data coming from neighbors)
         Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
@@ -670,12 +623,27 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
         
     for k in range(asc.numNodes):
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1) + len(neighbourNodes[k])
+
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # dimYTilde[k] = asc.numSensors
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+
         wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
         wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTilde.append(wtmp)
         wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
         wtmp[:, 0] = 1      # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
+        wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
+        wtmp[:, 0] = 1      # initialize filter as a selector of the unaltered first sensor signal
+        wTildeExternalTarget.append(wtmp)
+        #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
@@ -737,7 +705,7 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
 
     t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
-    for events in eventsMatrix:
+    for idxGlobal, events in enumerate(eventsMatrix):
 
         # Parse event matrix (+ inform user)
         t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=settings.printouts.events_parser)
@@ -830,14 +798,22 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
                 elif settings.broadcastDomain == 'f':
                     # Broadcasting done in frequency-domain
                     yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    # Build z from scratch
+                    # Build z from scratch -- ignore broadcasted data -- [19/04/2022 decision]
                     z = np.empty((numFreqLines, 0), dtype=complex)
                     for q in neighbourNodes[k]:
                         yq = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q+1]
                         yqHat = 1 / winWOLAanalysis.sum() * np.fft.fft(yq * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                         yqHat = yqHat[:numFreqLines, :]
-                        zq = np.einsum('ij,ij->i', wTildeExternal[k][:, :yLocalCurr.shape[-1]].conj(), yqHat)     # zq = wqq^H * yq
+                        zq = np.einsum('ij,ij->i', wTildeExternal[q][:, :asc.numSensorPerNode[q]].conj(), yqHat)     # zq = wqq^H * yq
+                        # zq = np.einsum('ij,ij->i', wTildeExternal[q][:, :asc.numSensorPerNode[q]], yqHat)     # zq = wqq^T * yq
                         z = np.concatenate((z, zq[:, np.newaxis]), axis=1)
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+                        # z = np.concatenate((z, yqHat), axis=1)
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
+                        # # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP 
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], z), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
@@ -876,13 +852,24 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
                     print('!! User-forced bypass of filter coefficients updates !!')
 
 
+
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+
+                # Systematically update the external filter coefficients, slowly towards `wTildeExternalTarget`
+                # betaExternal = settings.expAvgBeta ** 10    # corresponding to a 10 time faster time constant
+                # betaExternal = 0    # no smoothing
+                betaExternal = settings.expAvgBeta ** 2
+                wTildeExternal[k] = betaExternal * wTildeExternal[k] + (1 - betaExternal) * wTildeExternalTarget[k]
+
+                # Update targets
                 if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
-                    wTildeExternal[k] = (1 - alphaExternalFilters) * wTildeExternal[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
+                    # Inverted definition w.r.t. the `beta` of exponential averaging -- see szurley2013a, eq.(19)
+                    wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
                     # Update last external filter update instant [s]
                     lastExternalFiltUpdateInstant[k] = t
                     if settings.printouts.externalFilterUpdates:    # inform user
                         print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
+                
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
 
@@ -945,8 +932,7 @@ def simpler_danse_simultaneous(yin, asc: classes.AcousticScenario, settings: cla
                 #     plt.pause(0.01)
                 #     ax1.clear()
                 #     ax2.clear()
-    
-    
+
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
