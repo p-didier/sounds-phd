@@ -17,6 +17,7 @@ sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
 resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1']
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['no_compensation', 'oracle_compensation']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/with_perfectly_delayed_initial_updates']
 TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
@@ -66,13 +67,18 @@ def main():
         res['ref'].append(PurePath(resultsBaseFolder).name)
 
 
-    # PLOT
+    # Plot
+    colors = [f'C{i}' for i in range(nNodes)]
+    styles = ['-', '--', '-.', ':']
+    if len(styles) < len(res['stoi']):
+        return ValueError('Plotting issue: not enough linestyles given for the number of subfolders results to plot.')
+
     fig = plt.figure(figsize=(8,4))
     ax = fig.add_subplot(121)
     for idxNode in range(nNodes):
         for ii in range(len(res['stoi'])):
             ax.plot(res['sro'][ii], res['stoi'][ii][idxNode, :],\
-                        f'C{idxNode * len(res["stoi"]) + ii}-o',\
+                        f'{colors[idxNode]}{styles[ii]}o',\
                         label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
     ax.grid()
     ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
@@ -87,7 +93,7 @@ def main():
     for idxNode in range(nNodes):
         for ii in range(len(res['fwSNRseg'])):
             ax.plot(res['sro'][ii], res['fwSNRseg'][ii][idxNode, :],\
-                        f'C{idxNode * len(res["fwSNRseg"]) + ii}-o',\
+                        f'{colors[idxNode]}{styles[ii]}o',\
                         label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
     ax.grid()
     ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
@@ -96,7 +102,8 @@ def main():
     else:
         ax.set_ylabel('fwSNRseg [dB]')
 
-    ax.set_ylim([2.01, 9.05])
+    # ax.set_ylim([2.01, 9.05])
+    ax.set_ylim([2.3, 4.08])
     plt.tight_layout()
     fig.savefig(exportFileName + ".png")
     fig.savefig(exportFileName + ".pdf")
