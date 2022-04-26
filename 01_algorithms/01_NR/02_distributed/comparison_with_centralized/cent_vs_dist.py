@@ -26,7 +26,8 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    samplingFrequency=16000,
+    # samplingFrequency=16000,
+    samplingFrequency=8000,
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS4_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic',
@@ -44,8 +45,10 @@ mySettings = ProgramSettings(
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     SROsppm=0,
+    # SROsppm=[100, 0],
     #
-    selfnoiseSNR=-50,
+    # selfnoiseSNR=-50,
+    selfnoiseSNR=-np.Inf,
     #
     broadcastLength=2**9,
     # broadcastLength=2**5,
@@ -55,9 +58,9 @@ mySettings = ProgramSettings(
     referenceSensor=0,
     computeLocalEstimate=True,
     performGEVD=1,
-    # timeBtwExternalFiltUpdates=3,       # [s] minimum time between 2 consecutive filter update at a node 
+    timeBtwExternalFiltUpdates=3,       # [s] minimum time between 2 consecutive filter update at a node 
     # timeBtwExternalFiltUpdates=0,       # [s] minimum time between 2 consecutive filter update at a node 
-    timeBtwExternalFiltUpdates=np.Inf,       # [s] minimum time between 2 consecutive filter update at a node
+    # timeBtwExternalFiltUpdates=np.Inf,       # [s] minimum time between 2 consecutive filter update at a node
     #
     broadcastDomain='t',
     # broadcastDomain='f',
@@ -79,6 +82,9 @@ def main(settings):
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
 
+    from scipy.io import wavfile
+    wavfile.write('U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/dev/danse_simple/wav/vad.wav', mySettings.samplingFrequency, mySignals.VAD)
+
     # Centralized solution - GEVD-MWF
     print(f'Simulating centralized solution in {SIMULATIONMODE_MWF} mode.')
     if SIMULATIONMODE_MWF == 'batch':
@@ -89,16 +95,15 @@ def main(settings):
         raise ValueError('NOT YET IMPLEMENTED')
 
 
-    # Distributed solution - DANSE
+    # Distributed solution - GEVD-DANSE
     print('Computing distributed solution (DANSE)...')
     mySignals.desiredSigEst, mySignals.desiredSigEstLocal = danse(mySignals, asc, settings)
 
-    # PLOT
+    # Plot
     DfiltDANSE, f, t = get_stft(mySignals.desiredSigEst, mySignals.fs, settings)
     DfiltDANSElocal, f, t = get_stft(mySignals.desiredSigEstLocal, mySignals.fs, settings)
     if f.ndim == 1:
         f = f[:, np.newaxis]
-
 
     for ii in range(asc.numNodes):
         localData = mySignals.sensorSignals[:, asc.sensorToNodeTags == ii+1]

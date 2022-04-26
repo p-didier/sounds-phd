@@ -1,6 +1,8 @@
 
 
+from turtle import color
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def get_events_matrix(timeInstants, N, Ns, L, nodeLinks, fs):
@@ -179,8 +181,110 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
     return outputEvents
 
 
-def visualize_events():
+
+def events_parser(events, startUpdates=None, printouts=False):
+    """Printouts to inform user of DANSE events.
     
+    Parameters
+    ----------
+    events : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
+        Event instants matrix. One column per event instant.
+        Output of `get_events_matrix` function.
+    startUpdates : list of bools
+        Node-specific flags to indicate whether DANSE updates have started. 
+    printouts : bool
+        If True, inform user about current events after parsing.    
+
+    Returns
+    -------
+    t : float
+        Current time instant [s].
+    eventTypes : list of str
+        Events at current instant.
+    nodesConcerned : list of ints
+        Corresponding node indices.
+    """
+
+    # Parse events
+    t = events[0]
+    nodesConcerned = events[1]
+    eventTypes = ['update'if val==1 else 'broadcast' for val in events[2]]
+
+    if printouts:
+        if startUpdates is None:
+            startUpdates = [True for _ in range(len(eventTypes))]   
+        if 'update' in eventTypes:
+            txt = f't={np.round(t, 3)}s -- '
+            updatesTxt = 'Updating nodes: '
+            broadcastsTxt = 'Broadcasting nodes: '
+            flagCommaUpdating = False    # little flag to add a comma (`,`) at the right spot
+            for idxEvent in range(len(eventTypes)):
+                k = int(nodesConcerned[idxEvent])   # node index
+                if eventTypes[idxEvent] == 'broadcast':
+                    if idxEvent > 0:
+                        broadcastsTxt += ','
+                    broadcastsTxt += f'{k + 1}'
+                elif eventTypes[idxEvent] == 'update':
+                    if startUpdates[k]:  # only print if the node actually has started updating (i.e. there has been sufficiently many autocorrelation matrices updates since the start of recording)
+                        if not flagCommaUpdating:
+                            flagCommaUpdating = True
+                        else:
+                            updatesTxt += ','
+                        updatesTxt += f'{k + 1}'
+            print(txt + broadcastsTxt + '; ' + updatesTxt)
+
+    return t, eventTypes, nodesConcerned
+
+
+def visualize_events(eventMatrix, tmax=1, suptitle=None):
+    """Visually displays events.
     
+    Parameters
+    ----------
+    eventMatrix : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
+        Event instants matrix. One column per event instant.
+    tmax : float
+        [s] Maximum time instant to plot.
+    """
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    nNodes = 0
+    for events in eventMatrix:
+        t, nodesConcerned, eventTypes = events[0], events[1], events[2]
+
+        if t > tmax:
+            break
+        else:
+            for idxEvent, eventType in enumerate(eventTypes):
+                # Count number of nodes
+                if nNodes < nodesConcerned[idxEvent] + 1:
+                    nNodes = nodesConcerned[idxEvent] + 1
+
+                if eventType == 0:
+                    markerstyle = 'x'
+                elif eventType == 1:
+                    markerstyle = '+'
+
+                ax.stem(t, eventType + 1,
+                        linefmt=f'C{nodesConcerned[idxEvent]}-',
+                        markerfmt=f'C{nodesConcerned[idxEvent]}{markerstyle}')
+        stop = 1
+
+    ax.grid()
+    fig.set_figwidth(8)  
+    fig.set_figheight(0.5*nNodes)
+
+    # Manual legend
+    for ii in range(nNodes):
+        plt.text(t * 0.9, 1.75 - 0.2 * ii, f'Node {ii+1}', color=f'C{ii}', fontweight='bold', fontsize='large')
+        
+    plt.yticks([1, 2], ['Broadcast', 'Update'])
+    plt.xlabel('$t$ [s]')
+    if suptitle is not None:
+        plt.suptitle(suptitle)
+    plt.tight_layout()	
+    plt.show()
 
     return None

@@ -1,6 +1,6 @@
-
 from pathlib import Path, PurePath
 import sys
+
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -10,7 +10,6 @@ sys.path.append(f'{pathToRoot}\\01_algorithms\\01_NR\\02_distributed')
 from danse_utilities import events_manager as evm
 from danse_utilities.setup import generate_signals
 from danse_utilities.classes import ProgramSettings
-import numpy as np
 
 
 # General parameters
@@ -30,7 +29,7 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     #
-    SROsppm=[5, 0]
+    SROsppm=[50000, 0]
     )
 
 
@@ -38,14 +37,18 @@ def main():
 
     mySignals, asc = generate_signals(mySettings)
 
-    stop = 1
-
-    evm.get_events_matrix(mySignals.timeStampsSROs,
+    events, _ = evm.get_events_matrix(mySignals.timeStampsSROs,
                             mySettings.stftWinLength,
                             mySettings.stftEffectiveFrameLen,
                             mySettings.broadcastLength,
                             asc.nodeLinks,
                             mySignals.fs)
+                            
+    evm.visualize_events(events,
+                        tmax=3,    # [s]
+                        suptitle=f'SROs: {mySettings.SROsppm} (ppm)')
+
+    stop = 1
 
 
 

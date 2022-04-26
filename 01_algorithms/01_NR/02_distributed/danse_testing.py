@@ -24,6 +24,8 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_RT500ms'],
     #
+    # fs=8000,    
+    fs=16000,    
     specificDesiredSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     sigDur=20,
@@ -39,6 +41,9 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     timeBtwExternalFiltUpdates=np.Inf,
     # broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastLength=512,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    #
+    compensateSROs=True,
+    estimateSROs=True,
 )
 
 

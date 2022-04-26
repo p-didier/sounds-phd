@@ -410,13 +410,11 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
     y, t, nadd = prep_for_ffts(signals, asc, settings)
 
     # DANSE it up
-    desiredSigEstLocal_STFT = None
     if settings.danseUpdating == 'sequential':
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
-        # desiredSigEst, desiredSigEstLocal = danse_scripts.simpler_danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx, signals.fs)
+        desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -479,14 +477,15 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs, VADener
     """
 
     signalLength = int(desiredDuration * targetFs)   # desired signal length [samples]
+    if originalFs != targetFs:
+        # Resample signal so that its sampling frequency matches the target
+        rawSignal = resampy.resample(rawSignal, originalFs, targetFs)
+        # rawSignal = sig.resample(rawSignal, signalLength) 
+
     while len(rawSignal) < signalLength:
         rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
     if len(rawSignal) > signalLength:
-        rawSignal = rawSignal[:int(desiredDuration * originalFs)]  # truncate too long signals
-    
-    if len(rawSignal) != signalLength:
-        # Resample signal so that its sampling frequency matches the target
-        rawSignal = sig.resample(rawSignal, signalLength) 
+        rawSignal = rawSignal[:int(desiredDuration * targetFs)]  # truncate too long signals
 
     # Voice Activity Detection (pre-truncation/resampling)
     if vadGiven == []:

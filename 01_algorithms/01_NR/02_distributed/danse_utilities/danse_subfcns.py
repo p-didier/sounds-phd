@@ -169,6 +169,7 @@ def perform_gevd(Ryy, Rnn, rank=1, refSensorIdx=0, jitted=False):
         diagveig = np.append(diagveig, np.zeros(Ryy.shape[0] - rank))
         # LMMSE weights
         w = np.linalg.inv(Qmat.conj().T) @ np.diag(diagveig) @ Qmat.conj().T @ Evect
+    
     return w, Qmat
 
 
@@ -207,24 +208,31 @@ def perform_gevd_noforloop(Ryy, Rnn, rank=1, refSensorIdx=0):
 
     # t0 = time.perf_counter()
     for kappa in range(nFreqs):
-        # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted / vectorized
+        # Perform generalized eigenvalue decomposition -- as of 2022/02/17: scipy.linalg.eigh() seemingly cannot be jitted nor vectorized
         sigmacurr, Xmatcurr = sla.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :], check_finite=False, driver='gvd')
         # Flip Xmat to sort eigenvalues in descending order
         idx = np.flip(np.argsort(sigmacurr))
         sigma[kappa, :] = sigmacurr[idx]
         Xmat[kappa, :, :] = Xmatcurr[:, idx]
-    # print(f'GEVD done in {np.round((time.perf_counter() - t0) * 1e3)} ms')
 
     Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0,2,1]))
     # GEVLs tensor
     Dmat = np.zeros((nFreqs, n, n))
     for ii in range(rank):
-        Dmat[:, ii, ii] = np.squeeze(1 - 1/sigma[:, ii:(ii+1)])
+        Dmat[:, ii, ii] = np.squeeze(1 - 1/sigma[:, ii])
     # Dmat = np.zeros((nFreqs, n, n))
     # Dmat[:, 0, 0] = np.squeeze(1 - 1/sigma[:, :rank])
     # LMMSE weights
     Qhermitian = np.transpose(Qmat.conj(), axes=[0,2,1])
     w = np.matmul(np.matmul(np.matmul(Xmat, Dmat), Qhermitian), Evect)
+
+
+    # Dmat2 = np.zeros((nFreqs, n, n))
+    # for ii in range(rank):
+    #     Dmat2[:, ii, ii] = np.squeeze(sigma[:, ii:(ii+1)] - 1)
+    # w = np.zeros((nFreqs, n, n), dtype=complex)
+    # for kappa in range(nFreqs):
+    #     w[kappa, :] = np.linalg.pinv(Ryy[kappa, :, :]) @ Qmat[kappa, :, :] @ Dmat2[kappa, :, :] @ Qmat[kappa, :, :].conj().T @ Evect
 
     return w, Qmat
 
@@ -757,7 +765,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L, nodeLinks, fs):
+def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -775,8 +783,6 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks, fs):
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
     nodeLinks : [Nn x Nn] np.ndarray (bools)
         Node links matrix. Element `(i,j)` is `True` if node `i` and `j` are connected, `False` otherwise.
-    fs : list of floats
-        Sampling frequency of each node.
     
     Returns
     -------
@@ -995,13 +1001,13 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomai
     else:
         if broadcastDomain == 't':
             # Compress current data chunk in the frequency domain
-            zLocal = danse_compression(yk, w[:, :yk.shape[-1]], n)              # local compressed signals
+            zLocal = danse_compression(yk, w, n)              # local compressed signals
 
             zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
 
         elif broadcastDomain == 'f':
             # Frequency-domain broadcasting
-            zLocalHat = danse_compression_freq_domain(yk, w[:, :yk.shape[-1]])  # local compressed signals (freq.-domain)
+            zLocalHat = danse_compression_freq_domain(yk, w)  # local compressed signals (freq.-domain)
 
             zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat)  
 

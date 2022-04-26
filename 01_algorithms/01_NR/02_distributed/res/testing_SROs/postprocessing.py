@@ -13,10 +13,10 @@ sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 from danse_utilities.classes import Results, ProgramSettings
 sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/with_delayed_initial_updates']
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1']
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/with_perfectly_delayed_initial_updates']
 TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
@@ -95,6 +95,8 @@ def main():
         ax.set_ylabel('$\\Delta$fwSNRseg [dB]')
     else:
         ax.set_ylabel('fwSNRseg [dB]')
+
+    ax.set_ylim([2.01, 9.05])
     plt.tight_layout()
     fig.savefig(exportFileName + ".png")
     fig.savefig(exportFileName + ".pdf")
