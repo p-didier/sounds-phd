@@ -16,12 +16,26 @@ sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1']
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1']
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/with_compression/freq_domain_compression/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['no_compensation', 'oracle_compensation']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/with_compression/freq_domain_compression/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['no_compensation']]
 # resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/with_perfectly_delayed_initial_updates']
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['anechoic_nocomp', 'anechoic_comp']]
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['RT200ms_nocomp', 'RT200ms_comp']]
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['RT400ms_nocomp', 'RT400ms_comp']]
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in \
+    ['anechoic_nocomp', 'anechoic_comp',\
+    'RT200ms_nocomp', 'RT200ms_comp',\
+        'RT400ms_nocomp', 'RT400ms_comp']]
+# givenFormats, givenLegend = None, None
+givenFormats = ['C0o-','C0o:','C1o-','C1o:','C2o-','C2o:']
+givenLegend = ['Anechoic', 'Anechoic - Oracle compensation',\
+            '$T_{{60}}=0.2$s', '$T_{{60}}=0.2$s - Oracle compensation',\
+            '$T_{{60}}=0.4$s', '$T_{{60}}=0.4$s - Oracle compensation']
+
 TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
+SINGLENODEPLOT = True
 
 def main():
     
@@ -30,7 +44,7 @@ def main():
 
     if isinstance(resultsBaseFolder, list):
 
-        exportFileName = f'{Path(resultsBaseFolder[0]).parent}/metricAsFcnOfSRO_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        exportFileName = f'{Path(resultsBaseFolder[0]).parent}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
         
         for ii in range(len(resultsBaseFolder)):
             resSubDirs = list(Path(resultsBaseFolder[ii]).iterdir())
@@ -53,7 +67,7 @@ def main():
 
     elif isinstance(resultsBaseFolder, str):
 
-        exportFileName = f'{resultsBaseFolder}/metricAsFcnOfSRO_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        exportFileName = f'{resultsBaseFolder}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
 
         resSubDirs = list(Path(resultsBaseFolder).iterdir())
         resSubDirs = [f for f in resSubDirs if f.name[-1] == ']']
@@ -67,50 +81,67 @@ def main():
         res['sro'].append(sros)
         res['ref'].append(PurePath(resultsBaseFolder).name)
 
-
     # Plot
+    plotit(nNodes,
+            res,
+            flagDelta_stoi, flagDelta_fwSNRseg,
+            exportFileName,
+            givenFormats, givenLegend,
+            ylims=[0, 6.5])
+
+
+def plotit(nNodes, res, flagDelta_stoi, flagDelta_fwSNRseg, exportFileName, givenFormats=None, givenLegend=None, ylims=None):
+    """Plotting function."""
+    
     colors = [f'C{i}' for i in range(nNodes)]
     styles = ['-', '--', '-.', ':']
-    if len(styles) < len(res['stoi']):
-        return ValueError('Plotting issue: not enough linestyles given for the number of subfolders results to plot.')
+    markers = ['o', 'x', '+', 'd']
+    if len(styles) < len(res['stoi']) and len(givenFormats) < len(res['stoi']):
+        raise ValueError('Plotting issue: not enough linestyles given for the number of subfolders results to plot.')
 
     fig = plt.figure(figsize=(8,4))
     ax = fig.add_subplot(121)
-    for idxNode in range(nNodes):
-        for ii in range(len(res['stoi'])):
-            ax.plot(res['sro'][ii], res['stoi'][ii][idxNode, :],\
-                        f'{colors[idxNode]}{styles[ii]}o',\
-                        label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
-    ax.grid()
-    ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
-    if flagDelta_stoi:
-        ax.set_ylabel('$\\Delta$STOI')
-    else:
-        ax.set_ylabel('STOI')
+    _subplot(ax, nNodes, res['sro'], res['stoi'], res['ref'], colors, styles, markers, flagDelta_stoi, 'STOI', givenFormats)
     ax.set_ylim([0, 1])
-    plt.legend()
+    if givenLegend is not None and len(givenLegend) == len(res['stoi']):
+        plt.legend(labels=givenLegend)
+    else:
+        plt.legend()
     #
     ax = fig.add_subplot(122)
-    for idxNode in range(nNodes):
-        for ii in range(len(res['fwSNRseg'])):
-            ax.plot(res['sro'][ii], res['fwSNRseg'][ii][idxNode, :],\
-                        f'{colors[idxNode]}{styles[ii]}o',\
-                        label=f'Node {idxNode+1} -- {res["ref"][ii]}', markersize=2)
-    ax.grid()
-    ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
-    if flagDelta_fwSNRseg:
-        ax.set_ylabel('$\\Delta$fwSNRseg [dB]')
-    else:
-        ax.set_ylabel('fwSNRseg [dB]')
-
-    # ax.set_ylim([2.01, 9.05])
-    # ax.set_ylim([2.3, 4.08])
+    _subplot(ax, nNodes, res['sro'], res['fwSNRseg'], res['ref'], colors, styles, markers, flagDelta_fwSNRseg, 'fwSNRseg', givenFormats)
+    if ylims is not None:
+        ax.set_ylim(ylims)
     plt.tight_layout()
     fig.savefig(exportFileName + ".png")
     fig.savefig(exportFileName + ".pdf")
     plt.show()
 
-    stop = 1
+
+def _subplot(ax, nNodes, sros, metric, refs, colors, styles, markers, flagDelta, ylab, givenFormats=None):
+    """Subplot helper function for conciseness."""
+
+    for idxNode in range(nNodes):
+        if SINGLENODEPLOT and idxNode > 0:
+            continue
+        for ii in range(len(metric)):
+            if givenFormats is not None:
+                fmt = givenFormats[ii]
+            else:
+                if not SINGLENODEPLOT:
+                    fmt = f'{colors[idxNode]}{styles[ii]}{markers[ii]}'
+                else:
+                    fmt = f'{colors[ii]}{styles[0]}{markers[0]}'
+            ax.plot(sros[ii], metric[ii][idxNode, :],\
+                        fmt,label=f'Node {idxNode+1} -- {refs[ii]}', markersize=5)
+    ax.grid()
+    ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
+    if flagDelta:
+        ax.set_ylabel(f'$\\Delta${ylab}')
+    else:
+        ax.set_ylabel(ylab)
+
+    return None
 
 
 def extract_metrics(nNodes, resSubDirs, typeMetric='improvement'):
