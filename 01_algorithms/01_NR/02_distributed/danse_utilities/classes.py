@@ -544,7 +544,7 @@ def normalize_toint16(nparray):
 
 
 @dataclass
-class Results:
+class Results(object):
     """Class for storing simulation results"""
     signals: Signals = field(init=False)                       # all signals involved in run
     enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics

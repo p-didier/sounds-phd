@@ -4,6 +4,8 @@ from pathlib import Path, PurePath
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as sig
+from scipy.io import wavfile
+import matplotlib.pyplot as plt
 #
 # Find path to root folder
 rootFolder = 'sounds-phd'
@@ -15,6 +17,7 @@ if not any("_general_fcts" in s for s in sys.path):
 import VAD
 if not any("_third_parties" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_third_parties')
+from playsounds.playsounds import playwavfile
 if not any("01_algorithms/01_NR/02_distributed" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 # Custom packages imports
@@ -30,19 +33,21 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 mySettings = ProgramSettings(
     # samplingFrequency=16000,
     samplingFrequency=8000,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2, 2]_Ns1_Nn1/AS1_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/speech1.wav'],
     noiseSignalFile=[f'{signalsPath}/02_noise/whitenoise_signal_1.wav'],
     #
-    signalDuration=60,
+    signalDuration=20,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     SROsppm=0,
     # SROsppm=[100,0],
     #
-    selfnoiseSNR=-50
+    selfnoiseSNR=-50,
+    # expAvg50PercentTime=0.05,
     )
 
 
@@ -66,6 +71,7 @@ def main():
     nFrames = y.shape[1]     # expected number of frames
     # Hard-coded variables
     beta = 0.9889709163809315
+    beta = 0.9
     lambda_ext = beta
     # lambda_ext = beta ** 10
     alpha = 0.5
@@ -101,8 +107,8 @@ def main():
     nSecondsPerFrame = frameSize / mySettings.samplingFrequency 
 
 
-    # d, wThroughFrames_noCompression = run_danse(y, K, asc, neighbourNodes, nf, nFrames, False, sequential, oVADframes, beta, lambda_ext, extUpdateEvery, nSecondsPerFrame, alpha)
-    d, wThroughFrames_withCompression = run_danse(y, K, asc, neighbourNodes, nf, nFrames, True, sequential, oVADframes, beta, lambda_ext, extUpdateEvery, nSecondsPerFrame, alpha)
+    # dSTFT, wThroughFrames_noCompression = run_danse(y, K, asc, neighbourNodes, nf, nFrames, False, sequential, oVADframes, beta, lambda_ext, extUpdateEvery, nSecondsPerFrame, alpha)
+    dSTFT, wThroughFrames_withCompression = run_danse(y, K, asc, neighbourNodes, nf, nFrames, True, sequential, oVADframes, beta, lambda_ext, extUpdateEvery, nSecondsPerFrame, alpha)
 
     # for k in range(K):
     #     # plot_filter_weights_evolution(wThroughFrames_noCompression[k])
@@ -110,6 +116,20 @@ def main():
     #     plot_filter_weights_evolution(wThroughFrames_withCompression[k])
     #     plt.suptitle(f'Node {k+1} - Diff. WITH COMPRESSION')
     #     plt.show()
+
+    if 1:
+        # LISTEN
+        listeningMaxDuration = 20
+        t, d = sig.istft(dSTFT[1],
+                            fs=mySettings.samplingFrequency,
+                            window=mySettings.stftWin,
+                            nperseg=mySettings.stftWinLength,
+                            noverlap=int(mySettings.stftFrameOvlp * mySettings.stftWinLength),
+                            input_onesided=True)
+        amplitude = np.iinfo(np.int16).max
+        d = (amplitude * d / np.amax(d) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
+        wavfile.write('tmp.wav', mySettings.samplingFrequency, d)
+        playwavfile('tmp.wav', listeningMaxDuration)
     
 
     kshow = 0   # index of node to plot
@@ -130,7 +150,7 @@ def main():
     ax.set_title('Ref. mic. signal')
     plt.colorbar(mapp)
     ax = fig.add_subplot(122)
-    mapp = ax.imshow(20 * np.log10(np.abs(d[kshow])), vmin=climLow, vmax=climHigh, extent=exts)
+    mapp = ax.imshow(20 * np.log10(np.abs(dSTFT[kshow])), vmin=climLow, vmax=climHigh, extent=exts)
     ax.invert_yaxis()
     ax.set_aspect('auto')
     ax.set_xlabel('$t$ [s]')
@@ -139,6 +159,7 @@ def main():
     plt.colorbar(mapp)
     plt.tight_layout()
     plt.show()
+    
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,6 +221,10 @@ def get_the_stfts(mySignals, mySettings):
 
 def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequential, oVADframes, beta, lambda_ext, extUpdateEvery, nSecondsPerFrame, alpha):
 
+    # For testing and debugging
+    flagCreateFigure = True
+
+
     # Initialize arrays
     Ryy = []
     Rnn = []
@@ -231,8 +256,10 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
     lastExtUpdateFrameIdx = np.zeros(K)
 
     wThroughFrames = []
+    sroresidual = []
     for k in range(K):
         wThroughFrames.append(np.zeros((nFrames, w[0].shape[0], w[0].shape[1]), dtype=complex))
+        sroresidual.append(np.zeros((nFrames, dimYTilde[k])))
 
     u = 0   # initialize updating node index
     # Online processing -- loop over time frames
@@ -273,12 +300,32 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
                 update = False
 
             if update and nUpdatesRyy[k] > dimYTilde[k] and nUpdatesRnn[k] > dimYTilde[k]:
+                wpri = copy.copy(w[k])  # a priori filter
                 w[k], _ = subs.perform_gevd_noforloop(Ryy[k], Rnn[k], rank=1, refSensorIdx=0)
                 # w[k] = subs.perform_update_noforloop(Ryy[k], Rnn[k], refSensorIdx=0)  # no GEVD method
                 nFilterUpdates[k] += 1
             else:
                 pass    # do not update `w[k]`
+            
+            if nFilterUpdates[k] >= 10:
+                sroresidual[k][l,:] = subs.residual_sro_estimation(w[k], wpri, asc.numSensorPerNode[k], 1024, 512)
 
+                # # TMP TMP TMP TMP TMP TMP TMP
+                # # TMP TMP TMP TMP TMP TMP TMP
+                # # TMP TMP TMP TMP TMP TMP TMP
+                # if k == 0 and flagCreateFigure:
+                #     fig = plt.figure(figsize=(8,4))
+                #     ax = fig.add_subplot(111)
+                #     flagCreateFigure = False
+                # ax.plot(resSROall)
+                # plt.draw() 
+                # plt.pause(0.01)
+                # ax.clear()
+                # # TMP TMP TMP TMP TMP TMP TMP
+                # # TMP TMP TMP TMP TMP TMP TMP
+                # # TMP TMP TMP TMP TMP TMP TMP
+
+                    
             # (smoothly) update broadcast filters
             wExternal[k] = lambda_ext * wExternal[k] + (1 - lambda_ext) * wExternalTarget[k]
 
@@ -293,6 +340,17 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
             d[k][:, l] = np.einsum('ij,ij->i', w[k].conj(), ytildecurr)
 
         u = (u + 1) % K     # update updating node index (for sequential processing)
+
+
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(111)
+    ax.plot(sroresidual[0] * 1e6)
+    ax.grid()
+    plt.tight_layout()	
+    plt.show()
+
+
+    stop = 1
 
     return d, wThroughFrames
 

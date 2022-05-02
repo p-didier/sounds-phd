@@ -265,7 +265,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     sigs.wetSpeech[startIdx:, trueIdxSensor],
                                     sigs.sensorSignals[startIdx:, trueIdxSensor],
                                     sigs.desiredSigEst[startIdx:, idxNode], 
-                                    sigs.fs[trueIdxSensor],  # 20220321 comment: using reference sensor (SRO = 0 ppm) for the Fs reference to avoid indefinitely while-looping issues when Fs is prime -- see Monday notes in week12 Word journal.
+                                    sigs.fs[trueIdxSensor],
                                     sigs.VAD[startIdx:],
                                     settings.dynamicMetricsParams,  # dynamic metrics computation parameters
                                     settings.gammafwSNRseg,

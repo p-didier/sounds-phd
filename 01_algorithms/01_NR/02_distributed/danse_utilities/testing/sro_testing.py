@@ -36,6 +36,7 @@ class DanseTestingParameters():
     nodeUpdating: str = 'simultaneous'      # node-updating strategy
     broadcastLength: int = 8                # length of broadcast chunk [samples]
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
+    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
     estimateSROs: bool = False              # if True, estimate SROs
@@ -151,6 +152,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     expAvg50PercentTime=2.,
                     estimateSROs=danseParams.estimateSROs,                  # if True, estimate SROs
                     compensateSROs=danseParams.compensateSROs,              # if True, compensate SROs
+                    broadcastDomain=danseParams.broadcastDomain,
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
             experiments.append(dict([('sets', sets), ('path', exportPath)]))

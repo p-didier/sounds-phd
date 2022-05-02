@@ -345,19 +345,8 @@ def danse_compression_freq_domain(yq, wHat):
     
     # Transfer local observations to frequency domain
     n = len(yq)     # FFT order
-    yqHat = np.fft.fft(np.squeeze(yq), n, axis=0)
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(211)
-    # ax.plot(yq)
-    # ax.grid()
-    # ax = fig.add_subplot(212)
-    # ax.plot(20 * np.log10(np.abs(yqHat)))
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-
+    window = np.sqrt(np.hanning(n))             # TODO: hard-coded <--- must be neatly integrated
+    yqHat = np.fft.fft(np.squeeze(yq) * window, n, axis=0)
 
     if flagSingleSensor:
         # Keep only positive frequencies
@@ -1093,13 +1082,28 @@ def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
     # Create `kappa` frequency bins vector
     kappa = 2 * np.pi / N * Ns * np.arange(numFreqLines)  # TODO: check if that is correct -- Eq. (3), week 02 in LaTeX journal 2022
 
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # resSROall = phi / kappa[:, np.newaxis]
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(resSROall)
+    # ax.grid()
+    # plt.tight_layout()	
+    # plt.show()
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
+    
     # Estimate residual SRO as least-square solution to system of equation across frequency bins
+    nfToDiscard = 0    # number of lowest frequency bins to discard -- see Word journal, TUE 26/04, week 17 2022
     residualSROs = np.zeros(dimYTilde)
     for q in range(dimYTilde):
-        residualSROs[q] = np.dot(kappa, phi[:, q]) / np.dot(kappa, kappa)
-
-
-    stop = 1
+        residualSROs[q] = np.dot(kappa[nfToDiscard:], phi[nfToDiscard:, q]) / np.dot(kappa[nfToDiscard:], kappa[nfToDiscard:])
 
     return residualSROs
 
