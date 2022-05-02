@@ -50,7 +50,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -354,7 +354,7 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
     """
 
     frameSize = settings.stftWinLength
-    nNewSamplesPerFrame = settings.stftEffectiveFrameLen
+    Ns = settings.stftEffectiveFrameLen
     y = signals.sensorSignals
 
     # 1) Extend signal on both ends to ensure that the first frame is centred on t = 0 -- see <scipy.signal.stft>'s `boundary` argument (default: `zeros`)
@@ -369,24 +369,24 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
         tpost[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * (frameSize // 2), num=frameSize // 2)
     t = np.concatenate((tpre, t, tpost), axis=0)
 
-    # 2) Zero-pad signal if necessary
+    # 2) Zero-pad signal if necessary to include an integer number of frames in the signal
     nadd = 0
-    if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:
-        nadd = (-(y.shape[0] - frameSize) % nNewSamplesPerFrame) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
+    if not (y.shape[0] - frameSize) % Ns == 0:
+        nadd = (-(y.shape[0] - frameSize) % Ns) % frameSize  # see <scipy.signal.stft>'s `padded` argument (default: `True`)
         print(f'Padding {nadd} zeros to the signals in order to fit FFT size')
         y = np.concatenate((y, np.zeros([nadd, y.shape[-1]])), axis=0)
         # Adapt time vector too
         tzp = np.zeros((nadd, asc.numNodes))
         for k in range(asc.numNodes):
-            tzp[:, k] = np.linspace(start= t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)     # TODO what if clock jitter?
+            tzp[:, k] = np.linspace(start=t[-1, k] + dt[k], stop=t[-1, k] + dt[k] * nadd, num=nadd)     # TODO what if clock jitter?
         t = np.concatenate((t, tzp), axis=0)
-        if not (y.shape[0] - frameSize) % nNewSamplesPerFrame == 0:   # double-check
+        if not (y.shape[0] - frameSize) % Ns == 0:   # double-check
             raise ValueError('There is a problem with the zero-padding...')
 
     return y, t, nadd
 
 
-def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
+def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
     """Main wrapper for DANSE computations.
 
     Parameters
@@ -407,6 +407,8 @@ def danse(signals: classes.Signals, asc: classes.AcousticScenario, settings: cla
         -Note: if `settings.computeLocalEstimate == False`, then `desiredSigEstLocal` is output as an all-zeros array.
     """
     # Prepare signals for Fourier transforms
+    # -- Zero-padding and signals length adaptation to ensure correct FFT/IFFT operation.
+    # -- Based on FFT implementation by `scipy.signal` module.
     y, t, nadd = prep_for_ffts(signals, asc, settings)
 
     # DANSE it up

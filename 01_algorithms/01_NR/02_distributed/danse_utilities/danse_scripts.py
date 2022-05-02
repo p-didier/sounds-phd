@@ -1,6 +1,4 @@
 
-from cProfile import label
-from doctest import master
 import numpy as np
 import time, datetime
 from . import classes
@@ -345,7 +343,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Pad zeros at beginning if needed
                     if idxEndChunk - idxBegChunk < frameSize:
                         yLocalCurr = np.concatenate((np.zeros((frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
-                    
+
                 # Perform broadcast -- update all buffers in network
                 zBuffer = subs.broadcast(
                             t,
@@ -499,7 +497,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Update phase shifts for SRO compensation
                 if settings.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
-                        # Increment phase shift factor recursively....
+                        # Increment phase shift factor recursively
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   
                         #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
 
@@ -543,24 +541,24 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # plt.tight_layout()	
     # plt.show()
 
-    fig = plt.figure(figsize=(6,4))
-    for ii in range(len(residualSROs)):
-        ax = fig.add_subplot(len(residualSROs) * 100 + 10 + ii + 1)
-        for jj in range(residualSROs[ii].shape[0]):
-            if jj >= asc.numSensorPerNode[ii]:
-                lab = f'Neighbor #{jj+1 - asc.numSensorPerNode[ii]}'
-                ax.plot(residualSROs[ii][jj, :].T * 10 ** 6, label=lab)
-                # # Show actual relative SRO
-                # trueSRO = (SROsEstimates[ii][jj - asc.numSensorPerNode[ii]]) * 10 ** 6
-                # ax.hlines(trueSRO, xmin=0, xmax=residualSROs[ii].shape[1], color='k')
-        ax.grid()
-        ax.set_ylabel('Residual SRO [ppm]')
-        ax.set_title(f"Node {ii+1}'s estimates")
-        ax.legend()
-        # ax.set_ylim([-100, 100])
-    ax.set_xlabel('DANSE iteration i')
-    plt.tight_layout()	
-    plt.show()
+    # fig = plt.figure(figsize=(6,4))
+    # for ii in range(len(residualSROs)):
+    #     ax = fig.add_subplot(len(residualSROs) * 100 + 10 + ii + 1)
+    #     for jj in range(residualSROs[ii].shape[0]):
+    #         if jj >= asc.numSensorPerNode[ii]:
+    #             lab = f'Neighbor #{jj+1 - asc.numSensorPerNode[ii]}'
+    #             ax.plot(residualSROs[ii][jj, :].T * 10 ** 6, label=lab)
+    #             # # Show actual relative SRO
+    #             # trueSRO = (SROsEstimates[ii][jj - asc.numSensorPerNode[ii]]) * 10 ** 6
+    #             # ax.hlines(trueSRO, xmin=0, xmax=residualSROs[ii].shape[1], color='k')
+    #     ax.grid()
+    #     ax.set_ylabel('Residual SRO [ppm]')
+    #     ax.set_title(f"Node {ii+1}'s estimates")
+    #     ax.legend()
+    #     # ax.set_ylim([-100, 100])
+    # ax.set_xlabel('DANSE iteration i')
+    # plt.tight_layout()	
+    # plt.show()
 
     stop = 1
 

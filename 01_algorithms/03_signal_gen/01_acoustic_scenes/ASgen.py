@@ -31,16 +31,16 @@ sets = ASCProgramSettings(
     minDistFromWalls = 0.2,
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=1,                # nr. of noise sources
-    numNodes=3,                       # nr. of nodes
+    numNodes=2,                       # nr. of nodes
     # numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
     # numSensorPerNode=[2,2],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
-    numSensorPerNode=[1,2,3],               # nr. of sensor per node,
-    # numSensorPerNode=1,               # nr. of sensor per node,
+    # numSensorPerNode=[1,2,3],               # nr. of sensor per node,
+    numSensorPerNode=1,               # nr. of sensor per node,
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation=1,             # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime=0.0,                      # reverberation time [s]
+    sensorSeparation=1,                 # separation between sensor in array (only used if numSensorPerNode > 1)
+    revTime=0.1,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases 
     topology='fully_connected',
 )
@@ -72,7 +72,13 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     rngGlobal = np.random.default_rng(globalSeed)
 
     # Export folder
-    expFolder = f"{basepath}/J{sets.numNodes}Mk{sets.numSensorPerNode}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    Mks = '['
+    for ii in range(len(sets.numSensorPerNode)):
+        Mks += str(sets.numSensorPerNode[ii])
+        if ii < len(sets.numSensorPerNode) - 1:
+            Mks += '_'
+    Mks += ']'
+    expFolder = f"{basepath}/J{sets.numNodes}Mk{Mks}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
 

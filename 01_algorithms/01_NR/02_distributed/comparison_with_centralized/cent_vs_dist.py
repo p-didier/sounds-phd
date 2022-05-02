@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path, PurePath
-from threading import local
 import matplotlib.pyplot as plt
 import numpy as np
 #
@@ -18,7 +17,7 @@ if not any("01_algorithms/01_NR/02_distributed" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 # Custom packages imports
 from danse_utilities.classes import ProgramSettings, get_stft, PrintoutsParameters
-from danse_utilities.setup import generate_signals, danse
+from danse_utilities.setup import generate_signals, launch_danse
 
 
 # General parameters
@@ -97,7 +96,7 @@ def main(settings):
 
     # Distributed solution - GEVD-DANSE
     print('Computing distributed solution (DANSE)...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = launch_danse(mySignals, asc, settings)
 
     # Plot
     DfiltDANSE, f, t = get_stft(mySignals.desiredSigEst, mySignals.fs, settings)

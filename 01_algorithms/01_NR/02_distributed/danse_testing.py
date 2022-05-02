@@ -19,10 +19,12 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1, 1]_Ns1_Nn1/AS2_anechoic'],
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2, 3, 4]_Ns1_Nn1/AS5_anechoic'],
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS1_anechoic'],
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3, 1]_Ns1_Nn1/AS2_RT500ms'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS8_anechoic'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS6_RT400ms'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS4_RT200ms'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2_3_4]_Ns1_Nn1/AS5_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3_1]_Ns1_Nn1/AS1_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3_1]_Ns1_Nn1/AS2_RT500ms'],
     #
     fs=8000,    
     # fs=16000,    
@@ -44,14 +46,14 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     broadcastDomain='f',    
     #
     compensateSROs=True,
-    estimateSROs=True,
+    # estimateSROs=True,
     # compensateSROs=False,
-    # estimateSROs=False,
+    estimateSROs=False,
 )
 
 
 def main():
-    """Main wrapper"""
+    """Main wrapper for DANSE testing."""
     sro_testing.go(danseTestingParams, exportBasePath)
 
 # ------------------------------------ RUN SCRIPT ------------------------------------
