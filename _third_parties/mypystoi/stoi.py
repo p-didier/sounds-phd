@@ -1,6 +1,7 @@
 import numpy as np
 import warnings
 from . import utils
+import matplotlib.pyplot as plt
 
 # Constant definition
 FS = 10000                          # Sampling frequency
