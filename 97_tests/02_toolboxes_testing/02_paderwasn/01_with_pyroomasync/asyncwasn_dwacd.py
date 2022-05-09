@@ -1,3 +1,17 @@
+"""ABOUT
+Script to test out Pyroomasync-generated SRO-affected signals 
+in combination with Gburrek's DWACD SRO-estimation method.
+
+Ref: Gburrek, Tobias, Joerg Schmalenstroeer, and Reinhold Haeb-Umbach. 
+    "On Synchronization of Wireless Acoustic Sensor Networks in the 
+    Presence of Time-Varying Sampling Rate Offsets and Speaker Changes."
+    ICASSP 2022-2022 IEEE International Conference on Acoustics, 
+    Speech and Signal Processing (ICASSP). IEEE, 2022.
+
+Pyroomasync: https://github.com/ImperialCollegeLondon/sap-pyroomasync/tree/main/pyroomasync
+DWACD: https://github.com/fgnt/paderwasn
+"""
+
 import sys
 from dataclasses import dataclass
 import numpy as np
@@ -12,6 +26,7 @@ from sqlalchemy import true
 
 @dataclass
 class ExperimentParameters():
+    """Small dataclass to easily store experiment parameters."""
     roomDims: np.ndarray
     micPos: np.ndarray
     fsOffsets: np.ndarray
@@ -19,10 +34,12 @@ class ExperimentParameters():
     pathToSignals: str
     vadThreshold : float
 
-SROset = np.linspace(start=0, stop=100, num=10)     # SROs to test
+
+SROset = np.linspace(start=0, stop=100, num=5)     # SROs to test
 
 
 def main():
+    """Main wrapper -- Generate signals and compute SRO estimates."""
 
     for ii in range(len(SROset)):
         print(f'Estimating SROs (set {ii+1}/{len(SROset)})...')
@@ -42,18 +59,21 @@ def main():
         if ii == 0:
             sroEstimateDWACD = np.zeros((len(SROset), len(tmp)))
         sroEstimateDWACD[ii, :] = tmp
+        # Apply Online WACD
+        sroEstimator = OnlineWACD()
+        tmp = sroEstimator(sig=signals[:, 0], ref_sig=signals[:, 1])
+        if ii == 0:
+            sroEstimateOWACD = np.zeros((len(SROset), len(tmp)))
+        sroEstimateOWACD[ii, :] = tmp
 
     print('ALL DONE.')
 
-    plot_sro_est(sroEstimateDWACD, SROset)
-    
-
-    stop = 1
-    
-    return None
+    # Plot
+    plot_sro_est(sroEstimateDWACD, sroEstimateOWACD, SROset)
 
 
 def gen_parameters(sro, baseFs=48000):
+    """Generate parameters for current test."""
 
     fsOffset = sro * 1e-6 * baseFs
 
@@ -72,6 +92,7 @@ def gen_parameters(sro, baseFs=48000):
 
 
 def gen_signals(params: ExperimentParameters):
+    """Generate asynchronized signals using Pyroomasync."""
 
     # Create room
     room = ConnectedShoeBox(params.roomDims)
@@ -94,16 +115,20 @@ def gen_signals(params: ExperimentParameters):
     return signals
 
 
-def plot_sro_est(sroEsts, trueSROs):
+def plot_sro_est(sroEstimateDWACD, sroEstimateOWACD, trueSROs):
+    """Plot the SRO estimates along with their ground truth."""
 
-    fig = plt.figure(figsize=(6,3))
+    fig = plt.figure(figsize=(6,5))
     ax = fig.add_subplot(111)
-    for ii in range(sroEsts.shape[0]):
-        ax.plot(sroEsts[ii, :], label=f'$\\varepsilon={trueSROs[ii]}$ ppm')
+    for ii in range(sroEstimateDWACD.shape[0]):
+        ax.plot(sroEstimateDWACD[ii, :], 'r', label=f'DWACD: $\\varepsilon={np.round(trueSROs[ii], 1)}$ ppm')
+        ax.plot(sroEstimateOWACD[ii, :], 'b', label=f'Online WACD: $\\varepsilon={np.round(trueSROs[ii], 1)}$ ppm')
         plt.axhline(y=trueSROs[ii], color='k', linestyle='--')
     ax.grid()
     ax.set_ylabel('[ppm]')
+    ax.set_xlabel('Online SRO estimation iteration index')
     plt.legend()
+    plt.title('(In black: true values)')
     plt.tight_layout()	
     plt.show()
 
