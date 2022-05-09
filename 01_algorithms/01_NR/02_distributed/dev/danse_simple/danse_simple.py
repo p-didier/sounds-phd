@@ -224,7 +224,6 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
     # For testing and debugging
     flagCreateFigure = True
 
-
     # Initialize arrays
     Ryy = []
     Rnn = []
@@ -300,7 +299,7 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
                 update = False
 
             if update and nUpdatesRyy[k] > dimYTilde[k] and nUpdatesRnn[k] > dimYTilde[k]:
-                wpri = copy.copy(w[k])  # a priori filter
+                wapriori = copy.copy(w[k])  # a priori filter
                 w[k], _ = subs.perform_gevd_noforloop(Ryy[k], Rnn[k], rank=1, refSensorIdx=0)
                 # w[k] = subs.perform_update_noforloop(Ryy[k], Rnn[k], refSensorIdx=0)  # no GEVD method
                 nFilterUpdates[k] += 1
@@ -308,7 +307,7 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
                 pass    # do not update `w[k]`
             
             if nFilterUpdates[k] >= 10:
-                sroresidual[k][l,:] = subs.residual_sro_estimation(w[k], wpri, asc.numSensorPerNode[k], 1024, 512)
+                sroresidual[k][l,:] = subs.residual_sro_estimation(w[k], wapriori, asc.numSensorPerNode[k], 1024, 512)
 
                 # # TMP TMP TMP TMP TMP TMP TMP
                 # # TMP TMP TMP TMP TMP TMP TMP

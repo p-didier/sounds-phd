@@ -4,6 +4,7 @@
 # Acoustic Scenario (AS) generation script.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+from tokenize import Expfloat
 import numpy as np
 import os, sys
 from pathlib import Path, PurePath
@@ -30,7 +31,7 @@ sets = ASCProgramSettings(
     roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
     minDistFromWalls = 0.2,
     numSpeechSources=1,               # nr. of speech sources
-    numNoiseSources=1,                # nr. of noise sources
+    numNoiseSources=0,                # nr. of noise sources
     numNodes=2,                       # nr. of nodes
     # numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
     # numSensorPerNode=[2,2],               # nr. of sensor per node,
@@ -40,7 +41,7 @@ sets = ASCProgramSettings(
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation=1,                 # separation between sensor in array (only used if numSensorPerNode > 1)
-    revTime=0.1,                      # reverberation time [s]
+    revTime=0.0,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases 
     topology='fully_connected',
 )
@@ -78,7 +79,12 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
         if ii < len(sets.numSensorPerNode) - 1:
             Mks += '_'
     Mks += ']'
-    expFolder = f"{basepath}/J{sets.numNodes}Mk{Mks}_Ns{sets.numSpeechSources}_Nn{sets.numNoiseSources}"
+    expFolder = f"{basepath}/J{sets.numNodes}Mk{Mks}_Ns{sets.numSpeechSources}_"
+    if sets.numNoiseSources > 0:
+        expFolder += f'Nn{sets.numNoiseSources}'
+    else:
+        expFolder += 'noiseless'
+
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
 

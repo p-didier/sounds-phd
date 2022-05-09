@@ -34,7 +34,11 @@ class SamplingRateOffsets:
     """Sampling rate/time offsets class, containing all necessary info for
     applying, estimating, and compensation SROs/STOs"""
     SROsppm: list[float] = field(default_factory=list)     # SROs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
-    STOsppm: list[float] = field(default_factory=list)     # STOs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
+    estimateSROs: bool = False              # if True, estimate SROs
+    compensateSROs: bool = False            # if True, compensate SROs
+    STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
+    estimateSTOs: bool = False              # if True, estimate STOs
+    compensateSTOs: bool = False            # if True, compensate STOs
 
     def __post_init__(self):
         if len(self.SROsppm) < self.nNodes:

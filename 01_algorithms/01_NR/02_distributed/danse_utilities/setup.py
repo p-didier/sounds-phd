@@ -555,7 +555,8 @@ def generate_signals(settings: classes.ProgramSettings):
                     rirNoiseToSensors_resampled = np.zeros((resampled.shape[0], asc.rirNoiseToSensors.shape[1], asc.rirNoiseToSensors.shape[2]))
                 rirNoiseToSensors_resampled[:, ii, jj] = resampled
         asc.rirDesiredToSensors = rirDesiredToSensors_resampled
-        asc.rirNoiseToSensors = rirNoiseToSensors_resampled
+        if asc.rirNoiseToSensors.shape[2] > 0:  # account for noiseless scenario
+            asc.rirNoiseToSensors = rirNoiseToSensors_resampled
         # Modify ASC object parameter
         asc.samplingFreq = settings.samplingFrequency
 

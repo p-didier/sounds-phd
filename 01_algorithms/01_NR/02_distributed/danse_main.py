@@ -45,7 +45,8 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS1_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_noiseless/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS3_RT500ms',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1_1_1_1_1]_Ns1_Nn1/AS10_anechoic',
@@ -56,11 +57,12 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=20,
+    signalDuration=40,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
@@ -68,24 +70,24 @@ mySettings = ProgramSettings(
     # SROsppm=[0, 4000, 6000],
     # SROsppm=[0, 400, 600],
     # SROsppm=[0, 2000, 12000, 22000, 32000],
-    # SROsppm=[100, 0],
+    # SROsppm=[500, 0],
     # SROsppm=[0, 500, 1000],
     # SROsppm=[5, 0],
     SROsppm=0,
-    # compensateSROs=False,                # if True, compensate SROs
+    compensateSROs=False,                # if True, compensate SROs
     # estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
     # compensateSROs=True,               # if True, compensate SROs
     estimateSROs=True,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
-    # danseUpdating='simultaneous',       # node-updating scheme
-    danseUpdating='sequential',       # node-updating scheme
+    danseUpdating='simultaneous',       # node-updating scheme
+    # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True, also compute and store the local estimate (as if there was no cooperation between nodes)
     performGEVD=1,                      # if True, perform GEVD-DANSE
     # bypassFilterUpdates=True,
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    # timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # broadcastDomain='t',
     broadcastDomain='f',

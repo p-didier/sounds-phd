@@ -74,6 +74,9 @@ class AcousticScenario:
 
     def plot(self):
 
+        # Detect noiseless scenarios
+        noiselessFlag = self.rirNoiseToSensors.shape[-1] == 0
+
         fig, (a0, a1) = plt.subplots(2, 2, gridspec_kw={'height_ratios': [3, 1]})
         plot_side_room(a0[0], self.roomDimensions[0:2], 
                     self.desiredSourceCoords[:, [0,1]], 
@@ -104,16 +107,31 @@ class AcousticScenario:
         boxText = boxText[:-1]
         # Plot RIRs
         t = np.arange(self.rirDesiredToSensors.shape[0]) / self.samplingFreq
-        ymax = np.amax([np.amax(self.rirDesiredToSensors[:, 0, 0]), np.amax(self.rirNoiseToSensors[:, 0, 0])])
-        ymin = np.amin([np.amin(self.rirDesiredToSensors[:, 0, 0]), np.amin(self.rirNoiseToSensors[:, 0, 0])])
+
+        # Set RIRs plots y-axes bounds
+        if noiselessFlag:
+            ymax = np.amax(self.rirDesiredToSensors[:, 0, 0])
+            ymin = np.amin(self.rirDesiredToSensors[:, 0, 0])
+        else:
+            ymax = np.amax([np.amax(self.rirDesiredToSensors[:, 0, 0]), np.amax(self.rirNoiseToSensors[:, 0, 0])])
+            ymin = np.amin([np.amin(self.rirDesiredToSensors[:, 0, 0]), np.amin(self.rirNoiseToSensors[:, 0, 0])])
+
+        # Plot RIRs
         a1[0].plot(t, self.rirDesiredToSensors[:, 0, 0], 'k')
         a1[0].grid()
         a1[0].set(xlabel='$t$ [s]', title=f'RIR node 1 - D1')
         a1[0].set_ylim([ymin, ymax])
-        a1[1].plot(t, self.rirNoiseToSensors[:, 0, 0], 'k')
-        a1[1].grid()
-        a1[1].set(xlabel='$t$ [s]', title=f'RIR node 1 - N1')
-        a1[1].set_ylim([ymin, ymax])
+        if noiselessFlag:
+            a1[1].set_xlim([0, 1])
+            a1[1].set_ylim([0, 1])
+            a1[1].text(0.5, 0.5, 'Noiseless',ha='center', va='center')
+            a1[1].set_xticks([])
+            a1[1].set_yticks([])
+        else:
+            a1[1].plot(t, self.rirNoiseToSensors[:, 0, 0], 'k')
+            a1[1].grid()
+            a1[1].set(xlabel='$t$ [s]', title=f'RIR node 1 - N1')
+            a1[1].set_ylim([ymin, ymax])
         # Add text boxes
         a1[1].text(1.1, 0.9, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}', transform=a1[1].transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
