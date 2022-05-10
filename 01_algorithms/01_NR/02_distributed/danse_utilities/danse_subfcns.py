@@ -4,6 +4,7 @@ from numba import njit
 import scipy.linalg as sla
 from . import classes
 from danse_utilities.events_manager import *
+from .sro_subfcns import *
 
 
 def danse_init(yin, settings: classes.ProgramSettings, asc):
@@ -1040,70 +1041,3 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
         Rnn = beta * Rnn + (1 - beta) * yyH  # update noise-only matrix
 
     return Ryy, Rnn
-
-
-def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
-    """Estimates residual SRO using the residuals phase technique.
-    
-    Parameters
-    ----------
-    resPos : [N x M] np.ndarray (complex)
-        A posteriori (iteration `i + 1`) residuals for every frequency bin and every element of $\\tilde{y}$.
-    resPri : [N x M] np.ndarray (complex)
-        A priori (iteration `i`) residuals for every frequency bin and every element of $\\tilde{y}$.
-    nLocalSensors : int
-        Number of local sensors at current node.
-    N : int
-        Processing frame length (== DANSE DFT size).
-    Ns : int
-        Number of new samples at each new frame, counting overlap (`Ns = N * (1 - O)`, where `O` is the amount of overlap [/100%])
-
-    Returns
-    -------
-    residualSROs : [M x 1] np.ndarray (float)
-        Estimated residual SROs for each node.
-        -- `nLocalSensors` first elements of output should be zero (no intra-node SROs)
-    """
-
-    # Check correct input orientation
-    if resPos.shape[0] < resPos.shape[1]:
-        resPos = resPos.T
-    if resPri.shape[0] < resPri.shape[1]:
-        resPri = resPri.T
-    # Create useful explicit variables
-    numFreqLines = resPos.shape[0]
-    dimYTilde = resPos.shape[1]
-    
-
-    # Compute "residuals angle" matrix
-    phi = np.angle(resPri * resPos.conj())      # see LaTeX journal 2022 week 02
-    phi[:, :nLocalSensors] = 0              # NOTE: force a 0 residual at the local sensors (no intra-node SRO)
-
-    # Create `kappa` frequency bins vector
-    kappa = 2 * np.pi / N * Ns * np.arange(numFreqLines)  # TODO: check if that is correct -- Eq. (3), week 02 in LaTeX journal 2022
-
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # resSROall = phi / kappa[:, np.newaxis]
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(resSROall)
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    # TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP TMP
-    
-    # Estimate residual SRO as least-square solution to system of equation across frequency bins
-    nfToDiscard = 0    # number of lowest frequency bins to discard -- see Word journal, TUE 26/04, week 17 2022
-    residualSROs = np.zeros(dimYTilde)
-    for q in range(dimYTilde):
-        residualSROs[q] = np.dot(kappa[nfToDiscard:], phi[nfToDiscard:, q]) / np.dot(kappa[nfToDiscard:], kappa[nfToDiscard:])
-
-    return residualSROs
-
