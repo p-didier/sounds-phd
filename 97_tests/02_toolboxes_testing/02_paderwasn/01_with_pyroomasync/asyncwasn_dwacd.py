@@ -27,12 +27,25 @@ from paderwasn.synchronization.utils import VoiceActivityDetector
 class ExperimentParameters():
     """Small dataclass to easily store experiment parameters."""
     roomDims: np.ndarray
-    micPos: np.ndarray
+    nodePos: np.ndarray
     fsOffsets: np.ndarray
     sourcePos: np.ndarray
     pathToSignals: str
     vadThreshold : float
+    comp : dict
+    randomGen : np.random.Generator
 
+    def __post_init__(self):
+        if len(self.comp['Mk']) != self.nodePos.shape[0]:
+            raise ValueError(f'There must be as many Mk values as nodes ({self.nodePos.shape[0]}).')
+
+# General parameters
+roomDims = np.array([4.47, 5.13, 3.18])
+nodePos = np.array([[3.40, 2.10, 0.72], [3.35, 3.41, 0.72]])
+sourcePos = np.array([1.98, 0.61, 0])
+pathToSignals ='97_tests/02_toolboxes_testing/01_pyroomasync/data'
+vadThreshold = 1
+baseFs=48000
 
 SROset = np.linspace(start=0, stop=100, num=5)     # SROs to test
 SROset = np.array([50])     # SROs to test
@@ -43,20 +56,49 @@ TEMPDIST = 8192
 # TEMPDIST = int(8192 / 4)
 # TEMPDIST = int(8192 / 8)
 COMPUTEONLINE = False
+SEED = 12345
+multichannelCompression = dict([
+    ('active', True),
+    ('Mk', [1, 5]),
+    ('minSensorDistance', 0.05),
+    ('maxSensorDistance', 0.2)
+])
 
 
 def main():
     """Main wrapper -- Generate signals and compute SRO estimates."""
 
+    params = ExperimentParameters(
+        roomDims=roomDims,
+        nodePos=nodePos,
+        fsOffsets=np.array([0, SROset[0] * 1e-6 * baseFs]),   # sampling freq. offset [samples]
+        sourcePos=sourcePos,
+        pathToSignals=pathToSignals,
+        vadThreshold=vadThreshold,
+        comp=multichannelCompression,
+        randomGen=np.random.default_rng(SEED)
+    )
+
+
     for ii in range(len(SROset)):
         print(f'Estimating SROs (set {ii+1}/{len(SROset)})...')
 
-        # Get parameters
-        params = gen_parameters(SROset[ii], baseFs=48000)
+        # Set sampling frequency offsets
+        params.fsOffsets = np.array([0, SROset[ii] * 1e-6 * baseFs])   # sampling freq. offset [samples]
+
+        # Compute VAD
         vad = VoiceActivityDetector(params.vadThreshold)
 
-        # Get signals
+        # Generate signals
         signals = gen_signals(params)
+
+        if params.comp['active']:
+            signalsCompressed = np.zeros((signals.shape[0], params.nodePos.shape[0]))
+            for k in range(params.nodePos.shape[0]):
+                linearCompressor = params.randomGen.uniform(size=(params.comp['Mk'][k],)) +\
+                    1j * params.randomGen.uniform(size=(params.comp['Mk'][k],)) 
+                signalsCompressed[:, k] = np.einsum('ij,ij->i', linearCompressor[np.newaxis, :], signals[:, sum(params.comp['Mk'][:k]):(sum(params.comp['Mk'][:k + 1]))])
+            signals = signalsCompressed
 
         if mode == 'batch':
             # Apply DWACD (batch mode)
@@ -103,24 +145,6 @@ def main():
     plot_sro_est(sroEstimateDWACD, sroEstimateOWACD, SROset)
 
 
-def gen_parameters(sro, baseFs=48000):
-    """Generate parameters for current test."""
-
-    fsOffset = sro * 1e-6 * baseFs
-
-    params = ExperimentParameters(
-        roomDims=np.array([4.47, 5.13, 3.18]),
-        micPos=np.array([[3.40, 2.10, 0.72],
-                        [3.35, 3.41, 0.72]]),
-        fsOffsets=np.array([0, fsOffset]),   # sampling freq. offset [samples]
-        sourcePos=np.array([1.98, 0.61, 0]),
-        pathToSignals='97_tests/02_toolboxes_testing/01_pyroomasync/data',
-        vadThreshold = 1
-    )
-
-    return params
-
-
 def gen_signals(params: ExperimentParameters):
     """Generate asynchronized signals using Pyroomasync."""
 
@@ -128,8 +152,14 @@ def gen_signals(params: ExperimentParameters):
     room = ConnectedShoeBox(params.roomDims)
 
     # Add microphones with their sampling frequencies and latencies
-    for ii in range(params.micPos.shape[0]):
-        room.add_microphone(params.micPos[ii, :], fs_offset=params.fsOffsets[ii], delay=0, id=f'mic{ii+1}')
+    for ii in range(params.nodePos.shape[0]):
+        if params.comp['active']:
+            for _ in range(params.comp['Mk'][ii]):
+                posOffset = (params.comp['maxSensorDistance'] - params.comp['minSensorDistance'])\
+                     * params.randomGen.uniform(size=(3,)) + params.comp['minSensorDistance']
+                room.add_microphone(params.nodePos[ii, :] + posOffset, fs_offset=params.fsOffsets[ii], delay=0, id=f'mic{ii+1}')
+        else:
+            room.add_microphone(params.nodePos[ii, :], fs_offset=params.fsOffsets[ii], delay=0, id=f'mic{ii+1}')
 
     # Add a source
     room.add_source(params.sourcePos, "02_data/00_raw_signals/01_speech/speech1.wav", 'source1')
