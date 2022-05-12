@@ -22,7 +22,6 @@ from pyroomasync import (
 )
 from paderwasn.synchronization.sro_estimation import DynamicWACD, OnlineWACD
 from paderwasn.synchronization.utils import VoiceActivityDetector
-from sqlalchemy import true
 
 @dataclass
 class ExperimentParameters():
@@ -36,6 +35,14 @@ class ExperimentParameters():
 
 
 SROset = np.linspace(start=0, stop=100, num=5)     # SROs to test
+SROset = np.array([50])     # SROs to test
+mode = 'batch'      # batch-mode simulation: giving entire signal as input to `paderwasn` functions
+# mode = 'online'     # online-mode simulation: giving signal chunk by chunk as input to `paderwasn` functions
+TEMPDIST = 8192
+# TEMPDIST = int(8192 / 2)
+# TEMPDIST = int(8192 / 4)
+# TEMPDIST = int(8192 / 8)
+COMPUTEONLINE = False
 
 
 def main():
@@ -51,20 +58,44 @@ def main():
         # Get signals
         signals = gen_signals(params)
 
-        # Apply DWACD
-        sroEstimator = DynamicWACD()
-        tmp = sroEstimator(sig=signals[:, 0], ref_sig=signals[:, 1],
-                                    activity_sig=vad(signals[:, 0]),
-                                    activity_ref_sig=vad(signals[:, 1]))
-        if ii == 0:
-            sroEstimateDWACD = np.zeros((len(SROset), len(tmp)))
-        sroEstimateDWACD[ii, :] = tmp
-        # Apply Online WACD
-        sroEstimator = OnlineWACD()
-        tmp = sroEstimator(sig=signals[:, 0], ref_sig=signals[:, 1])
-        if ii == 0:
-            sroEstimateOWACD = np.zeros((len(SROset), len(tmp)))
-        sroEstimateOWACD[ii, :] = tmp
+        if mode == 'batch':
+            # Apply DWACD (batch mode)
+            sroEstimator = DynamicWACD(temp_dist=TEMPDIST)
+            tmp = sroEstimator(sig=signals[:, 0], ref_sig=signals[:, 1],
+                                        activity_sig=vad(signals[:, 0]),
+                                        activity_ref_sig=vad(signals[:, 1]))
+            if ii == 0:
+                sroEstimateDWACD = np.zeros((len(SROset), len(tmp)))
+            sroEstimateDWACD[ii, :] = tmp
+            if COMPUTEONLINE:
+                # Apply Online WACD
+                sroEstimator = OnlineWACD(temp_dist=TEMPDIST)
+                tmp = sroEstimator(sig=signals[:, 0], ref_sig=signals[:, 1])
+                if ii == 0:
+                    sroEstimateOWACD = np.zeros((len(SROset), len(tmp)))
+                sroEstimateOWACD[ii, :] = tmp
+            else:
+                sroEstimateOWACD = None
+
+        elif mode == 'online':
+            # Apply DWACD (online mode)
+            sroEstimator = DynamicWACD()
+            num_segments = int(
+                (signals.shape[0] - sroEstimator.temp_dist - sroEstimator.seg_len + sroEstimator.seg_shift)
+                // sroEstimator.seg_shift
+            )
+            if ii == 0:
+                sroEstimateDWACD = np.zeros((len(SROset), num_segments))
+
+            for idxseg in range(num_segments):
+                idxBeg = idxseg * sroEstimator.seg_shift
+                idxEnd = idxBeg + sroEstimator.seg_len + sroEstimator.temp_dist + sroEstimator.seg_len - sroEstimator.seg_shift
+                # SRO estimate over current segment
+                tmp = sroEstimator(sig=signals[idxBeg:idxEnd, 0], ref_sig=signals[idxBeg:idxEnd, 1],
+                                            activity_sig=vad(signals[idxBeg:idxEnd, 0]),
+                                            activity_ref_sig=vad(signals[idxBeg:idxEnd, 1]))
+
+                sroEstimateDWACD[ii, idxseg] = tmp[0]
 
     print('ALL DONE.')
 
@@ -88,7 +119,6 @@ def gen_parameters(sro, baseFs=48000):
     )
 
     return params
-
 
 
 def gen_signals(params: ExperimentParameters):
@@ -122,13 +152,15 @@ def plot_sro_est(sroEstimateDWACD, sroEstimateOWACD, trueSROs):
     ax = fig.add_subplot(111)
     for ii in range(sroEstimateDWACD.shape[0]):
         ax.plot(sroEstimateDWACD[ii, :], 'r', label=f'DWACD: $\\varepsilon={np.round(trueSROs[ii], 1)}$ ppm')
-        ax.plot(sroEstimateOWACD[ii, :], 'b', label=f'Online WACD: $\\varepsilon={np.round(trueSROs[ii], 1)}$ ppm')
+        if COMPUTEONLINE:
+            ax.plot(sroEstimateOWACD[ii, :], 'b', label=f'Online WACD: $\\varepsilon={np.round(trueSROs[ii], 1)}$ ppm')
         plt.axhline(y=trueSROs[ii], color='k', linestyle='--')
     ax.grid()
     ax.set_ylabel('[ppm]')
     ax.set_xlabel('Online SRO estimation iteration index')
+    ax.set_ylim([-5, 1.1 * np.amax(trueSROs)])
     plt.legend()
-    plt.title('(In black: true values)')
+    plt.title(f'(In black: true values) $l_\\mathrm{{d}} = {int(TEMPDIST)}$ samples.')
     plt.tight_layout()	
     plt.show()
 
