@@ -1,5 +1,4 @@
-# Using the "danse_env" virtual environment
-# %%
+# `danse_env` virtual environment
 # ---------------- Imports
 import time
 
@@ -12,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -66,18 +65,14 @@ mySettings = ProgramSettings(
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
-    # SROsppm=[0, 10000, 20000],               # SRO
-    # SROsppm=[0, 4000, 6000],
-    # SROsppm=[0, 400, 600],
-    # SROsppm=[0, 2000, 12000, 22000, 32000],
-    # SROsppm=[500, 0],
-    # SROsppm=[0, 500, 1000],
-    # SROsppm=[5, 0],
-    SROsppm=0,
-    compensateSROs=False,                # if True, compensate SROs
-    # estimateSROs=False,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
-    # compensateSROs=True,               # if True, compensate SROs
-    estimateSROs=True,                 # if True, estimate SROs; elif `compensateSROs == True`: use oracle knowledge of SROs for compensation
+    asynchronicity=SamplingRateOffsets(
+        SROsppm=[100, 0],
+        compensateSROs=True,
+        # estimateSROs='no',
+        estimateSROs='Residuals',
+        # estimateSROs='DWACD',
+        # estimateSROs='OnlineWACD',
+    ),
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
@@ -106,9 +101,9 @@ mySettings = ProgramSettings(
 subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySettings.acousticScenarioPath).parent.name}'
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
-experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
-if (np.array(mySettings.SROsppm) != 0).any():
-    if mySettings.compensateSROs:
+experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.asynchronicity.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
+if (np.array(mySettings.asynchronicity.SROsppm) != 0).any():
+    if mySettings.asynchronicity.compensateSROs:
         experimentName += '_comp'
     else:
         experimentName += '_nocomp'

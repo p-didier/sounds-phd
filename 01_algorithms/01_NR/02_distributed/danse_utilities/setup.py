@@ -529,14 +529,14 @@ def generate_signals(settings: classes.ProgramSettings):
         raise ValueError(f'{settings.desiredSignalFile} "desired" signal files provided while {asc.numDesiredSources} are needed.')
     if asc.numNoiseSources > len(settings.noiseSignalFile):
         raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
-    if asc.numNodes != len(settings.SROsppm):
-        if (np.array(settings.SROsppm) == 0).all():
-            settings.SROsppm = np.zeros(asc.numNodes)
+    if asc.numNodes != len(settings.asynchronicity.SROsppm):
+        if (np.array(settings.asynchronicity.SROsppm) == 0).all():
+            settings.asynchronicity.SROsppm = np.zeros(asc.numNodes)
         else:
             raise ValueError('Number of nodes does not match number of given non-zero SRO values.')
-    if asc.numNodes != len(settings.STOinducedDelays):
-        if (np.array(settings.STOinducedDelays) == 0).all():
-            settings.STOinducedDelays = np.zeros(asc.numNodes)
+    if asc.numNodes != len(settings.asynchronicity.STOinducedDelays):
+        if (np.array(settings.asynchronicity.STOinducedDelays) == 0).all():
+            settings.asynchronicity.STOinducedDelays = np.zeros(asc.numNodes)
         else:
             raise ValueError('Number of nodes does not match number of given non-zero STO values.')
 
@@ -620,10 +620,12 @@ def generate_signals(settings: classes.ProgramSettings):
     wetSpeech_norm = wetSpeech / np.amax(np.abs(wetNoise + wetSpeech))  # Normalize
 
     # --- Apply STOs / SROs ---
-    wetNoise_norm, _, _ = apply_sro_sto(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm, settings.STOinducedDelays)
-    wetSpeech_norm, timeStampsSROs, fsSROs = apply_sro_sto(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags, settings.SROsppm, settings.STOinducedDelays)
+    wetNoise_norm, _, _ = apply_sro_sto(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags,
+                                settings.asynchronicity.SROsppm, settings.asynchronicity.STOinducedDelays)
+    wetSpeech_norm, timeStampsSROs, fsSROs = apply_sro_sto(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags,
+                                settings.asynchronicity.SROsppm, settings.asynchronicity.STOinducedDelays)
     # Set reference node (for master clock) based on SRO values
-    masterClockNodeIdx = np.where(np.array(settings.SROsppm) == 0)[0][0]
+    masterClockNodeIdx = np.where(np.array(settings.asynchronicity.SROsppm) == 0)[0][0]
     # ------------------
 
     # Build sensor signals

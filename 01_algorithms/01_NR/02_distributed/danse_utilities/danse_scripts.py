@@ -278,7 +278,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     d = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhat`
     dhatLocal = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
     dLocal = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
-
     # Autocorrelation matrices update counters
     numUpdatesRyy = np.zeros(asc.numNodes)
     numUpdatesRnn = np.zeros(asc.numNodes)
@@ -409,7 +408,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
                 # Compensate SROs
-                if settings.compensateSROs:
+                if settings.asynchronicity.compensateSROs:
                     # Account for buffer flags
                     extraPhaseShiftFactor = np.zeros(dimYTilde[k])
                     for q in range(len(neighbourNodes[k])):
@@ -474,8 +473,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
 
                 # Update SRO estimates
-                if settings.estimateSROs and t > 3:
+                if settings.asynchronicity.estimateSROs == 'Residuals':
 
+                    # Residuals method
                     residualSROs[k][:, i[k]] = subs.residual_sro_estimation(
                                         resPos=wTilde[k][:, i[k] + 1, :],         # a posteriori estimate
                                         resPri=wTilde[k][:, i[k], :],             # a priori estimate
@@ -491,11 +491,21 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                     if k == 0:  # save evolution of SRO estimates
                         SROsEstimatesThroughTime[i[k]] = SROsEstimates[k][0]
+                        
+                elif settings.asynchronicity.estimateSROs == 'DWACD':
+                    
+                    subs.dwacd_sro_estimation()
+
+                elif settings.asynchronicity.estimateSROs == 'OnlineWACD':
+                    raise ValueError('[NOT YET IMPLEMENTED]')  # TODO:
+
                 else:
-                    SROsEstimates[k] = (settings.SROsppm[k] - settings.SROsppm[neighbourNodes[k]]) * 1e-6    # no data-based dynamic SRO estimation: use oracle knowledge
+                    # no data-based dynamic SRO estimation: use oracle knowledge
+                    SROsEstimates[k] = (settings.asynchronicity.SROsppm[k] - \
+                        settings.asynchronicity.SROsppm[neighbourNodes[k]]) * 1e-6
 
                 # Update phase shifts for SRO compensation
-                if settings.compensateSROs:
+                if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
                         # Increment phase shift factor recursively
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   

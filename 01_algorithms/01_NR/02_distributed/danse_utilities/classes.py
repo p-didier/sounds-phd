@@ -30,23 +30,21 @@ class PrintoutsParameters:
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
 
 @dataclass
-class SamplingRateOffsets:
+class SamplingRateOffsets():
     """Sampling rate/time offsets class, containing all necessary info for
     applying, estimating, and compensation SROs/STOs"""
     SROsppm: list[float] = field(default_factory=list)     # SROs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
-    estimateSROs: bool = False              # if True, estimate SROs
     compensateSROs: bool = False            # if True, compensate SROs
+    estimateSROs: str = 'no'                # SRO estimation method. If 'no', no estimation: using oracle if `compensateSROs == True`
     STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
-    estimateSTOs: bool = False              # if True, estimate STOs
     compensateSTOs: bool = False            # if True, compensate STOs
+    estimateSTOs: bool = False              # if True, estimate STOs
 
     def __post_init__(self):
-        if len(self.SROsppm) < self.nNodes:
-            warnings.warn(f'There are more nodes ({self.nNodes}) than SROs ({len(self.SROsppm)}). Settings last nodes to SRO = 0.')
-            self.SROsppm += [0. for _ in range(self.nNodes - len(self.SROsppm))]
-        if len(self.SROsppm) > self.nNodes:
-            warnings.warn(f'There are less nodes ({self.nNodes}) than SROs ({len(self.SROsppm)}). Discarding last ({len(self.SROsppm) - self.nNodes}) SRO(s).')
-            self.SROsppm = self.SROsppm[:self.nNodes]
+        # Base checks
+        if self.estimateSROs != 'no':
+            if self.estimateSROs not in ['Residuals', 'DWACD', 'OnlineWACD']:
+                raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Residuals", "DWACD", "Online WACD".')
 
 
 @dataclass
@@ -88,13 +86,8 @@ class ProgramSettings(object):
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     dynamicMetricsParams: evenh.DynamicMetricsParameters = evenh.DynamicMetricsParameters()   # dynamic objective speech enhancement metrics computation parameters
-    # SROs parameters
-    SROsppm: list[float] = field(default_factory=list)   # [ppm] sampling rate offsets
-    estimateSROs: bool = False              # if True, estimate SROs
-    compensateSROs: bool = False            # if True, compensate SROs
-    STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
-    estimateSTOs: bool = False              # if True, estimate STOs
-    compensateSTOs: bool = False            # if True, compensate STOs
+    # Asynchronicity (SRO/STO) parameters
+    asynchronicity: SamplingRateOffsets = SamplingRateOffsets()   # all-things SROs/STOs
     # Other parameters
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
@@ -116,8 +109,8 @@ class ProgramSettings(object):
         elif self.broadcastDomain != 't':
             raise ValueError(f'The broadcasting domain must be "t" or "f" (current value: "{self.broadcastDomain}").')
         # Adapt formats
-        self.SROsppm = sto_sro_formatting(self.SROsppm)
-        self.STOinducedDelays = sto_sro_formatting(self.STOinducedDelays)
+        self.asynchronicity.SROsppm = sto_sro_formatting(self.asynchronicity.SROsppm)
+        self.asynchronicity.STOinducedDelays = sto_sro_formatting(self.asynchronicity.STOinducedDelays)
         if not isinstance(self.desiredSignalFile, list):
             self.desiredSignalFile = [self.desiredSignalFile]
         if not isinstance(self.noiseSignalFile, list):
@@ -163,11 +156,11 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
 """
         if self.performGEVD:
             string += f'GEVD with R = {self.GEVDrank}.' 
-        if (np.array(self.SROsppm) != 0).any():
+        if (np.array(self.asynchronicity.SROsppm) != 0).any():
             string += f'\n------ SRO settings ------'
-            for idxNode in range(len(self.SROsppm)):
-                string += f'\nSRO Node {idxNode + 1} = {self.SROsppm[idxNode]} ppm'
-                if self.SROsppm[idxNode] == 0:
+            for idxNode in range(len(self.asynchronicity.SROsppm)):
+                string += f'\nSRO Node {idxNode + 1} = {self.asynchronicity.SROsppm[idxNode]} ppm'
+                if self.asynchronicity.SROsppm[idxNode] == 0:
                     string += ' (base sampling freq.)'
         else:
             string += f'\nPerfectly synchronized network, no SROs'

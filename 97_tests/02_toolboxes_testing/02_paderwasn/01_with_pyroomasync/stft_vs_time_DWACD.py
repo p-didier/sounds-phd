@@ -224,7 +224,6 @@ class STFTDynamicWACD:
         # Convert to STFT domain
         sigSTFT = self.stft(sig)
         ref_sigSTFT = self.stft(ref_sig)
-        
         # Useful quantities
         Nl = sigSTFT.shape[0]      # number of STFT frames (calculated using `self.frame_shift_welch` as frame shift)
         Nf = sigSTFT.shape[1]      # number of STFT bins
