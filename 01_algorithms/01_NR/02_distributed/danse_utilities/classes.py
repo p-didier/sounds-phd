@@ -29,6 +29,55 @@ class PrintoutsParameters:
     danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
 
+
+@dataclass
+class DWACDParameters():
+    """
+    Dataclass containing the required parameters for the
+    Dynamic Weighted Average Coherence Drift method for 
+    SRO estimation.
+
+    Attributes
+    ----------
+    seg_len : int
+        Length of the segments used for coherence estimation (= Length
+        of the segments used for power spectral density (PSD)
+        estimation based on a Welch method)
+    seg_shift : int
+        Shift of the segments used for coherence estimation (The SRO is
+        estimated every seg_shift samples)
+    temp_dist : int
+        Amount of samples between the two consecutive coherence
+        functions
+    alpha : float
+        Smoothing factor used for the autoregressive smoothing for time
+        averaging of the complex conjugated coherence product
+    src_activity_th : float
+        If the amount of time with source activity within one segment
+        is smaller than the threshold src_activity_th the segment will
+        not be used to update th average coherence product.
+    settling_time : int
+        Amount of segments after which the SRO is estimated for the
+        first time
+    frame_shift_welch : int
+        Frame shift used for the Welch method utilized for
+        PSD estimation
+    fft_size : int
+        Frame size / FFT size used for the Welch method utilized for
+        PSD estimation
+    nFiltUpdatePerSeg : int 
+        Number of DANSE filter updates per DWACD segment
+    """
+    seg_len : int = 2**13           # 2**13: default value from https://github.com/fgnt/paderwasn
+    seg_shift : int = 2**11         # 2**11: default value from https://github.com/fgnt/paderwasn
+    temp_dist : int = 2**13         # 2**13: default value from https://github.com/fgnt/paderwasn
+    alpha : float = .95             # .95  : default value from https://github.com/fgnt/paderwasn
+    src_activity_th : float = .75   # .75  : default value from https://github.com/fgnt/paderwasn
+    settling_time : int = 40        # 40   : default value from https://github.com/fgnt/paderwasn
+    frame_shift_welch: int = 2**9  
+    fft_size : int = 2**12
+    nFiltUpdatePerSeg : int = 1
+
 @dataclass
 class SamplingRateOffsets():
     """Sampling rate/time offsets class, containing all necessary info for
@@ -39,13 +88,13 @@ class SamplingRateOffsets():
     STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
     compensateSTOs: bool = False            # if True, compensate STOs
     estimateSTOs: bool = False              # if True, estimate STOs
+    dwacd: DWACDParameters = DWACDParameters()  # parameters for Dynamic Weighted Average Coherence Drift SRO estimation
 
     def __post_init__(self):
         # Base checks
         if self.estimateSROs != 'no':
-            if self.estimateSROs not in ['Residuals', 'DWACD', 'OnlineWACD']:
-                raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Residuals", "DWACD", "Online WACD".')
-
+            if self.estimateSROs not in ['Residuals', 'DWACD']:
+                raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Residuals", "DWACD".')
 
 @dataclass
 class ProgramSettings(object):
@@ -98,6 +147,16 @@ class ProgramSettings(object):
         # Create new attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.samplingFrequency / self.stftEffectiveFrameLen))
+        # --- SROs ---        
+        if self.asynchronicity.estimateSROs == 'DWACD':
+            # Add parameters to DWACD method object
+            self.asynchronicity.dwacd.frame_shift_welch = self.stftEffectiveFrameLen
+            self.asynchronicity.dwacd.fft_size = self.stftWinLength
+            nFilterUpdatesBtwConsecutiveDWACDSROupdates = self.asynchronicity.dwacd.seg_shift // self.stftEffectiveFrameLen
+            if nFilterUpdatesBtwConsecutiveDWACDSROupdates < 1:
+                raise ValueError(f'Too quick DWACD SRO estimation updates (every {self.asynchronicity.dwacd.seg_shift} samples) for the chosen DANSE filter update interval ({self.stftEffectiveFrameLen} samples).')
+            else:
+                self.asynchronicity.dwacd.nFiltUpdatePerSeg = nFilterUpdatesBtwConsecutiveDWACDSROupdates
         # Check for frequency-domain broadcasting option
         if self.broadcastDomain == 'f':
             if self.broadcastLength != self.stftWinLength / 2:

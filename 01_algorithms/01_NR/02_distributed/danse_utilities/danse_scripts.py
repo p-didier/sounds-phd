@@ -226,6 +226,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
     residualSROs = []                               # residual SROs, for each node, across DANSE iterations
+    avgCohProdDWACD = []                            # average coherence product coming out of DWACD processing (SRO estimation)
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
@@ -264,6 +265,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
+        avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize)))
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -285,6 +287,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     nInternalFilterUpdates = np.zeros(asc.numNodes)
     # Booleans
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
+    # --- SRO estimation ---
+    # Expected number of SRO estimate updates via DWACD during total signal length
+    nDWACDSROupdates = numIterations // settings.asynchronicity.dwacd.nFiltUpdatePerSeg
+    # DANSE filter update indices corresponding to DWACD SRO estimate updates
+    dwacdSROupdateIndices = (settings.asynchronicity.dwacd.temp_dist +\
+                            settings.asynchronicity.dwacd.seg_len +\
+                            np.arange(nDWACDSROupdates) * settings.asynchronicity.dwacd.seg_shift)\
+                            // settings.stftEffectiveFrameLen
+    # DWACD segments (i.e., SRO estimate update) counters (for each node)
+    dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
@@ -472,7 +484,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
 
-                # Update SRO estimates
+                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 if settings.asynchronicity.estimateSROs == 'Residuals':
 
                     # Residuals method
@@ -493,22 +505,48 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         SROsEstimatesThroughTime[i[k]] = SROsEstimates[k][0]
                         
                 elif settings.asynchronicity.estimateSROs == 'DWACD':
-                    
-                    subs.dwacd_sro_estimation()
+                    # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
 
-                elif settings.asynchronicity.estimateSROs == 'OnlineWACD':
-                    raise ValueError('[NOT YET IMPLEMENTED]')  # TODO:
+                    if i[k] in dwacdSROupdateIndices:
+
+                        for q in range(len(neighbourNodes[k])):
+
+                            sroEst, acp = subs.dwacd_sro_estimation(
+                                    sigSTFT=ytildeHat[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
+                                    ref_sigSTFT=ytildeHat[k][:, :i[k]+1, 0],   # local sensor signal
+                                    activity_sig=oVADframes[:i[k]+1],    
+                                    activity_ref_sig=oVADframes[:i[k]+1],
+                                    paramsDWACD=settings.asynchronicity.dwacd,
+                                    seg_idx=dwacdSegIdx[k],
+                                    sro_est=SROsEstimates[k][q],   # previous SRO estimate
+                                    avg_coh_prod=avgCohProdDWACD[k][q, :]
+                            )
+
+                            SROsEstimates[k][q] = sroEst
+                            avgCohProdDWACD[k][q, :] = acp
+                                
+                        if k == 0:  # save evolution of SRO estimates
+                            SROsEstimatesThroughTime[i[k]:] = SROsEstimates[k][0]
+                            # # Memorize SRO estimates through time
+                            # if dwacdSegIdx[k] > settings.asynchronicity.dwacd.settling_time - 1:
+                            #     SROsEstimatesThroughTime[dwacdSegIdx[k]] = sroEst
+                            # if dwacdSegIdx[k] == settings.asynchronicity.dwacd.settling_time - 1:
+                            #     SROsEstimates[k][q, :dwacdSegIdx[k] + 1] = sroEst
+
+                        dwacdSegIdx[k] += 1
 
                 else:
                     # no data-based dynamic SRO estimation: use oracle knowledge
                     SROsEstimates[k] = (settings.asynchronicity.SROsppm[k] - \
                         settings.asynchronicity.SROsppm[neighbourNodes[k]]) * 1e-6
+                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
                 # Update phase shifts for SRO compensation
                 if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
                         # Increment phase shift factor recursively
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   
+                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns   
                         #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
 
                 # ----- Compute desired signal chunk estimate -----
@@ -543,32 +581,36 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(SROsEstimatesThroughTime)
-    # ax.grid()
-    # ax.set_xlabel('DANSE iteration index')
-    # plt.tight_layout()	
-    # plt.show()
-
-    fig = plt.figure(figsize=(6,4))
-    for ii in range(len(residualSROs)):
-        ax = fig.add_subplot(len(residualSROs) * 100 + 10 + ii + 1)
-        for jj in range(residualSROs[ii].shape[0]):
-            if jj >= asc.numSensorPerNode[ii]:
-                lab = f'Neighbor #{jj+1 - asc.numSensorPerNode[ii]}'
-                ax.plot(residualSROs[ii][jj, :].T * 10 ** 6, label=lab)
-                # # Show actual relative SRO
-                # trueSRO = (SROsEstimates[ii][jj - asc.numSensorPerNode[ii]]) * 10 ** 6
-                # ax.hlines(trueSRO, xmin=0, xmax=residualSROs[ii].shape[1], color='k')
-        ax.grid()
-        ax.set_ylabel('Residual SRO [ppm]')
-        ax.set_title(f"Node {ii+1}'s estimates")
-        ax.legend()
-        # ax.set_ylim([-100, 100])
-    ax.set_xlabel('DANSE iteration i')
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(111)
+    ax.plot(SROsEstimatesThroughTime * 1e6, label='SRO estimate')
+    plt.hlines(y=settings.asynchronicity.SROsppm[1], xmin=0, xmax=len(SROsEstimatesThroughTime), label='Original SRO', colors='k')
+    plt.legend()
+    # plt.vlines(dwacdSROupdateIndices, ymin=0, ymax=np.amax(SROsEstimatesThroughTime * 1e6), colors='k')
+    ax.grid()
+    ax.set_xlabel('DANSE iteration index')
+    ax.set_ylabel('Estimated SRO [ppm]')
     plt.tight_layout()	
     plt.show()
+
+    # fig = plt.figure(figsize=(6,4))
+    # for ii in range(len(residualSROs)):
+    #     ax = fig.add_subplot(len(residualSROs) * 100 + 10 + ii + 1)
+    #     for jj in range(residualSROs[ii].shape[0]):
+    #         if jj >= asc.numSensorPerNode[ii]:
+    #             lab = f'Neighbor #{jj+1 - asc.numSensorPerNode[ii]}'
+    #             ax.plot(residualSROs[ii][jj, :].T * 10 ** 6, label=lab)
+    #             # # Show actual relative SRO
+    #             # trueSRO = (SROsEstimates[ii][jj - asc.numSensorPerNode[ii]]) * 10 ** 6
+    #             # ax.hlines(trueSRO, xmin=0, xmax=residualSROs[ii].shape[1], color='k')
+    #     ax.grid()
+    #     ax.set_ylabel('Residual SRO [ppm]')
+    #     ax.set_title(f"Node {ii+1}'s estimates")
+    #     ax.legend()
+    #     # ax.set_ylim([-100, 100])
+    # ax.set_xlabel('DANSE iteration i')
+    # plt.tight_layout()	
+    # plt.show()
 
     stop = 1
 

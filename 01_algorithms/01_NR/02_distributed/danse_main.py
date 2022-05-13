@@ -44,8 +44,8 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_noiseless/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_noiseless/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS3_RT500ms',
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1_1_1_1_1]_Ns1_Nn1/AS10_anechoic',
@@ -56,7 +56,7 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=40,
+    signalDuration=20,
     baseSNR=5,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
@@ -66,12 +66,12 @@ mySettings = ProgramSettings(
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
-        SROsppm=[100, 0],
-        compensateSROs=True,
+        SROsppm=[0, 50],
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='no',
-        estimateSROs='Residuals',
-        # estimateSROs='DWACD',
-        # estimateSROs='OnlineWACD',
+        # estimateSROs='Residuals',
+        estimateSROs='DWACD',
     ),
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
@@ -80,7 +80,7 @@ mySettings = ProgramSettings(
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True, also compute and store the local estimate (as if there was no cooperation between nodes)
     performGEVD=1,                      # if True, perform GEVD-DANSE
-    # bypassFilterUpdates=True,
+    bypassFilterUpdates=True,
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
