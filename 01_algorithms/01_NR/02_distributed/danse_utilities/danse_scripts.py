@@ -265,7 +265,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
-        avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize)))
+        avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize), dtype=complex))
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -510,9 +510,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     if i[k] in dwacdSROupdateIndices:
 
                         for q in range(len(neighbourNodes[k])):
-
                             sroEst, acp = subs.dwacd_sro_estimation(
                                     sigSTFT=ytildeHat[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
+                                    # sigSTFT=ytildeHat[k][:, :i[k]+1, 0],    # compressed signal from `q`-th neighbour
                                     ref_sigSTFT=ytildeHat[k][:, :i[k]+1, 0],   # local sensor signal
                                     activity_sig=oVADframes[:i[k]+1],    
                                     activity_ref_sig=oVADframes[:i[k]+1],
@@ -521,7 +521,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     sro_est=SROsEstimates[k][q],   # previous SRO estimate
                                     avg_coh_prod=avgCohProdDWACD[k][q, :]
                             )
-
                             SROsEstimates[k][q] = sroEst
                             avgCohProdDWACD[k][q, :] = acp
                                 
