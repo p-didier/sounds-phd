@@ -225,6 +225,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
+    SROsEstimatesAccumulated = []
     residualSROs = []                               # residual SROs, for each node, across DANSE iterations
     avgCohProdDWACD = []                            # average coherence product coming out of DWACD processing (SRO estimation)
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
@@ -264,6 +265,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
+        SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
         avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize), dtype=complex))
         #
@@ -310,10 +312,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Extra variables -- TEMPORARY: TODO -- to be treated and integrated more neatly
     zFull = []
     a = []
+    b = []
+    phaseShiftFactorThroughTime = np.zeros((numIterations))
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
         a.append(np.zeros(len(neighbourNodes[k])))
-    SROsEstimatesThroughTime = np.zeros(numIterations)
+        b.append(np.zeros(len(neighbourNodes[k])))
+    SROresidualThroughTime = np.zeros(numIterations)
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -502,7 +507,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     SROsEstimates[k] += a[k]
 
                     if k == 0:  # save evolution of SRO estimates
-                        SROsEstimatesThroughTime[i[k]] = SROsEstimates[k][0]
+                        SROresidualThroughTime[i[k]] = SROsEstimates[k][0]
                         
                 elif settings.asynchronicity.estimateSROs == 'DWACD':
                     # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
@@ -512,7 +517,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         for q in range(len(neighbourNodes[k])):
                             sroEst, acp = subs.dwacd_sro_estimation(
                                     sigSTFT=ytildeHat[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
-                                    # sigSTFT=ytildeHat[k][:, :i[k]+1, 0],    # compressed signal from `q`-th neighbour
                                     ref_sigSTFT=ytildeHat[k][:, :i[k]+1, 0],   # local sensor signal
                                     activity_sig=oVADframes[:i[k]+1],    
                                     activity_ref_sig=oVADframes[:i[k]+1],
@@ -523,14 +527,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             )
                             SROsEstimates[k][q] = sroEst
                             avgCohProdDWACD[k][q, :] = acp
+
+                            # Feedback loop 1
+                            # # tmp = numFreqLines * SROsEstimates[k][q] / (1 + SROsEstimates[k][q])  # in Taewoong's slides: $N \Delta\hat{\varepsilon}_k / (1 + \Delta\hat{\varepsilon}_k)$
+                            # a[k][q] += SROsEstimates[k][q]  # simpler than (and near equal to) the line above
+                            # # Feedback loop 2
+                            # b[k][q] += a[k][q]
                                 
                         if k == 0:  # save evolution of SRO estimates
-                            SROsEstimatesThroughTime[i[k]:] = SROsEstimates[k][0]
-                            # # Memorize SRO estimates through time
-                            # if dwacdSegIdx[k] > settings.asynchronicity.dwacd.settling_time - 1:
-                            #     SROsEstimatesThroughTime[dwacdSegIdx[k]] = sroEst
-                            # if dwacdSegIdx[k] == settings.asynchronicity.dwacd.settling_time - 1:
-                            #     SROsEstimates[k][q, :dwacdSegIdx[k] + 1] = sroEst
+                            SROresidualThroughTime[i[k]:] = SROsEstimates[k][0]
 
                         dwacdSegIdx[k] += 1
 
@@ -540,13 +545,19 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         settings.asynchronicity.SROsppm[neighbourNodes[k]]) * 1e-6
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
+                        
                 # Update phase shifts for SRO compensation
                 if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
                         # Increment phase shift factor recursively
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns   
-                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns   
+                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns  
+                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns
+                        a[k][q] += SROsEstimates[k][q] 
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= a[k][q] * Ns
                         #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
+
+                    if k == 0:
+                        phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
@@ -582,8 +593,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     fig = plt.figure(figsize=(8,4))
     ax = fig.add_subplot(111)
-    ax.plot(SROsEstimatesThroughTime * 1e6, label='SRO estimate')
-    plt.hlines(y=settings.asynchronicity.SROsppm[1], xmin=0, xmax=len(SROsEstimatesThroughTime), label='Original SRO', colors='k')
+    ax.plot(SROresidualThroughTime * 1e6, label='SRO estimate')
+    plt.hlines(y=settings.asynchronicity.SROsppm[1], xmin=0, xmax=len(SROresidualThroughTime), label='Original SRO', colors='k')
     plt.legend()
     # plt.vlines(dwacdSROupdateIndices, ymin=0, ymax=np.amax(SROsEstimatesThroughTime * 1e6), colors='k')
     ax.grid()
@@ -591,6 +602,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     ax.set_ylabel('Estimated SRO [ppm]')
     plt.tight_layout()	
     plt.show()
+
+
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(111)
+    ax.plot(phaseShiftFactorThroughTime)
+    ax.grid()
+    ax.set_xlabel('DANSE iteration index')
+    ax.set_ylabel('phaseShiftFactorThroughTime')
+    plt.tight_layout()	
+    plt.show()
+
+
 
     # fig = plt.figure(figsize=(6,4))
     # for ii in range(len(residualSROs)):

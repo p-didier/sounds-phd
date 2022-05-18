@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -58,21 +58,28 @@ mySettings = ProgramSettings(
     #
     signalDuration=20,
     baseSNR=5,
+    # baseSNR=-90,
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
+    # broadcastDomain='t',
+    broadcastDomain='f',
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
-        SROsppm=[0, 50],
-        # compensateSROs=True,
-        compensateSROs=False,
+        SROsppm=[0, 75],
+        compensateSROs=True,
+        # compensateSROs=False,
         # estimateSROs='no',
         # estimateSROs='Residuals',
         estimateSROs='DWACD',
+        dwacd=DWACDParameters(
+            seg_shift=2**11,
+        )
     ),
+    # bypassFilterUpdates=True,
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
@@ -80,16 +87,13 @@ mySettings = ProgramSettings(
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True, also compute and store the local estimate (as if there was no cooperation between nodes)
     performGEVD=1,                      # if True, perform GEVD-DANSE
-    bypassFilterUpdates=True,
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    # broadcastDomain='t',
-    broadcastDomain='f',
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
-                                    externalFilterUpdates=True),
+                                    externalFilterUpdates=True,),
     #
     dynamicMetricsParams=dynParams(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]

@@ -123,6 +123,8 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
             PSD of the the i-th signal and the j-th signal
         """
         shifts = sro * frame_shift_welch * np.arange(stft_seg_j.shape[-1])
+        # shifts = np.zeros_like(shifts)  # TMP <-- OVERRIDE SHIFT EFFECT
+        # print(shifts)
         stft_seg_j *= \
             np.exp(1j * 2 * np.pi / fft_size
                    * np.arange(fft_size // 2 + 1)[None] * shifts[:, None]).T
@@ -164,19 +166,16 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     temp_dist = paramsDWACD.temp_dist
     alpha = paramsDWACD.alpha
     src_activity_th = paramsDWACD.src_activity_th
-    settling_time = paramsDWACD.settling_time
+    # settling_time = paramsDWACD.settling_time
 
     # Useful quantities
-    Nf = sigSTFT.shape[0]      # number of STFT bins
-    Nl = sigSTFT.shape[1]      # number of STFT frames (calculated using `frame_shift_welch` as frame shift)
     Nl_segShift = seg_shift // frame_shift_welch      # number of STFT frames per segment shift 
     Nl_segLen   = seg_len // frame_shift_welch        # number of STFT frames per segment 
     Nl_cohDelay = temp_dist // frame_shift_welch      # number of STFT frames corresponding to the time 
                                                       # interval between two consecutive coherence functions
 
-    # Init
-    tau_sro = 0
-
+    # # Init
+    # tau_sro = 0
     # # Estimate of the SRO-induced integer shift to be compensated
     # shift = int(np.round(tau_sro))
     # # Corresponding STFT frequency shift (Linear Phase Drift model)
