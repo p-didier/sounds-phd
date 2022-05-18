@@ -1,5 +1,4 @@
 import numpy as np
-from paderbox.transform import STFT
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters
 
@@ -56,6 +55,7 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
                         paramsDWACD: DWACDParameters,
                         seg_idx,
                         sro_est,
+                        tau_sro,
                         avg_coh_prod
                         ):
     """Dynamic Weighted Average Coherence Drift (DWACD)-based SRO
@@ -91,6 +91,8 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         DWACD parameters
     seg_idx : int
         DWACD segment index
+    tau_sro : float
+        [s] Time shift estimate from previous DWACD segment
     sro_est : float
         SRO estimate from previous DWACD segment
     avg_coh_prod : [Nf x 1] np.ndarray (complex)
@@ -169,18 +171,16 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     # settling_time = paramsDWACD.settling_time
 
     # Useful quantities
+    Nf = sigSTFT.shape[0]      # number of STFT bins
     Nl_segShift = seg_shift // frame_shift_welch      # number of STFT frames per segment shift 
     Nl_segLen   = seg_len // frame_shift_welch        # number of STFT frames per segment 
     Nl_cohDelay = temp_dist // frame_shift_welch      # number of STFT frames corresponding to the time 
                                                       # interval between two consecutive coherence functions
-
-    # # Init
-    # tau_sro = 0
-    # # Estimate of the SRO-induced integer shift to be compensated
-    # shift = int(np.round(tau_sro))
-    # # Corresponding STFT frequency shift (Linear Phase Drift model)
-    # phaseShift = np.exp( 1j * 2 * np.pi / Nf * np.arange(Nf) * shift)
-    phaseShift = 1
+    # Estimate of the SRO-induced integer shift to be compensated
+    shift = int(np.round(tau_sro))
+    # Corresponding STFT frequency shift (Linear Phase Drift model)
+    phaseShift = np.exp( 1j * 2 * np.pi / Nf * np.arange(Nf) * shift)
+    phaseShift = phaseShift[:, np.newaxis]  # adapt array format for subsequent element-wise product
 
     # Define STFT frame indices for current segment
     lStart = seg_idx * Nl_segShift + Nl_cohDelay
@@ -229,32 +229,3 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         sro_est = - max_time_lag_search(avg_coh_prod) / temp_dist
 
     return sro_est, avg_coh_prod
-
-    
-def owacd_sro_estimation():
-    """Online Weighted Average Coherence Drift (WACD)-based SRO
-    estimation.
-    
-    Parameters
-    ----------
-
-    Returns
-    -------
-
-    References
-    ----------
-    [1] Chinaev, Aleksej, et al. "Online Estimation of Sampling Rate Offsets
-        in Wireless Acoustic Sensor Networks with Packet Loss."
-        2021 29th European Signal Processing Conference (EUSIPCO). IEEE, 2021.
-    """
-
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-    # TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: TODO: 
-
-    residualSROs = None
-
-    return residualSROs

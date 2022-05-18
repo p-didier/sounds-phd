@@ -5,6 +5,7 @@ from . import classes
 from . import danse_subfcns as subs
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
+import copy
 
 """
 References:
@@ -219,11 +220,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     ryd = []                                        # cross-correlation between observations and estimations
     ytilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
+    ytildeHatUncomp = []                            # local full observation vectors, frequency-domain, SRO-uncompensated
     z = []                                          # current-iteration compressed signals used in DANSE update
     zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
+    tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
     SROsEstimatesAccumulated = []
     residualSROs = []                               # residual SROs, for each node, across DANSE iterations
@@ -248,6 +251,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
+        ytildeHatUncomp.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
         sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
@@ -264,6 +268,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
         #
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
+        tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
@@ -437,8 +442,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             skipUpdate = True
                     # Complete phase shift factors
                     phaseShiftFactors[k] += extraPhaseShiftFactor
+                    # Save uncompensated \tilde{y}
+                    ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
                     # Apply phase shift factors
                     ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
+
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
@@ -516,13 +524,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                         for q in range(len(neighbourNodes[k])):
                             sroEst, acp = subs.dwacd_sro_estimation(
-                                    sigSTFT=ytildeHat[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
-                                    ref_sigSTFT=ytildeHat[k][:, :i[k]+1, 0],   # local sensor signal
+                                    # sigSTFT=ytildeHat[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
+                                    # ref_sigSTFT=ytildeHat[k][:, :i[k]+1, 0],   # local sensor signal
+                                    sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
+                                    ref_sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, 0],   # local sensor signal
                                     activity_sig=oVADframes[:i[k]+1],    
                                     activity_ref_sig=oVADframes[:i[k]+1],
                                     paramsDWACD=settings.asynchronicity.dwacd,
                                     seg_idx=dwacdSegIdx[k],
-                                    sro_est=SROsEstimates[k][q],   # previous SRO estimate
+                                    tau_sro=tauSROsEstimates[k][q],  # previous time shift estimate
+                                    sro_est=SROsEstimates[k][q],     # previous SRO estimate
                                     avg_coh_prod=avgCohProdDWACD[k][q, :]
                             )
                             SROsEstimates[k][q] = sroEst
@@ -551,9 +562,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     for q in range(len(neighbourNodes[k])):
                         # Increment phase shift factor recursively
                         # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns  
-                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns
-                        a[k][q] += SROsEstimates[k][q] 
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= a[k][q] * Ns
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns
+                        # a[k][q] += SROsEstimates[k][q] 
+                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= a[k][q] * Ns
                         #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
 
                     if k == 0:
