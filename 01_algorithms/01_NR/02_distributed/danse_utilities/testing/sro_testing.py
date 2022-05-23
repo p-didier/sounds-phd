@@ -5,7 +5,7 @@ from pathlib import Path, PurePath
 
 import danse_main
 from itertools import combinations
-from danse_utilities.classes import ProgramSettings
+from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, DWACDParameters
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -39,8 +39,7 @@ class DanseTestingParameters():
     broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
-    estimateSROs: bool = False              # if True, estimate SROs
-    compensateSROs: bool = False            # if True, compensate SROs
+    asynchronicity: SamplingRateOffsets = SamplingRateOffsets()
 
     def __post_init__(self):
         # Check inputs variable type
@@ -138,21 +137,26 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     acousticScenarioPath=acousticScenarios[ii],
                     desiredSignalFile=speechFiles,
                     noiseSignalFile=noiseFiles,
+                    #
                     signalDuration=danseParams.sigDur,
                     baseSNR=danseParams.baseSNR,
                     plotAcousticScenario=False,
                     VADwinLength=40e-3,
                     VADenergyFactor=4000,
                     performGEVD=1,
-                    SROsppm=sros[ii][jj],
+                    #
                     danseUpdating=danseParams.nodeUpdating,
+                    broadcastDomain=danseParams.broadcastDomain,
                     broadcastLength=danseParams.broadcastLength,
                     computeLocalEstimate=False,
                     timeBtwExternalFiltUpdates=danseParams.timeBtwExternalFiltUpdates,
                     expAvg50PercentTime=2.,
-                    estimateSROs=danseParams.estimateSROs,                  # if True, estimate SROs
-                    compensateSROs=danseParams.compensateSROs,              # if True, compensate SROs
-                    broadcastDomain=danseParams.broadcastDomain,
+                    #
+                    asynchronicity=SamplingRateOffsets(
+                        SROsppm=sros[ii][jj],
+                        compensateSROs=danseParams.asynchronicity.compensateSROs,
+                        estimateSROs=danseParams.asynchronicity.estimateSROs,
+                    ),
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
             experiments.append(dict([('sets', sets), ('path', exportPath)]))

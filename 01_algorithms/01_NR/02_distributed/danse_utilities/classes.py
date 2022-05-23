@@ -84,7 +84,7 @@ class SamplingRateOffsets():
     applying, estimating, and compensation SROs/STOs"""
     SROsppm: list[float] = field(default_factory=list)     # SROs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
     compensateSROs: bool = False            # if True, compensate SROs
-    estimateSROs: str = 'no'                # SRO estimation method. If 'no', no estimation: using oracle if `compensateSROs == True`
+    estimateSROs: str = 'Oracle'                # SRO estimation method. If 'Oracle', no estimation: using oracle if `compensateSROs == True`
     STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
     compensateSTOs: bool = False            # if True, compensate STOs
     estimateSTOs: bool = False              # if True, estimate STOs
@@ -92,9 +92,16 @@ class SamplingRateOffsets():
 
     def __post_init__(self):
         # Base checks
-        if self.estimateSROs != 'no':
-            if self.estimateSROs not in ['Residuals', 'DWACD']:
-                raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Residuals", "DWACD".')
+        if self.estimateSROs not in ['Oracle', 'Residuals', 'DWACD']:
+            raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "Residuals", "DWACD".')
+        if all(v == 0 for v in self.SROsppm) and self.compensateSROs:
+            inn = input('No SROs involved -- no need to compensate. Set `compensateSROs` to `False`? [y/n]  ')
+            if inn in ['Y', 'y']:
+                print('Setting `compensateSROs` to `False`.')
+                self.compensateSROs = False
+            else:
+                print('Keeping `compensateSROs` as `True`.')
+
 
 @dataclass
 class ProgramSettings(object):
@@ -110,7 +117,7 @@ class ProgramSettings(object):
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
-    stftWin: np.ndarray = np.hanning(stftWinLength)     # STFT window
+    stftWin: np.ndarray = np.array([])     # STFT window
     # VAD parameters
     VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
@@ -180,6 +187,7 @@ class ProgramSettings(object):
             if inp not in ['y', 'Y']:
                 raise ValueError('Run aborted.')
         # Check window constraints
+        self.stftWin = np.hanning(self.stftWinLength)
         if not sig.check_NOLA(self.stftWin, self.stftWinLength, self.stftEffectiveFrameLen):
             raise ValueError('Window NOLA contrained is not respected.')
         if len(self.stftWin) != self.stftWinLength:

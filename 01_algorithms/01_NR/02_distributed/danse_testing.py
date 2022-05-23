@@ -2,6 +2,7 @@
 
 import sys
 from danse_utilities.testing import sro_testing
+from danse_utilities.classes import SamplingRateOffsets, DWACDParameters
 from pathlib import Path, PurePath
 import numpy as np
 # Find path to root folder
@@ -19,8 +20,8 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS8_anechoic'],
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS6_RT400ms'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS8_anechoic'],
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS6_RT400ms'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS4_RT200ms'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2_3_4]_Ns1_Nn1/AS5_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[3_1]_Ns1_Nn1/AS1_anechoic'],
@@ -32,23 +33,24 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     sigDur=40,
     baseSNR=5,
-    # possibleSROs=[0, 100, 200, 400, 800, 1600, 3200],
-    # possibleSROs=[0, 20, 40, 60, 80, 100],
-    possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=10)],
-    # possibleSROs=[0, 20, 40, 60, 80, 100, 200, 400, 600, 800, 1000],
-    # possibleSROs=[int(ii) for ii in np.logspace(0, np.log10(32000), num=20)],
-    # possibleSROs=[32000],
+    # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=10)],
+    possibleSROs=[int(ii) for ii in np.linspace(0, 1000, num=10)],
     nodeUpdating='simultaneous',
     timeBtwExternalFiltUpdates=3,
     # timeBtwExternalFiltUpdates=np.Inf,
     # broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastLength=2**9,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
-    broadcastDomain='f',    
+    broadcastDomain='f',
     #
-    compensateSROs=True,
-    # estimateSROs=True,
-    # compensateSROs=False,
-    estimateSROs=False,
+    asynchronicity=SamplingRateOffsets(
+        compensateSROs=True,
+        # compensateSROs=False,
+        # estimateSROs='DWACD',
+        estimateSROs='Residuals',
+        dwacd=DWACDParameters(
+            seg_shift=2**11,
+        )
+    ),
 )
 
 

@@ -6,7 +6,7 @@ from .classes import DWACDParameters
 def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
     """Estimates residual SRO using the residuals phase technique.
     
-    Parameters TODO: change inputs to accomodate other SRO estimation methods
+    Parameters
     ----------
     resPos : [N x M] np.ndarray (complex)
         A posteriori (iteration `i + 1`) residuals for every frequency bin and every element of $\\tilde{y}$.
@@ -34,6 +34,29 @@ def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
     # Create useful explicit variables
     numFreqLines = resPos.shape[0]
     dimYTilde = resPos.shape[1]
+
+    # # "Residuals" product
+    # res_prod = resPri * resPos.conj()
+
+    # avg_res_prod = np.zeros(((numFreqLines - 1) * 2, dimYTilde), dtype=complex)
+    # sro_est = np.zeros(dimYTilde)
+    # for k in range(dimYTilde):
+
+    #     currResProd = res_prod[:, k]
+
+    #     # Prep for ISTFT (negative frequency bins too)
+    #     currResProd = np.concatenate(
+    #         [currResProd[:-1],
+    #             np.conj(currResProd)[::-1][:-1]],
+    #         -1
+    #     )
+        
+    #     # Update the average coherence product
+    #     alpha = 0.95
+    #     avg_res_prod[:, k] = alpha * avg_res_prod[:, k] + (1 - alpha) * currResProd    
+
+    #     # Estimate SRO
+    #     sro_est[k] = - max_time_lag_search(avg_res_prod[:, k]) / Ns
     
     # Compute "residuals angle" matrix
     phi = np.angle(resPri * resPos.conj())      # see LaTeX journal 2022 week 02
@@ -172,10 +195,10 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
 
     # Useful quantities
     Nf = sigSTFT.shape[0]      # number of STFT bins
-    Nl_segShift = seg_shift // frame_shift_welch      # number of STFT frames per segment shift 
-    Nl_segLen   = seg_len // frame_shift_welch        # number of STFT frames per segment 
-    Nl_cohDelay = temp_dist // frame_shift_welch      # number of STFT frames corresponding to the time 
-                                                      # interval between two consecutive coherence functions
+    Nl_segShift = seg_shift // frame_shift_welch        # number of STFT frames per segment shift 
+    Nl_segLen   = seg_len // frame_shift_welch          # number of STFT frames per segment 
+    Nl_cohDelay = temp_dist // frame_shift_welch        # number of STFT frames corresponding to the time 
+                                                        # interval between two consecutive coherence functions
     # Estimate of the SRO-induced integer shift to be compensated
     shift = int(np.round(tau_sro))
     # Corresponding STFT frequency shift (Linear Phase Drift model)

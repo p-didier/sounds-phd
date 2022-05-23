@@ -2,6 +2,7 @@
 #%%
 from pathlib import Path, PurePath
 import sys
+from unittest import result
 import matplotlib.pyplot as plt
 import numpy as np
 # Find path to root folder
@@ -13,29 +14,55 @@ sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 from danse_utilities.classes import Results, ProgramSettings
 sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512', 'Leq8']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['Leq512']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J3Mk[2, 3, 4]_Ns1_Nn1/{ii}' for ii in ['Leq8']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1']
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/with_compression/freq_domain_compression/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['no_compensation', 'oracle_compensation']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/with_compression/freq_domain_compression/J2Mk[1, 1]_Ns1_Nn1/{ii}' for ii in ['no_compensation']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/J2Mk[1, 1]_Ns1_Nn1/with_perfectly_delayed_initial_updates']
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['anechoic_nocomp', 'anechoic_comp']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['RT200ms_nocomp', 'RT200ms_comp']]
-# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['RT400ms_nocomp', 'RT400ms_comp']]
-resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in \
-    ['anechoic_nocomp', 'anechoic_comp',\
-    'RT200ms_nocomp', 'RT200ms_comp',\
-        'RT400ms_nocomp', 'RT400ms_comp']]
+# ----------------------------------
+# Only anechoic, oracle compensation
+# ----------------------------------
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in ['anechoic_nocomp', 'anechoic_comp']]
 # givenFormats, givenLegend = None, None
-givenFormats = ['C0o-','C0o:','C1o-','C1o:','C2o-','C2o:']
-givenLegend = ['Anechoic', 'Anechoic - Oracle compensation',\
-            '$T_{{60}}=0.2$s', '$T_{{60}}=0.2$s - Oracle compensation',\
-            '$T_{{60}}=0.4$s', '$T_{{60}}=0.4$s - Oracle compensation']
 
-TYPEMETRIC = 'improvement'
+# ----------------------------------
+# Anechoic or reverberant, oracle compensation
+# ----------------------------------
+# resultsBaseFolder = [f'{Path(__file__).parent}/automated/20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/{ii}' for ii in \
+#     ['anechoic_nocomp', 'anechoic_comp',\
+#     'RT200ms_nocomp', 'RT200ms_comp',\
+#         'RT400ms_nocomp', 'RT400ms_comp']]
+# givenFormats = ['C0o-','C0o:','C1o-','C1o:','C2o-','C2o:']
+# givenLegend = ['Anechoic', 'Anechoic - Oracle compensation',\
+#             '$T_{{60}}=0.2$s', '$T_{{60}}=0.2$s - Oracle compensation',\
+#             '$T_{{60}}=0.4$s', '$T_{{60}}=0.4$s - Oracle compensation']
+# EXPORTPATH = 'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/testing_SROs/automated/20220502_impactOfReverb/'
+# ylimsFwSNRseg = [0, 6.5]
+
+# ----------------------------------
+# Only anechoic, DWACD estimation + compensation
+# ----------------------------------
+resultsBaseFolder = [f'{Path(__file__).parent}/automated/{ii}' for ii in \
+    [
+    #    '20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/anechoic_nocomp',
+    #    '20220502_impactOfReverb/J2Mk[1_1]_Ns1_Nn1/anechoic_comp',
+    #    '20220518_SROestimation_withDWACD/J2Mk[1_1]_Ns1_Nn1/anechoic',
+    #
+    #    '20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/anechoic_nocomp',
+    #    '20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/anechoic_comp',
+       '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/nocomp',
+       '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/comp',
+    ]]
+givenFormats = ['C0o-','C1o:','C2o--']
+givenLegend = ['No compensation',
+            # 'Oracle SRO',
+            'DWACD-based SRO estimation']
+ylimsFwSNRseg = [0, 7.5]
+# EXPORTPATH = f'{Path(__file__).parent}/automated/20220518_SROestimation_withDWACD/J2Mk[1_1]_Ns1_Nn1/figs/metrics_onlyAnechoic'
+EXPORTPATH = f'{Path(__file__).parent}/automated/20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/figs/metrics_onlyAnechoic'
+
+
+# TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
 SINGLENODEPLOT = True
+
+# SAVEFIGURES = True
+SAVEFIGURES = False
 
 def main():
     
@@ -44,7 +71,10 @@ def main():
 
     if isinstance(resultsBaseFolder, list):
 
-        exportFileName = f'{Path(resultsBaseFolder[0]).parent}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        if EXPORTPATH is None:
+            exportFileName = f'{Path(resultsBaseFolder[0]).parent}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        else:
+            exportFileName = EXPORTPATH
         
         for ii in range(len(resultsBaseFolder)):
             resSubDirs = list(Path(resultsBaseFolder[ii]).iterdir())
@@ -67,7 +97,10 @@ def main():
 
     elif isinstance(resultsBaseFolder, str):
 
-        exportFileName = f'{resultsBaseFolder}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        if EXPORTPATH is None:
+            exportFileName = f'{resultsBaseFolder}/metrics_{TYPEMETRIC}'  # + ".png" & ".pdf"
+        else:
+            exportFileName = EXPORTPATH
 
         resSubDirs = list(Path(resultsBaseFolder).iterdir())
         resSubDirs = [f for f in resSubDirs if f.name[-1] == ']']
@@ -87,10 +120,10 @@ def main():
             flagDelta_stoi, flagDelta_fwSNRseg,
             exportFileName,
             givenFormats, givenLegend,
-            ylims=[0, 6.5])
+            ylimsFwSNRseg=ylimsFwSNRseg)
 
 
-def plotit(nNodes, res, flagDelta_stoi, flagDelta_fwSNRseg, exportFileName, givenFormats=None, givenLegend=None, ylims=None):
+def plotit(nNodes, res, flagDelta_stoi, flagDelta_fwSNRseg, exportFileName, givenFormats=None, givenLegend=None, ylimsFwSNRseg=None):
     """Plotting function."""
     
     colors = [f'C{i}' for i in range(nNodes)]
@@ -110,12 +143,15 @@ def plotit(nNodes, res, flagDelta_stoi, flagDelta_fwSNRseg, exportFileName, give
     #
     ax = fig.add_subplot(122)
     _subplot(ax, nNodes, res['sro'], res['fwSNRseg'], res['ref'], colors, styles, markers, flagDelta_fwSNRseg, 'fwSNRseg', givenFormats)
-    if ylims is not None:
-        ax.set_ylim(ylims)
+    if ylimsFwSNRseg is not None:
+        ax.set_ylim(ylimsFwSNRseg)
     plt.tight_layout()
-    fig.savefig(exportFileName + ".png")
-    fig.savefig(exportFileName + ".pdf")
+    if SAVEFIGURES:
+        fig.savefig(exportFileName + ".png")
+        fig.savefig(exportFileName + ".pdf")
     plt.show()
+
+    stop = 1
 
 
 def _subplot(ax, nNodes, sros, metric, refs, colors, styles, markers, flagDelta, ylab, givenFormats=None):
@@ -140,6 +176,8 @@ def _subplot(ax, nNodes, sros, metric, refs, colors, styles, markers, flagDelta,
         ax.set_ylabel(f'$\\Delta${ylab}')
     else:
         ax.set_ylabel(ylab)
+    if SINGLENODEPLOT:
+        ax.set_title('Node 1')
 
     return None
 
@@ -171,8 +209,13 @@ def extract_metrics(nNodes, resSubDirs, typeMetric='improvement'):
                 flagDelta_fwSNRseg = True
             elif typeMetric == 'afterEnhancement':
                 fwSNRsegs[idx, ii] = val.after   # plot before/after enhancement improvement
-        sros[:, ii] = params.SROsppm
-        if all(v == 0 for v in params.SROsppm):
+        
+        # Adapt for changes in `params` object's structure
+        if hasattr(params, 'SROsppm'):
+            sros[:, ii] = params.SROsppm
+        else:
+            sros[:, ii] = params.asynchronicity.SROsppm
+        if all(v == 0 for v in sros[:, ii]):
             idxbenchmark = ii
 
     # Sorting by increasing SROs

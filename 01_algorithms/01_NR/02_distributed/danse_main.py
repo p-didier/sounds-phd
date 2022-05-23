@@ -22,7 +22,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
-from metrics.eval_enhancement import DynamicMetricsParameters as dynParams
+from metrics.eval_enhancement import DynamicMetricsParameters
 if not any("_third_parties" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_third_parties')
 from playsounds.playsounds import playwavfile
@@ -56,25 +56,30 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=20,
+    signalDuration=40,
     baseSNR=5,
     # baseSNR=-90,
-    chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
+    #
+    stftFrameOvlp=0.5,
+    stftWinLength=2**10,
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
+    chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # broadcastDomain='t',
     broadcastDomain='f',
-    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
-        SROsppm=[0, 75],
+        # SROsppm=[0, 45, 100],
+        # SROsppm=[0, 0, 0],
+        SROsppm=[0, 100],
         compensateSROs=True,
         # compensateSROs=False,
-        # estimateSROs='no',
-        # estimateSROs='Residuals',
-        estimateSROs='DWACD',
+        # estimateSROs='Oracle',
+        estimateSROs='Residuals',
+        # estimateSROs='DWACD',
         dwacd=DWACDParameters(
             seg_shift=2**11,
         )
@@ -82,6 +87,7 @@ mySettings = ProgramSettings(
     # bypassFilterUpdates=True,
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
+    # expAvg50PercentTime=1.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
@@ -95,7 +101,7 @@ mySettings = ProgramSettings(
     printouts=PrintoutsParameters(events_parser=True,
                                     externalFilterUpdates=True,),
     #
-    dynamicMetricsParams=dynParams(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
+    dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]
                                     dynamicfwSNRseg=True,
                                     dynamicSNR=True)
@@ -108,7 +114,7 @@ subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySetti
 experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.asynchronicity.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label
 if (np.array(mySettings.asynchronicity.SROsppm) != 0).any():
     if mySettings.asynchronicity.compensateSROs:
-        experimentName += '_comp'
+        experimentName += f'_comp{mySettings.asynchronicity.estimateSROs}'
     else:
         experimentName += '_nocomp'
 

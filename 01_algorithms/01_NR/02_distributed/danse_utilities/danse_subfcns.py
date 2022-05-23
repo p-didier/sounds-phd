@@ -322,7 +322,7 @@ def back_to_time_domain(x, n, axis=0):
 
 
 def danse_compression_freq_domain(yq, wHat):
-    """Performs local signals compression in the frequency domain. TODO:
+    """Performs local signals compression in the frequency domain.
 
     Parameters
     ----------
@@ -347,15 +347,16 @@ def danse_compression_freq_domain(yq, wHat):
     # Transfer local observations to frequency domain
     n = len(yq)     # FFT order
     window = np.sqrt(np.hanning(n))             # TODO: hard-coded <--- must be neatly integrated
-    yqHat = np.fft.fft(np.squeeze(yq) * window, n, axis=0)
 
     if flagSingleSensor:
+        yqHat = np.fft.fft(np.squeeze(yq) * window, n, axis=0)
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1)]
         # Apply linear combination to form compressed signal
         zqHat = wHat.conj() * yqHat     # single sensor = simple element-wise multiplication
         # zqHat = wHat * yqHat     # single sensor = simple element-wise multiplication
     else:
+        yqHat = np.fft.fft(np.squeeze(yq) * window[:, np.newaxis], n, axis=0)
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1), :]
         # Apply linear combination to form compressed signal
