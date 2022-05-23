@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters, FiltShiftSROEstimationParameters
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -56,7 +56,7 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=40,
+    signalDuration=20,
     baseSNR=5,
     # baseSNR=-90,
     #
@@ -74,14 +74,18 @@ mySettings = ProgramSettings(
     asynchronicity=SamplingRateOffsets(
         # SROsppm=[0, 45, 100],
         # SROsppm=[0, 0, 0],
-        SROsppm=[0, 100],
-        compensateSROs=True,
-        # compensateSROs=False,
+        SROsppm=[0, 75],
+        # SROsppm=[0, 50],
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='Oracle',
-        estimateSROs='Residuals',
-        # estimateSROs='DWACD',
+        # estimateSROs='Residuals',
+        estimateSROs='DWACD',
         dwacd=DWACDParameters(
             seg_shift=2**11,
+        ),
+        filtShiftsMethod=FiltShiftSROEstimationParameters(
+            nFiltUpdatePerSeg=5,
         )
     ),
     # bypassFilterUpdates=True,

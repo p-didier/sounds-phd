@@ -231,6 +231,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     SROsEstimatesAccumulated = []
     residualSROs = []                               # residual SROs, for each node, across DANSE iterations
     avgCohProdDWACD = []                            # average coherence product coming out of DWACD processing (SRO estimation)
+    avgProdResiduals = []                           # average residuals product coming out of filter-shift processing (SRO estimation)
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
     oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
     numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
@@ -273,6 +274,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
         avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize), dtype=complex))
+        avgProdResiduals.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -302,6 +304,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             settings.asynchronicity.dwacd.seg_len +\
                             np.arange(nDWACDSROupdates) * settings.asynchronicity.dwacd.seg_shift)\
                             // settings.stftEffectiveFrameLen
+    # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
+    filtShiftSROupdateIndices = np.arange(start=settings.asynchronicity.filtShiftsMethod.startAfterNupdates +\
+                            settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg,
+                            stop=numIterations,
+                            step=settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg)
     # DWACD segments (i.e., SRO estimate update) counters (for each node)
     dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
@@ -429,6 +436,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
+                # Save uncompensated \tilde{y}
+                ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
                 # Compensate SROs
                 if settings.asynchronicity.compensateSROs:
                     # Account for buffer flags
@@ -442,8 +451,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             skipUpdate = True
                     # Complete phase shift factors
                     phaseShiftFactors[k] += extraPhaseShiftFactor
-                    # Save uncompensated \tilde{y}
-                    ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
                     # Apply phase shift factors
                     ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
@@ -498,24 +505,29 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                if settings.asynchronicity.estimateSROs == 'Residuals':
+                if settings.asynchronicity.estimateSROs == 'Residuals' :
 
-                    # Residuals method
-                    residualSROs[k][:, i[k]] = subs.residual_sro_estimation(
-                                        resPos=wTilde[k][:, i[k] + 1, :],         # a posteriori estimate
-                                        resPri=wTilde[k][:, i[k], :],             # a priori estimate
-                                        nLocalSensors=yLocalCurr.shape[-1],
-                                        N=frameSize,
-                                        Ns=Ns
-                                        )
+                    if i[k] in filtShiftSROupdateIndices:
 
-                    resSROneighbors = residualSROs[k][asc.numSensorPerNode[k]:, i[k]]
-                    tmp = numFreqLines * resSROneighbors / (1 + resSROneighbors)  # in Taewoong's slides: $N \Delta\hat{\varepsilon}_k / (1 + \Delta\hat{\varepsilon}_k)$
-                    a[k] += tmp
-                    SROsEstimates[k] += a[k]
+                        # Residuals method
+                        for q in range(len(neighbourNodes[k])):
+                            sroEst, apr = subs.residual_sro_estimation(
+                                                resPos=wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q],         # a posteriori estimate
+                                                resPri=wTilde[k][:, i[k] + 1 - settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg, yLocalCurr.shape[-1] + q],             # a priori estimate
+                                                avg_res_prod=avgProdResiduals[k][:, q],
+                                                Ns=Ns
+                                                )
+                        
+                            SROsEstimates[k][q] = sroEst
+                            avgProdResiduals[k][:, q] = apr
+
+                    # resSROneighbors = residualSROs[k][asc.numSensorPerNode[k]:, i[k]]
+                    # tmp = numFreqLines * resSROneighbors / (1 + resSROneighbors)  # in Taewoong's slides: $N \Delta\hat{\varepsilon}_k / (1 + \Delta\hat{\varepsilon}_k)$
+                    # a[k] += tmp
+                    # SROsEstimates[k] += a[k]
 
                     if k == 0:  # save evolution of SRO estimates
-                        SROresidualThroughTime[i[k]] = SROsEstimates[k][0]
+                        SROresidualThroughTime[i[k]:] = SROsEstimates[k][0]
                         
                 elif settings.asynchronicity.estimateSROs == 'DWACD':
                     # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
@@ -530,7 +542,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     activity_ref_sig=oVADframes[:i[k]+1],
                                     paramsDWACD=settings.asynchronicity.dwacd,
                                     seg_idx=dwacdSegIdx[k],
-                                    tau_sro=tauSROsEstimates[k][q],  # previous time shift estimate
+                                    # tau_sro=tauSROsEstimates[k][q],  # previous time shift estimate
+                                    tau_sro=0,  # previous time shift estimate
                                     sro_est=SROsEstimates[k][q],     # previous SRO estimate
                                     avg_coh_prod=avgCohProdDWACD[k][q, :]
                             )
@@ -590,6 +603,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Profiling
     profiler.stop()
     profiler.print()
+
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(8,4))
+    # ax = fig.add_subplot(111)
+    # ax.plot(SROresidualThroughTime * 1e6)
+    # ax.grid()
+    # ax.set_ylabel('SRO [ppm]')
+    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime), colors='k')
+    # plt.tight_layout()	
+    # plt.show()
 
     stop = 1
 

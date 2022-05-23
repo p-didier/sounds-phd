@@ -3,82 +3,51 @@ from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters
 
 
-def residual_sro_estimation(resPos, resPri, nLocalSensors, N, Ns):
+def residual_sro_estimation(resPos: np.ndarray, resPri: np.ndarray, avg_res_prod, Ns, alpha=0.95):
     """Estimates residual SRO using the residuals phase technique.
     
     Parameters
     ----------
-    resPos : [N x M] np.ndarray (complex)
-        A posteriori (iteration `i + 1`) residuals for every frequency bin and every element of $\\tilde{y}$.
-    resPri : [N x M] np.ndarray (complex)
-        A priori (iteration `i`) residuals for every frequency bin and every element of $\\tilde{y}$.
-    nLocalSensors : int
-        Number of local sensors at current node.
-    N : int
-        Processing frame length (== DANSE DFT size).
+    resPos : [N x 1] np.ndarray (complex)
+        A posteriori (iteration `i + 1`) residuals for every frequency bin
+    resPri : [N x 1] np.ndarray (complex)
+        A priori (iteration `i`) residuals for every frequency bin
+    avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
+        Exponentially averaged residuals (complex conjugate) product
     Ns : int
-        Number of new samples at each new frame, counting overlap (`Ns = N * (1 - O)`, where `O` is the amount of overlap [/100%])
+        Number of new samples at each new frame, counting overlap (`Ns=N*(1-O)`, where `O` is the amount of overlap [/100%])
+    alpha : float
+        Exponential averaging constant.
 
     Returns
     -------
-    residualSROs : [M x 1] np.ndarray (float)
-        Estimated residual SROs for each node.
+    sro_est : float
+        Estimated residual SRO
         -- `nLocalSensors` first elements of output should be zero (no intra-node SROs)
+    avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
+        Exponentially averaged residuals (complex conjugate) product - post-processing.
     """
-    
-    # Check correct input orientation
-    if resPos.shape[0] < resPos.shape[1]:
-        resPos = resPos.T
-    if resPri.shape[0] < resPri.shape[1]:
-        resPri = resPri.T
-    # Create useful explicit variables
-    numFreqLines = resPos.shape[0]
-    dimYTilde = resPos.shape[1]
 
-    # # "Residuals" product
-    # res_prod = resPri * resPos.conj()
+    # "Residuals" product
+    res_prod = resPri * resPos.conj()
+    # Prep for ISTFT (negative frequency bins too)
+    res_prod = np.concatenate(
+        [res_prod[:-1],
+            np.conj(res_prod)[::-1][:-1]],
+        -1
+    )
+    # Update the average coherence product
+    avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod    
+    # Estimate SRO
+    sro_est = - max_time_lag_search(avg_res_prod) / Ns
 
-    # avg_res_prod = np.zeros(((numFreqLines - 1) * 2, dimYTilde), dtype=complex)
-    # sro_est = np.zeros(dimYTilde)
-    # for k in range(dimYTilde):
-
-    #     currResProd = res_prod[:, k]
-
-    #     # Prep for ISTFT (negative frequency bins too)
-    #     currResProd = np.concatenate(
-    #         [currResProd[:-1],
-    #             np.conj(currResProd)[::-1][:-1]],
-    #         -1
-    #     )
-        
-    #     # Update the average coherence product
-    #     alpha = 0.95
-    #     avg_res_prod[:, k] = alpha * avg_res_prod[:, k] + (1 - alpha) * currResProd    
-
-    #     # Estimate SRO
-    #     sro_est[k] = - max_time_lag_search(avg_res_prod[:, k]) / Ns
-    
-    # Compute "residuals angle" matrix
-    phi = np.angle(resPri * resPos.conj())      # see LaTeX journal 2022 week 02
-    phi[:, :nLocalSensors] = 0              # NOTE: force a 0 residual at the local sensors (no intra-node SRO)
-
-    # Create `kappa` frequency bins vector
-    kappa = 2 * np.pi / N * Ns * np.arange(numFreqLines)  # TODO: check if that is correct -- Eq. (3), week 02 in LaTeX journal 2022
-    
-    # Estimate residual SRO as least-square solution to system of equation across frequency bins
-    nfToDiscard = 0    # number of lowest frequency bins to discard -- see Word journal, TUE 26/04, week 17 2022
-    residualSROs = np.zeros(dimYTilde)
-    for q in range(dimYTilde):
-        residualSROs[q] = np.dot(kappa[nfToDiscard:], phi[nfToDiscard:, q]) / np.dot(kappa[nfToDiscard:], kappa[nfToDiscard:])
-
-    return residualSROs
+    return sro_est, avg_res_prod
 
 
 def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
                         paramsDWACD: DWACDParameters,
                         seg_idx,
                         sro_est,
-                        tau_sro,
                         avg_coh_prod
                         ):
     """Dynamic Weighted Average Coherence Drift (DWACD)-based SRO
@@ -114,8 +83,6 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         DWACD parameters
     seg_idx : int
         DWACD segment index
-    tau_sro : float
-        [s] Time shift estimate from previous DWACD segment
     sro_est : float
         SRO estimate from previous DWACD segment
     avg_coh_prod : [Nf x 1] np.ndarray (complex)
@@ -199,11 +166,11 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     Nl_segLen   = seg_len // frame_shift_welch          # number of STFT frames per segment 
     Nl_cohDelay = temp_dist // frame_shift_welch        # number of STFT frames corresponding to the time 
                                                         # interval between two consecutive coherence functions
-    # Estimate of the SRO-induced integer shift to be compensated
-    shift = int(np.round(tau_sro))
-    # Corresponding STFT frequency shift (Linear Phase Drift model)
-    phaseShift = np.exp( 1j * 2 * np.pi / Nf * np.arange(Nf) * shift)
-    phaseShift = phaseShift[:, np.newaxis]  # adapt array format for subsequent element-wise product
+    # # Estimate of the SRO-induced integer shift to be compensated
+    # shift = int(np.round(tau_sro))
+    # # Corresponding STFT frequency shift (Linear Phase Drift model)
+    # phaseShift = np.exp( 1j * 2 * np.pi / Nf * np.arange(Nf) * shift)
+    # phaseShift = phaseShift[:, np.newaxis]  # adapt array format for subsequent element-wise product
 
     # Define STFT frame indices for current segment
     lStart = seg_idx * Nl_segShift + Nl_cohDelay
@@ -225,12 +192,12 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     if activity:
         # Compute coherence directly from STFT domain signals
         seg_ref = ref_sigSTFT[:, lStart:lEnd] 
-        seg = phaseShift * sigSTFT[:, lStart:lEnd]
+        seg = sigSTFT[:, lStart:lEnd]
         coherence = calc_coherence_stft(frame_shift_welch, fft_size,
                                         seg, seg_ref, sro_est)
 
         seg_ref_delayed = ref_sigSTFT[:, (lStart - Nl_cohDelay):(lEnd - Nl_cohDelay)]
-        seg_delayed = phaseShift * sigSTFT[:, (lStart - Nl_cohDelay):(lEnd - Nl_cohDelay)]
+        seg_delayed = sigSTFT[:, (lStart - Nl_cohDelay):(lEnd - Nl_cohDelay)]
         coherence_delayed = calc_coherence_stft(frame_shift_welch, fft_size,
                                                 seg_delayed, seg_ref_delayed, sro_est)
 

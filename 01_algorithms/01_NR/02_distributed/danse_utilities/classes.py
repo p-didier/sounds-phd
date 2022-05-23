@@ -31,6 +31,25 @@ class PrintoutsParameters:
 
 
 @dataclass
+class FiltShiftSROEstimationParameters():
+    """
+    Dataclass containing the required parameters for the
+    "Filter-shift" SRO estimation method.
+
+    Attributes
+    ----------
+    alpha : float
+        Exponential averaging constant.
+    nFiltUpdatePerSeg : int 
+        Number of DANSE filter updates per SRO estimation segment
+    startAfterNupdates : int 
+        Minimum number of DANSE filter updates before first SRO estimation
+    """
+    alpha : float = .95
+    nFiltUpdatePerSeg : int = 1
+    startAfterNupdates : int = 10
+
+@dataclass
 class DWACDParameters():
     """
     Dataclass containing the required parameters for the
@@ -76,7 +95,7 @@ class DWACDParameters():
     settling_time : int = 40        # 40   : default value from https://github.com/fgnt/paderwasn
     frame_shift_welch: int = 2**9  
     fft_size : int = 2**12
-    nFiltUpdatePerSeg : int = 1
+    nFiltUpdatePerSeg : int = 1     # automatically adjusted in `__post_init__` of `ProgramSettings` object
 
 @dataclass
 class SamplingRateOffsets():
@@ -89,6 +108,7 @@ class SamplingRateOffsets():
     compensateSTOs: bool = False            # if True, compensate STOs
     estimateSTOs: bool = False              # if True, estimate STOs
     dwacd: DWACDParameters = DWACDParameters()  # parameters for Dynamic Weighted Average Coherence Drift SRO estimation
+    filtShiftsMethod: FiltShiftSROEstimationParameters = FiltShiftSROEstimationParameters()     # parameters for "Filter-shift" SRO estimation method
 
     def __post_init__(self):
         # Base checks
