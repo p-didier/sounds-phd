@@ -72,20 +72,23 @@ mySettings = ProgramSettings(
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
-        # SROsppm=[0, 45, 100],
-        # SROsppm=[0, 0, 0],
-        SROsppm=[0, 75],
+        SROsppm=[0, 0],
+        # SROsppm=[0, 75],
         # SROsppm=[0, 50],
         # compensateSROs=True,
         compensateSROs=False,
-        # estimateSROs='Oracle',
-        # estimateSROs='Residuals',
-        estimateSROs='DWACD',
+        estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
+        # estimateSROs='FiltShift',   # <-- Filter shift method (inspired by Thüne & Enzner + Nokia work)
+        # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
         dwacd=DWACDParameters(
             seg_shift=2**11,
         ),
         filtShiftsMethod=FiltShiftSROEstimationParameters(
-            nFiltUpdatePerSeg=5,
+            nFiltUpdatePerSeg=1,
+            # estimationMethod='gs',      # golden section search
+            # estimationMethod='mean',    # mean method
+            estimationMethod='ls',      # least-squares
+            startAfterNupdates=30,
         )
     ),
     # bypassFilterUpdates=True,

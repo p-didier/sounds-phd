@@ -1,23 +1,29 @@
+from audioop import avg
+from statistics import mean
 import numpy as np
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters
 
 
-def residual_sro_estimation(resPos: np.ndarray, resPri: np.ndarray, avg_res_prod, Ns, alpha=0.95):
+def residual_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs'):
     """Estimates residual SRO using the residuals phase technique.
     
     Parameters
     ----------
-    resPos : [N x 1] np.ndarray (complex)
-        A posteriori (iteration `i + 1`) residuals for every frequency bin
-    resPri : [N x 1] np.ndarray (complex)
-        A priori (iteration `i`) residuals for every frequency bin
+    wPos : [N x 1] np.ndarray (complex)
+        A posteriori (iteration `i + 1`) filter for every frequency bin
+    wPri : [N x 1] np.ndarray (complex)
+        A priori (iteration `i`) filter for every frequency bin
     avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
-        Exponentially averaged residuals (complex conjugate) product
+        Exponentially averaged filter complex conjugate product
     Ns : int
-        Number of new samples at each new frame, counting overlap (`Ns=N*(1-O)`, where `O` is the amount of overlap [/100%])
+        Number of new samples at each new STFT frame, counting overlap (`Ns=N*(1-O)`, where `O` is the amount of overlap [/100%])
+    ld : int
+        Number of STFT frames separating `wPos` from `wPri`.
     alpha : float
         Exponential averaging constant.
+    method : str
+        Method to use to retrieve SRO once the exponentially averaged product has been computed.
 
     Returns
     -------
@@ -29,7 +35,7 @@ def residual_sro_estimation(resPos: np.ndarray, resPri: np.ndarray, avg_res_prod
     """
 
     # "Residuals" product
-    res_prod = resPri * resPos.conj()
+    res_prod = wPri * wPos.conj()
     # Prep for ISTFT (negative frequency bins too)
     res_prod = np.concatenate(
         [res_prod[:-1],
@@ -37,9 +43,32 @@ def residual_sro_estimation(resPos: np.ndarray, resPri: np.ndarray, avg_res_prod
         -1
     )
     # Update the average coherence product
-    avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod    
+    alpha = 0.99
+    avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod  
+
     # Estimate SRO
-    sro_est = - max_time_lag_search(avg_res_prod) / Ns
+    if method == 'gs':
+        # --------- DWACD-inspired "golden section search"
+        sro_est = - max_time_lag_search(avg_res_prod) / (ld * Ns)
+        
+    elif method == 'mean':
+        # --------- Online-WACD-inspired "average phase"
+        print('Filter shift "mean" method for SRO estimation --> Not quite working?')
+        # TODO: avoid hard-coding
+        epsmax = 400 * 1e-6
+        kmin, kmax = 1, len(wPri)
+        kappa = np.arange(kmin, kmax)    # freq. bins indices
+        norm_phase = np.angle(avg_res_prod[(len(avg_res_prod) // 2 - 1 + kmin):(len(avg_res_prod) // 2 - 1 + kmax)])\
+                                                * len(wPri) / (2 * (ld * Ns) * kappa * epsmax)
+        mean_phase = np.mean(np.abs(avg_res_prod[(len(avg_res_prod) // 2 - 1 + kmin):(len(avg_res_prod) // 2 - 1 + kmax)])\
+                                                * np.exp(1j * norm_phase))
+        sro_est = - epsmax / np.pi * np.angle(mean_phase)
+
+    elif method == 'ls':
+        # --------- Least-squares solution over frequency bins
+        kappa = np.arange(1, len(wPri))    # freq. bins indices
+        b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
+        sro_est = - b.T @ np.angle(avg_res_prod[(len(avg_res_prod) // 2):]) / (b.T @ b)
 
     return sro_est, avg_res_prod
 
@@ -166,11 +195,6 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     Nl_segLen   = seg_len // frame_shift_welch          # number of STFT frames per segment 
     Nl_cohDelay = temp_dist // frame_shift_welch        # number of STFT frames corresponding to the time 
                                                         # interval between two consecutive coherence functions
-    # # Estimate of the SRO-induced integer shift to be compensated
-    # shift = int(np.round(tau_sro))
-    # # Corresponding STFT frequency shift (Linear Phase Drift model)
-    # phaseShift = np.exp( 1j * 2 * np.pi / Nf * np.arange(Nf) * shift)
-    # phaseShift = phaseShift[:, np.newaxis]  # adapt array format for subsequent element-wise product
 
     # Define STFT frame indices for current segment
     lStart = seg_idx * Nl_segShift + Nl_cohDelay

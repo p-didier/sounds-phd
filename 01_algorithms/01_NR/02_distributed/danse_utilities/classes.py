@@ -44,10 +44,31 @@ class FiltShiftSROEstimationParameters():
         Number of DANSE filter updates per SRO estimation segment
     startAfterNupdates : int 
         Minimum number of DANSE filter updates before first SRO estimation
+
+    References
+    ----------
+    [1] Gburrek, Tobias, Joerg Schmalenstroeer, and Reinhold Haeb-Umbach.
+        "On Synchronization of Wireless Acoustic Sensor Networks in the
+        Presence of Time-Varying Sampling Rate Offsets and Speaker Changes."
+        ICASSP 2022-2022 IEEE International Conference on Acoustics,
+        Speech and Signal Processing (ICASSP). IEEE, 2022.
+        
+    [2] Chinaev, Aleksej, et al. "Online Estimation of Sampling Rate
+        Offsets in Wireless Acoustic Sensor Networks with Packet Loss."
+        2021 29th European Signal Processing Conference (EUSIPCO). IEEE, 2021.
+        
+    [3] Bahari, Mohamad Hasan, Alexander Bertrand, and Marc Moonen.
+        "Blind sampling rate offset estimation for wireless acoustic sensor
+        networks through weighted least-squares coherence drift estimation."
+        IEEE/ACM Transactions on Audio, Speech, and Language Processing 25.3
+        (2017): 674-686.
     """
     alpha : float = .95
     nFiltUpdatePerSeg : int = 1
     startAfterNupdates : int = 10
+    estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
+                                        # "mean" (similar to Online WACD implementation [2]),
+                                        # "ls" (least-squares estimate over frequency bins [3])
 
 @dataclass
 class DWACDParameters():
@@ -103,7 +124,7 @@ class SamplingRateOffsets():
     applying, estimating, and compensation SROs/STOs"""
     SROsppm: list[float] = field(default_factory=list)     # SROs [ppm] to be applied to each node (taking Node#1 (idx = 0) as reference)
     compensateSROs: bool = False            # if True, compensate SROs
-    estimateSROs: str = 'Oracle'                # SRO estimation method. If 'Oracle', no estimation: using oracle if `compensateSROs == True`
+    estimateSROs: str = 'Oracle'            # SRO estimation method. If 'Oracle', no estimation: using oracle if `compensateSROs == True`
     STOinducedDelays: list[float] = field(default_factory=list)     # [s] STO-induced time delays between nodes (different starts of recording)
     compensateSTOs: bool = False            # if True, compensate STOs
     estimateSTOs: bool = False              # if True, estimate STOs
@@ -112,8 +133,8 @@ class SamplingRateOffsets():
 
     def __post_init__(self):
         # Base checks
-        if self.estimateSROs not in ['Oracle', 'Residuals', 'DWACD']:
-            raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "Residuals", "DWACD".')
+        if self.estimateSROs not in ['Oracle', 'FiltShift', 'DWACD']:
+            raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "FiltShift", "DWACD".')
         if all(v == 0 for v in self.SROsppm) and self.compensateSROs:
             inn = input('No SROs involved -- no need to compensate. Set `compensateSROs` to `False`? [y/n]  ')
             if inn in ['Y', 'y']:

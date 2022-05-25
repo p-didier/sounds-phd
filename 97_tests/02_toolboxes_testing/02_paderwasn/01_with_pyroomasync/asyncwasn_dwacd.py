@@ -56,6 +56,7 @@ TEMPDIST = 8192
 # TEMPDIST = int(8192 / 4)
 # TEMPDIST = int(8192 / 8)
 COMPUTEONLINE = False
+COMPUTEONLINE = True
 SEED = 12345
 multichannelCompression = dict([
     ('active', True),
@@ -93,7 +94,7 @@ def main():
         signals = gen_signals(params)
 
         if params.comp['active']:
-            signalsCompressed = np.zeros((signals.shape[0], params.nodePos.shape[0]))
+            signalsCompressed = np.zeros((signals.shape[0], params.nodePos.shape[0]), dtype=complex)
             for k in range(params.nodePos.shape[0]):
                 linearCompressor = params.randomGen.uniform(size=(params.comp['Mk'][k],)) +\
                     1j * params.randomGen.uniform(size=(params.comp['Mk'][k],)) 
