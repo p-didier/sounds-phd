@@ -1,4 +1,5 @@
 
+from xml.dom.minidom import NamedNodeMap
 import numpy as np
 import time, datetime
 from . import classes
@@ -214,7 +215,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
-    wTildeExternalTarget = []                       # target external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
+    wTildeExternalComplete = []                     # external filter coefficients - for TESTING PURPOSES (20220525)
+    wTildeExternalTarget = []                       # target external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` 
+    wTildeExternalTargetComplete = []               # target external filter coefficients - for TESTING PURPOSES (20220525)
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     ryd = []                                        # cross-correlation between observations and estimations
@@ -246,9 +249,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
         wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTilde.append(wtmp)
-        wtmp = np.ones((numFreqLines, sum(asc.sensorToNodeTags == k + 1)), dtype=complex)
+        wtmp = np.zeros((numFreqLines, sum(asc.sensorToNodeTags == k + 1)), dtype=complex)
+        wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ FOR TESTING (WED 20220525 -- w21) ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+        wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
+        wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+        wTildeExternalComplete.append(wtmp)
+        wTildeExternalTargetComplete.append(wtmp)
+        # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ FOR TESTING (WED 20220525 -- w21) ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
@@ -325,12 +335,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     zFull = []
     a = []
     b = []
+    SROresidualThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
         a.append(np.zeros(len(neighbourNodes[k])))
         b.append(np.zeros(len(neighbourNodes[k])))
-    SROresidualThroughTime = np.zeros(numIterations)
+        SROresidualThroughTime.append(np.zeros(numIterations))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -494,9 +505,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 wTildeExternal[k] = settings.expAvgBeta * wTildeExternal[k] + (1 - settings.expAvgBeta) * wTildeExternalTarget[k]
+                wTildeExternalComplete[k] = settings.expAvgBeta * wTildeExternalComplete[k] + (1 - settings.expAvgBeta) * wTildeExternalTargetComplete[k]
                 # Update targets
                 if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
                     wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
+                    wTildeExternalTargetComplete[k] = (1 - alphaExternalFilters) * wTildeExternalTargetComplete[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
                     # Update last external filter update instant [s]
                     lastExternalFiltUpdateInstant[k] = t
                     if settings.printouts.externalFilterUpdates:    # inform user
@@ -512,10 +525,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         # Residuals method
                         for q in range(len(neighbourNodes[k])):
                             sroEst, apr = subs.residual_sro_estimation(
-                                                resPos=wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q],         # a posteriori estimate
-                                                resPri=wTilde[k][:, i[k] + 1 - settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg, yLocalCurr.shape[-1] + q],             # a priori estimate
+                                                wPos=wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q],         # a posteriori estimate
+                                                wPri=wTilde[k][:, i[k] + 1 - settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg, yLocalCurr.shape[-1] + q],             # a priori estimate
                                                 avg_res_prod=avgProdResiduals[k][:, q],
-                                                Ns=Ns
+                                                Ns=Ns,
+                                                ld=settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg,
+                                                method=settings.asynchronicity.filtShiftsMethod.estimationMethod,
                                                 )
                         
                             SROsEstimates[k][q] = sroEst
@@ -526,8 +541,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # a[k] += tmp
                     # SROsEstimates[k] += a[k]
 
-                    if k == 0:  # save evolution of SRO estimates
-                        SROresidualThroughTime[i[k]:] = SROsEstimates[k][0]
+                    SROresidualThroughTime[k][i[k]:] = SROsEstimates[k][0]
                         
                 elif settings.asynchronicity.estimateSROs == 'DWACD':
                     # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
@@ -550,8 +564,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             SROsEstimates[k][q] = sroEst
                             avgCohProdDWACD[k][q, :] = acp
 
-                        if k == 0:  # save evolution of SRO estimates
-                            SROresidualThroughTime[i[k]:] = SROsEstimates[k][0]
+                        SROresidualThroughTime[k][i[k]:] = SROsEstimates[k][0]
 
                         dwacdSegIdx[k] += 1
 
@@ -574,6 +587,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                # dhatCurr = np.einsum('ij,ij->i', wTildeExternalComplete[k].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
@@ -607,10 +621,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(8,4))
     # ax = fig.add_subplot(111)
-    # ax.plot(SROresidualThroughTime * 1e6)
+    # for k in range(len(SROresidualThroughTime)):
+    #     ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
     # ax.grid()
     # ax.set_ylabel('SRO [ppm]')
-    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime), colors='k')
+    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
+    # plt.legend()
     # plt.tight_layout()	
     # plt.show()
 
