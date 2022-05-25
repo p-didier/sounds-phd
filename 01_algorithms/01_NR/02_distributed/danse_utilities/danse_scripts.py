@@ -215,9 +215,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     #
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
-    wTildeExternalComplete = []                     # external filter coefficients - for TESTING PURPOSES (20220525)
     wTildeExternalTarget = []                       # target external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` 
-    wTildeExternalTargetComplete = []               # target external filter coefficients - for TESTING PURPOSES (20220525)
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     ryd = []                                        # cross-correlation between observations and estimations
@@ -253,12 +251,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
-        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ FOR TESTING (WED 20220525 -- w21) ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        wtmp = np.zeros((numFreqLines, dimYTilde[k]), dtype=complex)
-        wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
-        wTildeExternalComplete.append(wtmp)
-        wTildeExternalTargetComplete.append(wtmp)
-        # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ FOR TESTING (WED 20220525 -- w21) ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
@@ -505,11 +497,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 wTildeExternal[k] = settings.expAvgBeta * wTildeExternal[k] + (1 - settings.expAvgBeta) * wTildeExternalTarget[k]
-                wTildeExternalComplete[k] = settings.expAvgBeta * wTildeExternalComplete[k] + (1 - settings.expAvgBeta) * wTildeExternalTargetComplete[k]
                 # Update targets
                 if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
                     wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
-                    wTildeExternalTargetComplete[k] = (1 - alphaExternalFilters) * wTildeExternalTargetComplete[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :]
                     # Update last external filter update instant [s]
                     lastExternalFiltUpdateInstant[k] = t
                     if settings.printouts.externalFilterUpdates:    # inform user
@@ -587,7 +577,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                # dhatCurr = np.einsum('ij,ij->i', wTildeExternalComplete[k].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
