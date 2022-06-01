@@ -135,13 +135,17 @@ class SamplingRateOffsets():
         # Base checks
         if self.estimateSROs not in ['Oracle', 'FiltShift', 'DWACD']:
             raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "FiltShift", "DWACD".')
-        if all(v == 0 for v in self.SROsppm) and self.compensateSROs:
-            inn = input('No SROs involved -- no need to compensate. Set `compensateSROs` to `False`? [y/n]  ')
-            if inn in ['Y', 'y']:
-                print('Setting `compensateSROs` to `False`.')
-                self.compensateSROs = False
-            else:
-                print('Keeping `compensateSROs` as `True`.')
+        
+        elif isinstance(self.SROsppm, float) or isinstance(self.SROsppm, int):
+            self.SROsppm = [self.SROsppm]
+        if isinstance(self.SROsppm, list):
+            if all(v == 0 for v in self.SROsppm) and self.compensateSROs:
+                inn = input('No SROs involved -- no need to compensate. Set `compensateSROs` to `False`? [y/n]  ')
+                if inn in ['Y', 'y']:
+                    print('Setting `compensateSROs` to `False`.')
+                    self.compensateSROs = False
+                else:
+                    print('Keeping `compensateSROs` as `True`.')
 
 
 @dataclass
@@ -158,7 +162,8 @@ class ProgramSettings(object):
     referenceSensor: int = 0                # Index of the reference sensor at each node
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
-    stftWin: np.ndarray = np.array([])     # STFT window
+    stftWin: np.ndarray = np.array([])      # STFT window
+    wasnTopology: str = 'fully_connected'   # WASN topology (fully connected or ad hoc)
     # VAD parameters
     VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
@@ -192,6 +197,10 @@ class ProgramSettings(object):
     printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
 
     def __post_init__(self) -> None:
+        # Base attribute checks
+        validTopologies = ['fully_connected', 'adhoc']
+        if self.wasnTopology not in validTopologies:
+            raise ValueError(f'The WASN topology requested ("{self.wasnTopology}") is invalid (accepted values: {validTopologies}).')
         # Create new attributes
         self.stftEffectiveFrameLen = int(self.stftWinLength * (1 - self.stftFrameOvlp))
         self.expAvgBeta = np.exp(np.log(0.5) / (self.expAvg50PercentTime * self.samplingFrequency / self.stftEffectiveFrameLen))

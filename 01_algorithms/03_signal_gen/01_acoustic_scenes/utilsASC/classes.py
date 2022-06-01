@@ -44,25 +44,25 @@ class AcousticScenario:
         self.numSensors = self.sensorCoords.shape[0]                    # number of sensors
         self.numNoiseSources = self.noiseSourceCoords.shape[0]          # number of noise sources
         self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]    # number of sensors per node
-        # Address topology
-        if self.topology == 'fully_connected':
-            self.nodeLinks = np.full((self.numNodes, self.numNodes), fill_value=True)
-        elif self.topology == 'no_connection':
-            self.nodeLinks = np.eye(self.numNodes, dtype=bool)
-        elif self.topology == 'tree':
-            raise ValueError('[NOT YET IMPLEMENTED] Tree WASN topology')
-        elif self.topology == 'random':
-            if rng is not None:
-                tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
-            elif seed is not None:
-                rng = np.random.default_rng(seed)
-                tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
-            else:
-                print('/!\\ No random generator provided: creating random WASN topology without seed.')
-                tmp = np.random.randint(2, size=(self.numNodes, self.numNodes), dtype=bool)
-            self.nodeLinks = np.maximum(tmp, tmp.transpose())
-        else:
-            raise ValueError(f'Unavailable WASN topology "{self.topology}".')
+        # # Address topology
+        # if self.topology == 'fully_connected':
+        #     self.nodeLinks = np.full((self.numNodes, self.numNodes), fill_value=True)
+        # elif self.topology == 'no_connection':
+        #     self.nodeLinks = np.eye(self.numNodes, dtype=bool)
+        # elif self.topology == 'tree':
+        #     raise ValueError('[NOT YET IMPLEMENTED] Tree WASN topology')
+        # elif self.topology == 'random':
+        #     if rng is not None:
+        #         tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
+        #     elif seed is not None:
+        #         rng = np.random.default_rng(seed)
+        #         tmp = rng.integers(low=0, high=1, size=(self.numNodes, self.numNodes), dtype=bool, endpoint=True)
+        #     else:
+        #         print('/!\\ No random generator provided: creating random WASN topology without seed.')
+        #         tmp = np.random.randint(2, size=(self.numNodes, self.numNodes), dtype=bool)
+        #     self.nodeLinks = np.maximum(tmp, tmp.transpose())
+        # else:
+        #     raise ValueError(f'Invalid WASN topology "{self.topology}".')
             
         return self
     
@@ -165,8 +165,7 @@ class ASCProgramSettings:
     seed: int = 12345                               # seed for random generator
     specialCase: str = ''                           # flag for special cases: '' or 'none' --> no special case;
                                                     # 'allNodesInSamePosition': all nodes and sensors are placed at the same position in space.
-    topology: str = 'fully_connected'               # WASN topology type ("fully_connected" or ...TODO)
-
+                                                    
     def load(self, filename: str, silent=False):
         return met.load(self, filename, silent)
     def save(self, filename: str):

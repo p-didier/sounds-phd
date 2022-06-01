@@ -5,9 +5,19 @@ import scipy.linalg as sla
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
+from collections import deque
+import matplotlib.pyplot as plt
+
+"""
+References:
+[1] Szurley, Joseph, Alexander Bertrand, and Marc Moonen.
+"Topology-independent distributed adaptive node-specific signal
+estimation in wireless sensor networks." IEEE Transactions on
+Signal and Information Processing over Networks 3.1 (2016): 130-144.
+"""
 
 
-def danse_init(yin, settings: classes.ProgramSettings, asc):
+def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=False):
     """DANSE algorithms initialization function.
     
     Parameters
@@ -54,17 +64,106 @@ def danse_init(yin, settings: classes.ProgramSettings, asc):
     numBroadcasts = int(np.ceil(yin.shape[0] / settings.broadcastLength))
 
     # Identify neighbours of each node
-    neighbourNodes = []
     allNodeIdx = np.arange(asc.numNodes)
-    for k in range(asc.numNodes):
-        if asc.topology == 'fully_connected':
-            # Option 1) - FULLY-CONNECTED WASN
+
+    # Option 1) - FULLY-CONNECTED WASN
+    if settings.wasnTopology == 'fully_connected':
+        neighbourNodes = []  
+        for k in range(asc.numNodes):
             neighbourNodes.append(np.delete(allNodeIdx, k))
-        else:
-            raise ValueError('[NOT YET IMPLEMENTED] Non-fully connected topology.')
+
+    # Option 2) - AD-HOC TOPOLOGY (via expanding communication radius)
+    elif settings.wasnTopology == 'adhoc':
+        comRad = 0  # initiate communication radius to 0 m
+        allReachable = False
+        nodeDistances = np.zeros((asc.numNodes, asc.numNodes))
+        for ii in range(asc.numNodes):
+            for jj in range(asc.numNodes):
+                nodeDistances[ii, jj] = np.linalg.norm(asc.sensorCoords[ii,:] - asc.sensorCoords[jj,:])
+
+        while not allReachable:
+            # Connection matrix
+            connectionMatrix = nodeDistances <= comRad
+            # Check if "every node is reachable by some set of links to every other node in the WSN" [1]
+            reachable = np.full((asc.numNodes, asc.numNodes), fill_value=False)
+            for ii in range(asc.numNodes):
+                for jj in range(asc.numNodes):
+                    # Base case
+                    if (ii == jj):
+                        reachable[ii, jj] = True
+                        continue
+
+                    # Mark all the vertices as not visited
+                    visited = [False for _ in range(asc.numNodes)]
+
+                    # Create a queue for BFS
+                    queue = deque()
+
+                    # Mark the current node as visited and enqueue it
+                    visited[ii] = True
+                    queue.append(ii)
+
+                    while (len(queue) > 0):
+                    
+                        # Dequeue a vertex from queue and print
+                        s = queue.popleft()
+
+                        # Get all adjacent vertices of the dequeued vertex s
+                        # If a adjacent has not been visited, then mark it
+                        # visited and enqueue it
+                        for i in allNodeIdx[connectionMatrix[s,:]]:
+
+                            # If this adjacent node is the destination node,
+                            # then return true
+                            if (i == jj):
+                                reachable[ii, jj] = True
+
+                            # Else, continue to do BFS
+                            if (not visited[i]):
+                                visited[i] = True
+                                queue.append(i)
+
+            if reachable.all():
+                allReachable = True
+            else:
+                comRad += .1    # increase communication radius by a bit
+                print(f'Increasing communication radius to {comRad} m...')
+
+        # Build neighbourNodes object
+        neighbourNodes = []
+        for k in range(asc.numNodes):
+            neighbours = allNodeIdx[connectionMatrix[k, :]]
+            neighbourNodes.append(neighbours[neighbours != k])
+
+        # Show WASN connections
+        if showWasnConnections:
+            plot_wasn_connections(asc.sensorCoords, connectionMatrix)
 
     return rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
 
+
+def plot_wasn_connections(coords: np.ndarray, connectionMatrix: np.ndarray):
+    """Quick visualization of the WASN connections (for an ad-hoc topology)."""
+
+    fig = plt.figure(figsize=(8,4))
+    ax = fig.add_subplot(111, projection='3d')
+    # Plot nodes
+    ax.scatter(coords[:,0], coords[:,1], coords[:,2], s=50, c='r', marker='o')
+    # Plot connections
+    for ii in range(connectionMatrix.shape[0]):
+        for jj in range(connectionMatrix.shape[1]):
+            if ii > jj:     # only considered one half of the connection matrix (undirected graph)
+                if connectionMatrix[ii, jj]:
+                    ax.plot([coords[ii,0], coords[jj,0]],
+                            [coords[ii,1], coords[jj,1]],
+                            [coords[ii,2], coords[jj,2]], 'k--')
+    ax.grid()
+    ax.set_xlabel('x [m]')
+    ax.set_ylabel('y [m]')
+    ax.set_zlabel('z [m]')
+    plt.tight_layout()	
+    plt.show()
+    
 
 def check_autocorr_est(Ryy, Rnn, nUpRyy=0, nUpRnn=0, min_nUp=0):
     """Performs checks on autocorrelation matrices to ensure their

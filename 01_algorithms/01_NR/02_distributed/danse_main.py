@@ -44,7 +44,8 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J5Mk[1 1 1 1 1]_Ns1_Nn1/AS6_allNodesInSamePosition_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_1]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS1_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_noiseless/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS3_RT500ms',
@@ -56,7 +57,10 @@ mySettings = ProgramSettings(
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    signalDuration=20,
+    wasnTopology='adhoc',
+    # wasnTopology='fully_connected',
+    #
+    signalDuration=5,
     baseSNR=5,
     # baseSNR=-90,
     #
@@ -72,7 +76,7 @@ mySettings = ProgramSettings(
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
-        SROsppm=[0, 0],
+        SROsppm=0,
         # SROsppm=[0, 75],
         # SROsppm=[0, 50],
         # compensateSROs=True,

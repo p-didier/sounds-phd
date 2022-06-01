@@ -176,6 +176,14 @@ def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plo
     numSensors = sigs.shape[-1]
     numNodes = len(np.unique(sensorToNodeTags))
 
+    # Check / adapt SROs object size
+    if len(SROsppm) != numNodes:
+        if len(SROsppm) == 1:
+            print(f'Applying the same SRO ({SROsppm} ppm) to all {numNodes} nodes.')
+            SROsppm = np.repeat(SROsppm[0], numNodes)
+        else:
+            raise ValueError(f'An incorrect number of SRO values was provided ({len(SROsppm)} for {numNodes} nodes).')
+
     # Apply STOs / SROs
     sigsOut       = np.zeros((numSamples, numSensors))
     timeVectorOut = np.zeros((numSamples, numNodes))
@@ -657,14 +665,5 @@ def generate_signals(settings: classes.ProgramSettings):
     if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
         conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
         raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(signals.sensorSignals)
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-    # stop = 1
 
     return signals, asc

@@ -28,11 +28,12 @@ sets = ASCProgramSettings(
     numScenarios=1,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
-    roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
+    # roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
+    roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
     minDistFromWalls = 0.2,
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=0,                # nr. of noise sources
-    numNodes=2,                       # nr. of nodes
+    numNodes=10,                       # nr. of nodes
     # numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
     # numSensorPerNode=[2,2],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
@@ -42,11 +43,12 @@ sets = ASCProgramSettings(
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     sensorSeparation=1,                 # separation between sensor in array (only used if numSensorPerNode > 1)
     revTime=0.0,                      # reverberation time [s]
-    # specialCase='allNodesInSamePosition'    # special cases 
-    topology='fully_connected',
+    # specialCase='allNodesInSamePosition'    # special cases
 )
 
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
+customASCname = 'testforTIDANSE'
+# customASCname = None
 plotit = 1  
 exportit = 1    # If True, export the ASC, settings, and figures.
 globalSeed = 12345
@@ -73,17 +75,20 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     rngGlobal = np.random.default_rng(globalSeed)
 
     # Export folder
-    Mks = '['
-    for ii in range(len(sets.numSensorPerNode)):
-        Mks += str(sets.numSensorPerNode[ii])
-        if ii < len(sets.numSensorPerNode) - 1:
-            Mks += '_'
-    Mks += ']'
-    expFolder = f"{basepath}/J{sets.numNodes}Mk{Mks}_Ns{sets.numSpeechSources}_"
-    if sets.numNoiseSources > 0:
-        expFolder += f'Nn{sets.numNoiseSources}'
+    if customASCname is None:
+        Mks = '['
+        for ii in range(len(sets.numSensorPerNode)):
+            Mks += str(sets.numSensorPerNode[ii])
+            if ii < len(sets.numSensorPerNode) - 1:
+                Mks += '_'
+        Mks += ']'
+        expFolder = f"{basepath}/J{sets.numNodes}Mk{Mks}_Ns{sets.numSpeechSources}_"
+        if sets.numNoiseSources > 0:
+            expFolder += f'Nn{sets.numNoiseSources}'
+        else:
+            expFolder += 'noiseless'
     else:
-        expFolder += 'noiseless'
+        expFolder = f'{basepath}/{customASCname}'
 
     if not os.path.isdir(expFolder):   # check if subfolder exists
         os.mkdir(expFolder)   # if not, make directory
