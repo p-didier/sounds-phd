@@ -1,5 +1,4 @@
 import sys, time
-from types import DynamicClassAttribute
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf

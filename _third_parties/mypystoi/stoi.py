@@ -1,7 +1,6 @@
 import numpy as np
 import warnings
 from . import utils
-import matplotlib.pyplot as plt
 
 # Constant definition
 FS = 10000                          # Sampling frequency
@@ -151,8 +150,6 @@ def stoi_any_fs(x, y, fs_sig, extended=False):
             Intelligibility of Speech Masked by Modulated Noise Maskers',
             IEEE Transactions on Audio, Speech and Language Processing, 2016.
     """
-
-    stop = 1
 
     if x.shape != y.shape:
         raise Exception('x and y should have the same length,' +

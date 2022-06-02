@@ -23,6 +23,7 @@ while PurePath(pathToRoot).name != rootFolder:
 if f'{pathToRoot}/_third_parties' not in sys.path:
     sys.path.append(f'{pathToRoot}/_third_parties')
 
+
 @dataclass
 class Metric:
     """Class for storing objective speech enhancement metrics"""
@@ -67,9 +68,7 @@ class DynamicMetric:
         self.timeStamps = np.zeros(nChunks)     # [s] true time stamps associated to each chunk 
 
 
-
-
-def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
+def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters=None, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
@@ -131,8 +130,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         fwSNRseg.afterLocal = np.mean(fwSNRseg_allFrames)
         fwSNRseg.diffLocal = fwSNRseg.afterLocal - fwSNRseg.before
     # Short-Time Objective Intelligibility (STOI)
-    myStoi.before = stoi_fcn(cleanSignal, noisySignal, fs)
-    myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs)
+    myStoi.before = stoi_fcn(cleanSignal, noisySignal, fs, extended=True)
+    myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs, extended=True)
     myStoi.diff = myStoi.after - myStoi.before
     if flagLocal:
         myStoi.afterLocal = stoi_fcn(cleanSignal, enhancedSignalLocal, fs)
@@ -154,37 +153,38 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
     # Compute dynamic metrics
-    dynamicMetricsFunctions = []    # list function objects to be used
-    if dynamic.dynamicSNR:
-        dynamicMetricsFunctions.append(get_snr)
-    if dynamic.dynamicfwSNRseg:
-        dynamicMetricsFunctions.append(get_fwsnrseg)
-    if dynamic.dynamicSTOI:
-        dynamicMetricsFunctions.append(stoi_fcn)
-    if dynamic.dynamicPESQ:
-        dynamicMetricsFunctions.append(pesq)
+    if dynamic is not None:
+        dynamicMetricsFunctions = []    # list function objects to be used
+        if dynamic.dynamicSNR:
+            dynamicMetricsFunctions.append(get_snr)
+        if dynamic.dynamicfwSNRseg:
+            dynamicMetricsFunctions.append(get_fwsnrseg)
+        if dynamic.dynamicSTOI:
+            dynamicMetricsFunctions.append(stoi_fcn)
+        if dynamic.dynamicPESQ:
+            dynamicMetricsFunctions.append(pesq)
 
-    dynMetrics = get_dynamic_metric(dynamicMetricsFunctions,
-                                    cleanSignal,
-                                    noisySignal,
-                                    enhancedSignal,
-                                    fs,
-                                    VAD,
-                                    dynamic,
-                                    gammafwSNRseg,
-                                    frameLen,
-                                    enhancedSignalLocal)
+        dynMetrics = get_dynamic_metric(dynamicMetricsFunctions,
+                                        cleanSignal,
+                                        noisySignal,
+                                        enhancedSignal,
+                                        fs,
+                                        VAD,
+                                        dynamic,
+                                        gammafwSNRseg,
+                                        frameLen,
+                                        enhancedSignalLocal)
 
-    # Store dynamic metrics
-    for key, value in dynMetrics.items():
-        if key == 'get_snr':
-            snr.import_dynamic_metric(value)
-        elif key == 'get_fwsnrseg':
-            fwSNRseg.import_dynamic_metric(value)
-        elif 'stoi' in key:
-            myStoi.import_dynamic_metric(value)
-        elif 'pesq' in key:
-            myPesq.import_dynamic_metric(value)
+        # Store dynamic metrics
+        for key, value in dynMetrics.items():
+            if key == 'get_snr':
+                snr.import_dynamic_metric(value)
+            elif key == 'get_fwsnrseg':
+                fwSNRseg.import_dynamic_metric(value)
+            elif 'stoi' in key:
+                myStoi.import_dynamic_metric(value)
+            elif 'pesq' in key:
+                myPesq.import_dynamic_metric(value)
 
     return snr, fwSNRseg, myStoi, myPesq
 

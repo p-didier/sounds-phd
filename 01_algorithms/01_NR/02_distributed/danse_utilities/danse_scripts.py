@@ -1,5 +1,4 @@
 
-from xml.dom.minidom import NamedNodeMap
 import numpy as np
 import time, datetime
 from . import classes
