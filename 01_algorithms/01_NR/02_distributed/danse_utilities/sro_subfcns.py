@@ -1,29 +1,30 @@
-from audioop import avg
-from statistics import mean
+
 import numpy as np
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters
 
 
-def residual_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs'):
-    """Estimates residual SRO using the residuals phase technique.
+def filtshift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
+    """Estimates residual SRO using the filter shift technique.
     
     Parameters
     ----------
     wPos : [N x 1] np.ndarray (complex)
-        A posteriori (iteration `i + 1`) filter for every frequency bin
+        A posteriori (iteration `i + 1`) value for every frequency bin
     wPri : [N x 1] np.ndarray (complex)
-        A priori (iteration `i`) filter for every frequency bin
+        A priori (iteration `i`) value for every frequency bin
     avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
-        Exponentially averaged filter complex conjugate product
+        Exponentially averaged complex conjugate product of `wPos` and `wPri`
     Ns : int
         Number of new samples at each new STFT frame, counting overlap (`Ns=N*(1-O)`, where `O` is the amount of overlap [/100%])
     ld : int
         Number of STFT frames separating `wPos` from `wPri`.
     alpha : float
-        Exponential averaging constant.
+        Exponential averaging constant (DWACD method: .95).
     method : str
         Method to use to retrieve SRO once the exponentially averaged product has been computed.
+    flagFirstSROEstimate : bool
+        If True, this is the first SRO estimation round --> do not apply exponential averaging.
 
     Returns
     -------
@@ -43,8 +44,10 @@ def residual_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
         -1
     )
     # Update the average coherence product
-    alpha = 0.99
-    avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod  
+    if flagFirstSROEstimate:
+        avg_res_prod = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
+    else:
+        avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod  
 
     # Estimate SRO
     if method == 'gs':
@@ -66,9 +69,10 @@ def residual_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
 
     elif method == 'ls':
         # --------- Least-squares solution over frequency bins
-        kappa = np.arange(1, len(wPri))    # freq. bins indices
-        b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
-        sro_est = - b.T @ np.angle(avg_res_prod[(len(avg_res_prod) // 2):]) / (b.T @ b)
+        kappa = np.arange(0, len(wPri))    # freq. bins indices
+        b = 2 * kappa * (ld * Ns) / len(kappa)
+        # b = np.pi * kappa * (ld * Ns) / len(kappa)
+        sro_est = - b.T @ np.angle(avg_res_prod[-len(kappa):]) / (b.T @ b)
 
     return sro_est, avg_res_prod
 
@@ -190,7 +194,6 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     # settling_time = paramsDWACD.settling_time
 
     # Useful quantities
-    Nf = sigSTFT.shape[0]      # number of STFT bins
     Nl_segShift = seg_shift // frame_shift_welch        # number of STFT frames per segment shift 
     Nl_segLen   = seg_len // frame_shift_welch          # number of STFT frames per segment 
     Nl_cohDelay = temp_dist // frame_shift_welch        # number of STFT frames corresponding to the time 

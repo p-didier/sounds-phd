@@ -42,6 +42,7 @@ class FiltShiftSROEstimationParameters():
         Exponential averaging constant.
     nFiltUpdatePerSeg : int 
         Number of DANSE filter updates per SRO estimation segment
+    TODO: ADD `estEvery`
     startAfterNupdates : int 
         Minimum number of DANSE filter updates before first SRO estimation
 
@@ -63,9 +64,13 @@ class FiltShiftSROEstimationParameters():
         IEEE/ACM Transactions on Audio, Speech, and Language Processing 25.3
         (2017): 674-686.
     """
-    alpha : float = .95
-    nFiltUpdatePerSeg : int = 1
-    startAfterNupdates : int = 10
+    alpha : float = .95                 
+    nFiltUpdatePerSeg : int = 1         # segment length: use phase angle between values
+                                        # spaced by `nFiltUpdatePerSeg` signal frames
+                                        # to estimate the SRO
+    estEvery : int = 1                  # estimate SRO every `estEvery` signal frames
+    startAfterNupdates : int = 10       # only start estimating the SRO after `startAfterNupdates`
+                                        # signal frames
     estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
                                         # "mean" (similar to Online WACD implementation [2]),
                                         # "ls" (least-squares estimate over frequency bins [3])

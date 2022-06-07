@@ -276,6 +276,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
         avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize), dtype=complex))
         avgProdResiduals.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
+        # avgProdResiduals.append(0+0j)   # <-- are actually initialized with arrays at the first SRO estimation iteration
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -307,9 +308,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             // settings.stftEffectiveFrameLen
     # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
     filtShiftSROupdateIndices = np.arange(start=settings.asynchronicity.filtShiftsMethod.startAfterNupdates +\
-                            settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg,
+                            settings.asynchronicity.filtShiftsMethod.estEvery,
                             stop=numIterations,
-                            step=settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg)
+                            step=settings.asynchronicity.filtShiftsMethod.estEvery)
     # DWACD segments (i.e., SRO estimate update) counters (for each node)
     dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
@@ -506,19 +507,52 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                if settings.asynchronicity.estimateSROs == 'Residuals' :
+                if settings.asynchronicity.estimateSROs == 'FiltShift' :
+                    
+                    ld = settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg
 
                     if i[k] in filtShiftSROupdateIndices:
 
+                        flagFirstSROEstimate = False
+                        if i[k] == np.amin(filtShiftSROupdateIndices):
+                            flagFirstSROEstimate = True     # let `filtshift_sro_estimation()` know that this is the 1st SRO estimation round
+
                         # Residuals method
                         for q in range(len(neighbourNodes[k])):
-                            sroEst, apr = subs.residual_sro_estimation(
-                                                wPos=wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q],         # a posteriori estimate
-                                                wPri=wTilde[k][:, i[k] + 1 - settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg, yLocalCurr.shape[-1] + q],             # a priori estimate
+
+                            # Actual filter shift method
+                            # $g_{kq}^{i+1}$
+                            residualPosteriori = (wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q] 
+                                                    / np.abs(wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]))
+                            # $g_{kq}^{i+1-ld}$
+                            residualPriori = (wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q] 
+                                                / np.abs(wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]))
+
+                            # Coherence drift method
+                            # # $y_{k1}^{i} * z_q^{i,\ast} / \sqrt{|y_{k1}^{i}|^2 |z_{q}^{i}|^2}$
+                            # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q])
+                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k], 0]) ** 2) 
+                            #                         * (np.abs(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]) ** 2)))
+                            # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast} / \sqrt{|y_{k1}^{i-ld}|^2 |z_{q}^{i-ld}|^2}$
+                            # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q])
+                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k] - ld, 0]) ** 2) 
+                            #                         * (np.abs(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]) ** 2)))
+
+                            # PSD drift
+                            # # $y_{k1}^{i} * z_q^{i,\ast}$
+                            # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]))
+                            # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast}$
+                            # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]))
+
+                            sroEst, apr = subs.filtshift_sro_estimation(
+                                                wPos=residualPosteriori,         # a posteriori estimate
+                                                wPri=residualPriori,             # a priori estimate
                                                 avg_res_prod=avgProdResiduals[k][:, q],
                                                 Ns=Ns,
-                                                ld=settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg,
+                                                ld=ld,
                                                 method=settings.asynchronicity.filtShiftsMethod.estimationMethod,
+                                                alpha=settings.asynchronicity.filtShiftsMethod.alpha,
+                                                flagFirstSROEstimate=flagFirstSROEstimate,
                                                 )
                         
                             SROsEstimates[k][q] = sroEst
@@ -544,8 +578,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     activity_ref_sig=oVADframes[:i[k]+1],
                                     paramsDWACD=settings.asynchronicity.dwacd,
                                     seg_idx=dwacdSegIdx[k],
-                                    # tau_sro=tauSROsEstimates[k][q],  # previous time shift estimate
-                                    tau_sro=0,  # previous time shift estimate
                                     sro_est=SROsEstimates[k][q],     # previous SRO estimate
                                     avg_coh_prod=avgCohProdDWACD[k][q, :]
                             )
@@ -605,17 +637,24 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # for k in range(len(SROresidualThroughTime)):
-    #     ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
-    # ax.grid()
-    # ax.set_ylabel('SRO [ppm]')
-    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
-    # plt.legend()
-    # plt.tight_layout()	
-    # plt.show()
+    import matplotlib.pyplot as plt
+    fig = plt.figure(figsize=(6,3))
+    ax = fig.add_subplot(211)
+    ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
+    ax.invert_yaxis()
+    ax.set_aspect('auto')
+    ax.set_ylabel('Freq. bin $\kappa$')
+    ax = fig.add_subplot(212)
+    for k in range(len(SROresidualThroughTime)):
+        ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
+    ax.grid()
+    ax.set_ylabel('SRO [ppm]')
+    ax.set_xlabel('DANSE iteration $i$')
+    ax.set_xlim([0, len(SROresidualThroughTime[k])])
+    plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
+    plt.legend()
+    plt.tight_layout()	
+    plt.show()
 
     stop = 1
 

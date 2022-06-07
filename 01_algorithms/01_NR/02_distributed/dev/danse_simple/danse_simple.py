@@ -307,7 +307,7 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
                 pass    # do not update `w[k]`
             
             if nFilterUpdates[k] >= 10:
-                sroresidual[k][l,:] = subs.residual_sro_estimation(w[k], wapriori, asc.numSensorPerNode[k], 1024, 512)
+                sroresidual[k][l,:] = subs.filtshift_sro_estimation(w[k], wapriori, asc.numSensorPerNode[k], 1024, 512)
 
                 # # TMP TMP TMP TMP TMP TMP TMP
                 # # TMP TMP TMP TMP TMP TMP TMP
