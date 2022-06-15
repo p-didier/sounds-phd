@@ -217,8 +217,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     wTildeExternalTarget = []                       # target external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` 
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
-    RnntildePrev = []                               # autocorrelation matrix when VAD=0 at previous Rnn update (for SRO estimation)
-    RyytildePrev = []                               # autocorrelation matrix when VAD=1 at previous Ryy update (for SRO estimation)
     yyH = []                                        # instantaneous autocorrelation product
     yyHprev = []                                    # instantaneous autocorrelation product at previous iteration
     ryd = []                                        # cross-correlation between observations and estimations
@@ -264,8 +262,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
         Ryytilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # speech + noise
-        RnntildePrev.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                # noise only (previous update)
-        RyytildePrev.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                # speech + noise (previous update)
         yyH.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))
         yyHprev.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
@@ -325,9 +321,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             step=settings.asynchronicity.filtShiftsMethod.estEvery)
     # DWACD segments (i.e., SRO estimate update) counters (for each node)
     dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
-    # Hard-coded integers / OTHER STUFF TODO: clean that up
-    prevRyyUpdateIndex = np.full(asc.numNodes, fill_value=-1)
-    prevRnnUpdateIndex = np.full(asc.numNodes, fill_value=-1)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
@@ -478,22 +471,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                # Save previous values (for SRO estimation)
-                ldRyy = i[k] - prevRyyUpdateIndex[k]
-                ldRnn = i[k] - prevRnnUpdateIndex[k]
-                if oVADframes[i[k]]:
-                    RyytildePrev[k] = Ryytilde[k]
-                    prevRyyUpdateIndex[k] = i[k]
-                else:
-                    RnntildePrev[k] = Rnntilde[k]
-                    prevRnnUpdateIndex[k] = i[k]
-                    
-                yyHprev[k] = copy.copy(yyH[k])
+                yyHprev[k] = copy.copy(yyH[k])  # save previous instantaneous outer product
                 Ryytilde[k], Rnntilde[k], yyH[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                                 Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
                 if settings.computeLocalEstimate:
                     # Local observations only
-                    Ryylocal[k], Rnnlocal[k], yyHLocal = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
+                    Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
                                                     Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
                 
@@ -550,48 +533,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         # Residuals method
                         for q in range(len(neighbourNodes[k])):
 
-                            # Actual filter shift method
-                            # # $g_{kq}^{i+1}$ (normalized)
-                            # residualPosteriori = (wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q] 
-                            #                         / np.abs(wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]))
-                            # # $g_{kq}^{i+1-ld}$ (normalized)
-                            # residualPriori = (wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q] 
-                            #                     / np.abs(wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]))
-
-                            # # $g_{kq}^{i+1}$
-                            # residualPosteriori = wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]
-                            # # $g_{kq}^{i+1-ld}$
-                            # residualPriori = wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]
-
-                            # # Coherence drift method
-                            # # $y_{k1}^{i} * z_q^{i,\ast} / \sqrt{|y_{k1}^{i}|^2 |z_{q}^{i}|^2}$
-                            # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q])
-                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k], 0]) ** 2) 
-                            #                         * (np.abs(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]) ** 2)))
-                            # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast} / \sqrt{|y_{k1}^{i-ld}|^2 |z_{q}^{i-ld}|^2}$
-                            # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q])
-                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k] - ld, 0]) ** 2) 
-                            #                         * (np.abs(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]) ** 2)))
-                            # # PSD drift
-                            # # $y_{k1}^{i} * z_q^{i,\ast}$
-                            # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]))
-                            # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast}$
-                            # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]))
-
-                            # sroEst, apr = subs.filtshift_sro_estimation(
-                            #                     wPos=residualPosteriori,         # a posteriori estimate
-                            #                     wPri=residualPriori,     # a priori estimate
-                            #                     avg_res_prod=avgProdResiduals[k][:, q],
-                            #                     Ns=Ns,
-                            #                     ld=ld,
-                            #                     method=settings.asynchronicity.filtShiftsMethod.estimationMethod,
-                            #                     alpha=settings.asynchronicity.filtShiftsMethod.alpha,
-                            #                     flagFirstSROEstimate=flagFirstSROEstimate,
-                            # )
-                            # SROsEstimates[k][q] = sroEst  # average
-                            # avgProdResiduals[k][:, q] = apr
-
-
                             idxq = yLocalCurr.shape[-1] + q
                             residualPosteriori = (yyH[k][:, 0, idxq]
                                                     / np.sqrt(yyH[k][:, 0, 0] * yyH[k][:, idxq, idxq]))
@@ -610,11 +551,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         
                             SROsEstimates[k][q] = sroEst  # average
                             avgProdResiduals[k][:, q] = apr
-
-                    # resSROneighbors = residualSROs[k][asc.numSensorPerNode[k]:, i[k]]
-                    # tmp = numFreqLines * resSROneighbors / (1 + resSROneighbors)  # in Taewoong's slides: $N \Delta\hat{\varepsilon}_k / (1 + \Delta\hat{\varepsilon}_k)$
-                    # a[k] += tmp
-                    # SROsEstimates[k] += a[k]
 
                     SROresidualThroughTime[k][i[k]:] = SROsEstimates[k][0]
                         
