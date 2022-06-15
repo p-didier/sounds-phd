@@ -49,7 +49,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=20,
+    signalDuration=30,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -85,13 +85,13 @@ mySettings = ProgramSettings(
             nFiltUpdatePerSeg=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
             startAfterNupdates=50,
-            alpha=0
+            # alpha=0
         )
     ),
     # bypassFilterUpdates=True,
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
-    # expAvg50PercentTime=.1,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
+    # expAvg50PercentTime=1,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)

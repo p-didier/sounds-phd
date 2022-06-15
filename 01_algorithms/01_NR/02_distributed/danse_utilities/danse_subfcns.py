@@ -1128,6 +1128,8 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
         New Ryy matrices (for each time frame /or/ each frequency line).
     Rnn : [N x M x M] np.ndarray (real or complex)
         New Rnn matrices (for each time frame /or/ each frequency line).
+    yyH : [N x M x M] np.ndarray (real or complex)
+        Instantaneous correlation outer product.
     """
 
     # yyH = np.zeros((y.shape[0], y.shape[1], y.shape[1]))
@@ -1135,9 +1137,10 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
     #     yyH[kappa, :, :] = y[kappa, :] @ y[kappa, :].conj().T
 
     yyH = np.einsum('ij,ik->ijk', y, y.conj())
+
     if vad:
         Ryy = beta * Ryy + (1 - beta) * yyH  # update signal + noise matrix
     else:     
         Rnn = beta * Rnn + (1 - beta) * yyH  # update noise-only matrix
 
-    return Ryy, Rnn
+    return Ryy, Rnn, yyH
