@@ -40,6 +40,7 @@ mySettings = ProgramSettings(
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
     #
+    # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
@@ -48,9 +49,10 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=10,
+    signalDuration=20,
     baseSNR=5,
-    # baseSNR=-90,
+    # baseSNR=90,
+    # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
     stftWinLength=2**10,
@@ -80,22 +82,22 @@ mySettings = ProgramSettings(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
-            nFiltUpdatePerSeg=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
+            nFiltUpdatePerSeg=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
             startAfterNupdates=50,
-            # alpha=0
+            alpha=0
         )
     ),
     # bypassFilterUpdates=True,
     #
-    # expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
-    expAvg50PercentTime=.1,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
+    expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
+    # expAvg50PercentTime=.1,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
-    performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
-    # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
+    # performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
+    performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node

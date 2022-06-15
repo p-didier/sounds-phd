@@ -329,11 +329,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     b = []
     SROresidualThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
+    RyyDist = []
+    RnnDist = []
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
         a.append(np.zeros(len(neighbourNodes[k])))
         b.append(np.zeros(len(neighbourNodes[k])))
         SROresidualThroughTime.append(np.zeros(numIterations))
+        #
+        RyyDist.append(np.zeros(numIterations))
+        RnnDist.append(np.zeros(numIterations))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -457,7 +462,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Apply phase shift factors
                     ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
-
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                                 Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
@@ -521,28 +525,38 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         for q in range(len(neighbourNodes[k])):
 
                             # Actual filter shift method
-                            # $g_{kq}^{i+1}$
-                            residualPosteriori = (wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q] 
-                                                    / np.abs(wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]))
-                            # $g_{kq}^{i+1-ld}$
-                            residualPriori = (wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q] 
-                                                / np.abs(wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]))
+                            # # $g_{kq}^{i+1}$ (normalized)
+                            # residualPosteriori = (wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q] 
+                            #                         / np.abs(wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]))
+                            # # $g_{kq}^{i+1-ld}$ (normalized)
+                            # residualPriori = (wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q] 
+                            #                     / np.abs(wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]))
+
+                            # # $g_{kq}^{i+1}$
+                            # residualPosteriori = wTilde[k][:, i[k] + 1, yLocalCurr.shape[-1] + q]
+                            # # $g_{kq}^{i+1-ld}$
+                            # residualPriori = wTilde[k][:, i[k] + 1 - ld, yLocalCurr.shape[-1] + q]
 
                             # Coherence drift method
-                            # # $y_{k1}^{i} * z_q^{i,\ast} / \sqrt{|y_{k1}^{i}|^2 |z_{q}^{i}|^2}$
-                            # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q])
-                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k], 0]) ** 2) 
-                            #                         * (np.abs(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]) ** 2)))
-                            # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast} / \sqrt{|y_{k1}^{i-ld}|^2 |z_{q}^{i-ld}|^2}$
-                            # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q])
-                            #                         / np.sqrt((np.abs(ytildeHat[k][:, i[k] - ld, 0]) ** 2) 
-                            #                         * (np.abs(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]) ** 2)))
+                            # $y_{k1}^{i} * z_q^{i,\ast} / \sqrt{|y_{k1}^{i}|^2 |z_{q}^{i}|^2}$
+                            residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q])
+                                                    / np.sqrt((np.abs(ytildeHat[k][:, i[k], 0]) ** 2) 
+                                                    * (np.abs(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]) ** 2)))
+                            # $y_{k1}^{i-ld} * z_q^{i-ld,\ast} / \sqrt{|y_{k1}^{i-ld}|^2 |z_{q}^{i-ld}|^2}$
+                            residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q])
+                                                    / np.sqrt((np.abs(ytildeHat[k][:, i[k] - ld, 0]) ** 2) 
+                                                    * (np.abs(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]) ** 2)))
 
-                            # PSD drift
+                            # # PSD drift
                             # # $y_{k1}^{i} * z_q^{i,\ast}$
                             # residualPosteriori = (ytildeHat[k][:, i[k], 0] * np.conj(ytildeHat[k][:, i[k], yLocalCurr.shape[-1] + q]))
                             # # $y_{k1}^{i-ld} * z_q^{i-ld,\ast}$
                             # residualPriori = (ytildeHat[k][:, i[k] - ld, 0] * np.conj(ytildeHat[k][:, i[k] - ld, yLocalCurr.shape[-1] + q]))
+
+                            # # $g_{kq}^{i+1}$ (normalized)
+                            # residualPosteriori = Ryytilde[k][:, 0, yLocalCurr.shape[-1] + q]
+                            # # $g_{kq}^{i+1-ld}$ (normalized)
+                            # residualPriori = Ryytilde_prev[:, 0, yLocalCurr.shape[-1] + q]
 
                             sroEst, apr = subs.filtshift_sro_estimation(
                                                 wPos=residualPosteriori,         # a posteriori estimate
