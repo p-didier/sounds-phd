@@ -74,6 +74,8 @@ class FiltShiftSROEstimationParameters():
     estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
                                         # "mean" (similar to Online WACD implementation [2]),
                                         # "ls" (least-squares estimate over frequency bins [3])
+    alphaEps : float = .01              # residual SRO incrementation factor:
+                                        # $\hat{\varepsilon}^i = \hat{\varepsilon}^{i-1} + `alphaEps` * \Delta\varepsilon^i$
 
 @dataclass
 class DWACDParameters():

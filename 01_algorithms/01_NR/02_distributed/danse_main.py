@@ -67,9 +67,9 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         # SROsppm=0,
-        SROsppm=[0, 50],
+        # SROsppm=[0, 50],
         # SROsppm=[0, 75],
-        # SROsppm=[0, 100],
+        SROsppm=[0, 100],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
