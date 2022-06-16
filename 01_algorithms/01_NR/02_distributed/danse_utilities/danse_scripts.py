@@ -227,6 +227,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
+    a = []
     tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
     SROsEstimatesAccumulated = []
@@ -274,6 +275,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
         #
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
+        a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
@@ -331,20 +333,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     # Extra variables -- TEMPORARY: TODO -- to be treated and integrated more neatly
     zFull = []
-    a = []
-    b = []
     SROresidualThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
-    RyyDist = []
-    RnnDist = []
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
-        a.append(np.zeros(len(neighbourNodes[k])))
-        b.append(np.zeros(len(neighbourNodes[k])))
         SROresidualThroughTime.append(np.zeros(numIterations))
-        #
-        RyyDist.append(np.zeros(numIterations))
-        RnnDist.append(np.zeros(numIterations))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -565,6 +558,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     paramsDWACD=settings.asynchronicity.dwacd,
                                     seg_idx=dwacdSegIdx[k],
                                     sro_est=SROsEstimates[k][q],     # previous SRO estimate
+                                    # sro_est=0,     # previous SRO estimate
                                     avg_coh_prod=avgCohProdDWACD[k][q, :]
                             )
                             SROsEstimates[k][q] = sroEst
@@ -584,9 +578,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
                         # Increment phase shift factor recursively
+                        # a[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns
+                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= a[k][yLocalCurr.shape[-1] + q]
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns
                         #                               ↑↑↑↑ `yLocalCurr.shape[-1] + q` because first `yLocalCurr.shape[-1]` indices are linked to the local sensors
-
                     if k == 0:
                         phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
 
