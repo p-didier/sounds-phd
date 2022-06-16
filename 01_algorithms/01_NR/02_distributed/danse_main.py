@@ -67,14 +67,14 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         # SROsppm=0,
-        # SROsppm=[0, 50],
+        SROsppm=[0, 50],
         # SROsppm=[0, 75],
-        SROsppm=[0, 100],
+        # SROsppm=[0, 100],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
-        # estimateSROs='FiltShift',   # <-- Filter shift method (inspired by Thüne & Enzner + Nokia work)
-        estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
+        estimateSROs='FiltShift',   # <-- Filter shift method (inspired by Thüne & Enzner + Nokia work)
+        # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
         dwacd=DWACDParameters(
             seg_shift=2**11,
         ),
@@ -84,7 +84,7 @@ mySettings = ProgramSettings(
             # estimationMethod='ls',      # least-squares
             nFiltUpdatePerSeg=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
-            startAfterNupdates=50,
+            startAfterNupdates=11,
             # alpha=0
         )
     ),

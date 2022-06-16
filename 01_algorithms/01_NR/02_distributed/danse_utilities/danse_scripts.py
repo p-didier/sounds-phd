@@ -443,8 +443,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-                # Save uncompensated \tilde{y}
-                ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
                 # Compensate SROs
                 if settings.asynchronicity.compensateSROs:
                     # Account for buffer flags
@@ -458,16 +456,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             skipUpdate = True
                     # Complete phase shift factors
                     phaseShiftFactors[k] += extraPhaseShiftFactor
-                    # Apply phase shift factors
-                    ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
+
+                # Compute SRO-uncompensated outer product y*y^H
+                yyH[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHat[k][:, i[k], :], ytildeHat[k][:, i[k], :].conj())
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
-                                                Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
+                Ryytilde[k], Rnntilde[k] = subs.spatial_covariance_matrix_update(yyH[k][i[k], :, :, :],
+                                                Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]],
+                                                frameSize, phaseShiftFactors[k])
                 if settings.computeLocalEstimate:
                     # Local observations only
-                    Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
-                                                    Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
+                    Ryylocal[k], Rnnlocal[k] = subs.spatial_covariance_matrix_update(yyH[k][i[k], :, :dimYLocal[k], :dimYLocal[k]],
+                                                    Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]], frameSize)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
                 
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
