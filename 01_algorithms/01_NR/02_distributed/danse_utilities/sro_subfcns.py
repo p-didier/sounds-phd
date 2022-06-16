@@ -36,7 +36,8 @@ def filtshift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, N
     """
 
     # "Residuals" product
-    res_prod = wPri * wPos.conj()
+    # res_prod = wPri * wPos.conj()
+    res_prod = wPos * wPri.conj()
     # Prep for ISTFT (negative frequency bins too)
     res_prod = np.concatenate(
         [res_prod[:-1],
