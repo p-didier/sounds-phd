@@ -1106,13 +1106,13 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomai
     return zBuffer
 
 
-def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
+def spatial_covariance_matrix_update(yyH, Ryy, Rnn, beta, vad, frameSize=0, phaseShiftFactors=0):
     """Helper function: performs the spatial covariance matrices updates.
     
     Parameters
     ----------
-    y : [N x M] np.ndarray (real or complex)
-        Current input data chunk (if complex: in the frequency domain).
+    yyH : [N x M x M] np.ndarray (real or complex)
+        Instantaneous correlation outer product.
     Ryy : [N x M x M] np.ndarray (real or complex)
         Previous Ryy matrices (for each time frame /or/ each frequency line).
     Rnn : [N x M x M] np.ndarray (real or complex)
@@ -1128,19 +1128,15 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
         New Ryy matrices (for each time frame /or/ each frequency line).
     Rnn : [N x M x M] np.ndarray (real or complex)
         New Rnn matrices (for each time frame /or/ each frequency line).
-    yyH : [N x M x M] np.ndarray (real or complex)
-        Instantaneous correlation outer product.
     """
 
-    # yyH = np.zeros((y.shape[0], y.shape[1], y.shape[1]))
-    # for kappa in range(y.shape[0]):
-    #     yyH[kappa, :, :] = y[kappa, :] @ y[kappa, :].conj().T
-
-    yyH = np.einsum('ij,ik->ijk', y, y.conj())
+    # Apply SRO compensation
+    phi = np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(yyH.shape[0]), phaseShiftFactors))
+    phaseShiftMatrix = np.einsum('ij,ik->ijk', phi, phi.conj())
 
     if vad:
-        Ryy = beta * Ryy + (1 - beta) * yyH  # update signal + noise matrix
+        Ryy = beta * Ryy + (1 - beta) * yyH * phaseShiftMatrix  # update signal + noise matrix
     else:     
-        Rnn = beta * Rnn + (1 - beta) * yyH  # update noise-only matrix
+        Rnn = beta * Rnn + (1 - beta) * yyH * phaseShiftMatrix  # update noise-only matrix
 
-    return Ryy, Rnn, yyH
+    return Ryy, Rnn

@@ -36,8 +36,8 @@ def filtshift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, N
     """
 
     # "Residuals" product
-    # res_prod = wPri * wPos.conj()
-    res_prod = wPos * wPri.conj()
+    res_prod = wPri * wPos.conj()
+    # res_prod = wPos * wPri.conj()
     # Prep for ISTFT (negative frequency bins too)
     res_prod = np.concatenate(
         [res_prod[:-1],
@@ -149,8 +149,6 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
             PSD of the the i-th signal and the j-th signal
         """
         shifts = sro * frame_shift_welch * np.arange(stft_seg_j.shape[-1])
-        # shifts = np.zeros_like(shifts)  # TMP <-- OVERRIDE SHIFT EFFECT
-        # print(shifts)
         stft_seg_j *= \
             np.exp(1j * 2 * np.pi / fft_size
                    * np.arange(fft_size // 2 + 1)[None] * shifts[:, None]).T
