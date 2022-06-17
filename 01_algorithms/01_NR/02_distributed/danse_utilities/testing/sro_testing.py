@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 import sys, time
 from pathlib import Path, PurePath
 
+from matplotlib.pyplot import plot
+
 import danse_main
 from itertools import combinations
 from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, DWACDParameters
@@ -37,6 +39,7 @@ class DanseTestingParameters():
     broadcastLength: int = 8                # length of broadcast chunk [samples]
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
     broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
+    performGEVD : bool = True               # if True, perform GEVD, else, regular DANSE
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()
@@ -143,7 +146,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     plotAcousticScenario=False,
                     VADwinLength=40e-3,
                     VADenergyFactor=4000,
-                    performGEVD=1,
+                    performGEVD=danseParams.performGEVD,
                     #
                     danseUpdating=danseParams.nodeUpdating,
                     broadcastDomain=danseParams.broadcastDomain,
@@ -156,6 +159,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                         SROsppm=sros[ii][jj],
                         compensateSROs=danseParams.asynchronicity.compensateSROs,
                         estimateSROs=danseParams.asynchronicity.estimateSROs,
+                        plotResult=danseParams.asynchronicity.plotResult
                     ),
                     )
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path

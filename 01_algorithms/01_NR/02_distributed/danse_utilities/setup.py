@@ -49,7 +49,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal = launch_danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, sroData = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -63,6 +63,7 @@ def run_experiment(settings: classes.ProgramSettings):
     results.signals = mySignals
     results.enhancementEval = enhancementEval
     results.acousticScenario = asc
+    results.sroData = sroData
 
     return results
 
@@ -412,6 +413,8 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEstLocal : [Nt x Nn] np.ndarray of floats
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `desiredSigEstLocal` is output as an all-zeros array.
+    sroData : danse_subfcns.SROdata object
+        Data on SRO estimation / compensation (see danse_subfcns.sro_subfcns module for details).
     """
     # Prepare signals for Fourier transforms
     # -- Zero-padding and signals length adaptation to ensure correct FFT/IFFT operation.
@@ -423,7 +426,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
+        desiredSigEst, desiredSigEstLocal, sroData = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -431,7 +434,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal
+    return desiredSigEst, desiredSigEstLocal, sroData
 
 
 def whiten(sig, vad=[]):

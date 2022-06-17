@@ -45,8 +45,9 @@ resultsBaseFolder = [f'{Path(__file__).parent}/automated/{ii}' for ii in \
     #
     #    '20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/anechoic_nocomp',
     #    '20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/anechoic_comp',
-       '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/nocomp',
-       '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/comp',
+        # '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/nocomp',
+        # '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/comp',
+        '20220617_cohDriftSROestcomp/noGEVD/J2Mk[1_1]_Ns1_Nn1',
     ]]
 givenFormats = ['C0o-','C1o:','C2o--']
 givenLegend = ['No compensation',
@@ -60,6 +61,7 @@ EXPORTPATH = f'{Path(__file__).parent}/automated/20220518_SROestimation_withDWAC
 # TYPEMETRIC = 'improvement'
 TYPEMETRIC = 'afterEnhancement'
 SINGLENODEPLOT = True
+# SINGLENODEPLOT = False
 
 # SAVEFIGURES = True
 SAVEFIGURES = False

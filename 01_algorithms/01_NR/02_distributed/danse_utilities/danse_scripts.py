@@ -9,11 +9,11 @@ import copy
 
 """
 References:
- - [1]: Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific 
+- [1]: Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific 
         signal estimation in fully connected sensor networks—Part I: 
         Sequential node updating." IEEE Transactions on Signal Processing 
         58.10 (2010): 5277-5291.
- - [2]: Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific 
+- [2]: Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific 
         signal estimation in fully connected sensor networks—Part II: 
         Simultaneous and Asynchronous Node Updating." IEEE Transactions on 
         Signal Processing 58.10 (2010): 5292-5305.
@@ -192,6 +192,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     dLocal : [Nt x Nn] np.ndarray of floats
         Time-domain representation of the desired signal at each of the Nn nodes -- using only local observations (not data coming from neighbors).
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
+    sroData : danse_subfcns.SROdata object
+        Data on SRO estimation / compensation (see danse_subfcns.sro_subfcns module for details)
     """
 
     # Hard-coded parameters
@@ -336,10 +338,12 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Extra variables -- TEMPORARY: TODO -- to be treated and integrated more neatly
     zFull = []
     SROresidualThroughTime = []
+    SROestimateThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
     for k in range(asc.numNodes):
         zFull.append(np.empty((0,)))
         SROresidualThroughTime.append(np.zeros(numIterations))
+        SROestimateThroughTime.append(np.zeros(numIterations))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -445,7 +449,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-                # Save uncompensated \tilde{y}
+                # Save uncompensated \tilde{y} (for DWACD-based SRO estimation)
                 ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
                 # Compensate SROs
                 if settings.asynchronicity.compensateSROs:
@@ -566,8 +570,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             SROsEstimates[k][q] = sroEst
                             avgCohProdDWACD[k][q, :] = acp
 
-                        SROresidualThroughTime[k][i[k]:] = SROsEstimates[k][0]
-
                         dwacdSegIdx[k] += 1
 
                 elif settings.asynchronicity.estimateSROs == 'Oracle':
@@ -582,6 +584,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         if settings.asynchronicity.estimateSROs == 'CohDrift':
                             # Increment estimate using SRO residual
                             SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
+                        # Save estimate evolution for later plotting
+                        SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
                         # Increment phase shift factor recursively
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid direclty for oracle SRO ``estimation''
                     if k == 0:
@@ -615,29 +619,36 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     if (dLocal == 0).all():
         dLocal = np.array([])
 
+    # Prep SRO data for export
+    sroData = classes.SROdata(estMethod=settings.asynchronicity.estimateSROs,
+                            compensation=settings.asynchronicity.compensateSROs,
+                            residuals=SROresidualThroughTime,
+                            estimate=SROestimateThroughTime,
+                            groundTruth=settings.asynchronicity.SROsppm / 1e6)
+
     # Profiling
     profiler.stop()
     profiler.print()
 
-    import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(6,3))
-    ax = fig.add_subplot(211)
-    ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
-    ax.invert_yaxis()
-    ax.set_aspect('auto')
-    ax.set_ylabel('Freq. bin $\kappa$')
-    ax = fig.add_subplot(212)
-    for k in range(len(SROresidualThroughTime)):
-        ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
-    ax.grid()
-    ax.set_ylabel('SRO [ppm]')
-    ax.set_xlabel('DANSE iteration $i$')
-    ax.set_xlim([0, len(SROresidualThroughTime[k])])
-    plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
-    plt.legend()
-    plt.tight_layout()	
-    plt.show()
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(6,3))
+    # ax = fig.add_subplot(211)
+    # ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
+    # ax.invert_yaxis()
+    # ax.set_aspect('auto')
+    # ax.set_ylabel('Freq. bin $\kappa$')
+    # ax = fig.add_subplot(212)
+    # for k in range(len(SROresidualThroughTime)):
+    #     ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
+    # ax.grid()
+    # ax.set_ylabel('SRO [ppm]')
+    # ax.set_xlabel('DANSE iteration $i$')
+    # ax.set_xlim([0, len(SROresidualThroughTime[k])])
+    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
+    # plt.legend()
+    # plt.tight_layout()	
+    # plt.show()
 
-    stop = 1
+    # stop = 1
 
-    return d, dLocal
+    return d, dLocal, sroData

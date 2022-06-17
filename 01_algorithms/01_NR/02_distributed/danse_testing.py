@@ -1,6 +1,8 @@
 """Main script for testing implementations of DANSE algorithm."""
 
 import sys
+
+from sqlalchemy import true
 from danse_utilities.testing import sro_testing
 from danse_utilities.classes import SamplingRateOffsets, DWACDParameters
 from pathlib import Path, PurePath
@@ -20,7 +22,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS8_anechoic'],
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS6_RT400ms'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS4_RT200ms'],
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J3Mk[2_3_4]_Ns1_Nn1/AS5_anechoic'],
@@ -33,20 +35,22 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     sigDur=40,
     baseSNR=5,
-    # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=10)],
-    possibleSROs=[int(ii) for ii in np.linspace(0, 1000, num=10)],
+    possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
+    # possibleSROs=[int(ii) for ii in np.linspace(0, 1000, num=10)],
     nodeUpdating='simultaneous',
     timeBtwExternalFiltUpdates=3,
     # timeBtwExternalFiltUpdates=np.Inf,
     # broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
-    broadcastLength=2**9,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
+    broadcastLength=2**9,                 # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastDomain='f',
+    performGEVD=0,
     #
     asynchronicity=SamplingRateOffsets(
-        compensateSROs=True,
-        # compensateSROs=False,
+        plotResult=True,
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='DWACD',
-        estimateSROs='Residuals',
+        estimateSROs='CohDrift',
         dwacd=DWACDParameters(
             seg_shift=2**11,
         )

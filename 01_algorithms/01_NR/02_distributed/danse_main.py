@@ -49,7 +49,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=30,
+    signalDuration=10,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -66,6 +66,7 @@ mySettings = ProgramSettings(
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
+        plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         # SROsppm=0,
         # SROsppm=[0, 50],
         # SROsppm=[0, 75],
@@ -232,6 +233,13 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
 \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
         fig2.tight_layout()
         fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
+        if showPlots:
+            plt.draw()
+
+    # Plot SRO data
+    if settings.asynchronicity.plotResult:
+        fig = results.sroData.plotSROdata()
+        plt.savefig(f'{pathToResults}/SROestcomp.png')
         if showPlots:
             plt.draw()
 

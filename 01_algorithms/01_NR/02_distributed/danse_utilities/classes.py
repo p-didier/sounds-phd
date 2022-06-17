@@ -23,6 +23,38 @@ if not any("01_acoustic_scenes" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 from utilsASC.classes import AcousticScenario
 
+
+@dataclass
+class SROdata:
+    estMethod : str         # SRO estimation method
+    compensation : bool     # if True, compensation was applied, else, not
+    residuals : np.ndarray  # SRO residuals through time
+    estimate : np.ndarray   # SRO estimates through time
+    groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
+
+    def plotSROdata(self):
+        """Show evolution of SRO estimates / residuals through time."""
+        
+        nNodes = len(self.residuals)
+
+        fig = plt.figure(figsize=(6,2))
+        ax = fig.add_subplot(111)
+        for k in range(nNodes):
+            ax.plot(self.residuals[k] * 1e6, f'C{k}--', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+            ax.plot(self.estimate[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+            ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
+                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+        ax.grid()
+        ax.set_ylabel('[ppm]')
+        ax.set_xlabel('DANSE iteration $i$')
+        ax.set_xlim([0, len(self.residuals[k])])
+        plt.legend(bbox_to_anchor=(1.05, 1.05))
+        plt.title('SRO estimation through time')
+        plt.tight_layout()
+
+        return fig
+
+
 @dataclass
 class PrintoutsParameters:
     events_parser: bool = False             # controls printouts in `events_parser()` function
@@ -65,11 +97,11 @@ class CohDriftSROEstimationParameters():
         (2017): 674-686.
     """
     alpha : float = .95                 
-    nFiltUpdatePerSeg : int = 1         # segment length: use phase angle between values
+    nFiltUpdatePerSeg : int = 10        # segment length: use phase angle between values
                                         # spaced by `nFiltUpdatePerSeg` signal frames
                                         # to estimate the SRO
     estEvery : int = 1                  # estimate SRO every `estEvery` signal frames
-    startAfterNupdates : int = 10       # only start estimating the SRO after `startAfterNupdates`
+    startAfterNupdates : int = 11       # only start estimating the SRO after `startAfterNupdates`
                                         # signal frames
     estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
                                         # "mean" (similar to Online WACD implementation [2]),
@@ -137,6 +169,7 @@ class SamplingRateOffsets():
     estimateSTOs: bool = False              # if True, estimate STOs
     dwacd: DWACDParameters = DWACDParameters()  # parameters for Dynamic Weighted Average Coherence Drift SRO estimation
     cohDriftMethod: CohDriftSROEstimationParameters = CohDriftSROEstimationParameters()     # parameters for "Coherence drift" SRO estimation method
+    plotResult: bool = False                # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
 
     def __post_init__(self):
         # Base checks
@@ -146,7 +179,7 @@ class SamplingRateOffsets():
         elif isinstance(self.SROsppm, float) or isinstance(self.SROsppm, int):
             self.SROsppm = [self.SROsppm]
         if isinstance(self.SROsppm, list):
-            if all(v == 0 for v in self.SROsppm) and self.compensateSROs:
+            if len(self.SROsppm) > 0 and all(v == 0 for v in self.SROsppm) and self.compensateSROs:
                 inn = input('No SROs involved -- no need to compensate. Set `compensateSROs` to `False`? [y/n]  ')
                 if inn in ['Y', 'y']:
                     print('Setting `compensateSROs` to `False`.')
@@ -667,9 +700,10 @@ def normalize_toint16(nparray):
 @dataclass
 class Results(object):
     """Class for storing simulation results"""
-    signals: Signals = field(init=False)                       # all signals involved in run
-    enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
-    acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
+    signals : Signals = field(init=False)                       # all signals involved in run
+    enhancementEval : EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
+    acousticScenario : AcousticScenario = field(init=False)     # acoustic scenario considered
+    sroData : SROdata = field(init=False)                       # SRO estimation data
 
     def load(self, foldername: str, silent=False):
         return met.load(self, foldername, silent)
@@ -750,7 +784,7 @@ class Results(object):
             
             # Select dictionary elements
             dynMetricsNames = [fields(self.enhancementEval)[ii].name\
-                                 for ii in range(len(fields(self.enhancementEval))) if flagsDynMetrics[ii]]
+                                for ii in range(len(fields(self.enhancementEval))) if flagsDynMetrics[ii]]
             dynMetrics = [getattr(self.enhancementEval, n) for n in dynMetricsNames]
 
             # Plot
