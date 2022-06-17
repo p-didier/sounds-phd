@@ -229,6 +229,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
     a = []
     tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
+    SROsResiduals = []                              # SRO residuals per node (for each neighbor)
     SROsEstimates = []                              # SRO estimates per node (for each neighbor)
     SROsEstimatesAccumulated = []
     residualSROs = []                               # residual SROs, for each node, across DANSE iterations
@@ -277,6 +278,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
+        SROsResiduals.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
         residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
@@ -315,10 +317,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             np.arange(nDWACDSROupdates) * settings.asynchronicity.dwacd.seg_shift)\
                             // settings.stftEffectiveFrameLen
     # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
-    filtShiftSROupdateIndices = np.arange(start=settings.asynchronicity.filtShiftsMethod.startAfterNupdates +\
-                            settings.asynchronicity.filtShiftsMethod.estEvery,
+    cohDriftSROupdateIndices = np.arange(start=settings.asynchronicity.cohDriftMethod.startAfterNupdates +\
+                            settings.asynchronicity.cohDriftMethod.estEvery,
                             stop=numIterations,
-                            step=settings.asynchronicity.filtShiftsMethod.estEvery)
+                            step=settings.asynchronicity.cohDriftMethod.estEvery)
     # DWACD segments (i.e., SRO estimate update) counters (for each node)
     dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
@@ -460,7 +462,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     phaseShiftFactors[k] += extraPhaseShiftFactor
                     # Apply phase shift factors
                     ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
-                    # ytildeHat[k][:, i[k], :] *= np.exp(i[k] * -1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
@@ -510,40 +511,40 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                if settings.asynchronicity.estimateSROs == 'FiltShift' :
+                if settings.asynchronicity.estimateSROs == 'CohDrift':
                     
-                    ld = settings.asynchronicity.filtShiftsMethod.nFiltUpdatePerSeg
+                    ld = settings.asynchronicity.cohDriftMethod.nFiltUpdatePerSeg
 
-                    if i[k] in filtShiftSROupdateIndices:
+                    if i[k] in cohDriftSROupdateIndices:
 
                         flagFirstSROEstimate = False
-                        if i[k] == np.amin(filtShiftSROupdateIndices):
-                            flagFirstSROEstimate = True     # let `filtshift_sro_estimation()` know that this is the 1st SRO estimation round
+                        if i[k] == np.amin(cohDriftSROupdateIndices):
+                            flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
 
                         # Residuals method
                         for q in range(len(neighbourNodes[k])):
 
                             idxq = yLocalCurr.shape[-1] + q     # index of the compressed signal from node `q` inside `yyH`
-                            residualPosteriori = (yyH[k][i[k], :, 0, idxq]
+                            cohPosteriori = (yyH[k][i[k], :, 0, idxq]
                                                     / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                            residualPriori = (yyH[k][i[k] - ld, :, 0, idxq]
+                            cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
                                                     / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
 
-                            sroEst, apr = subs.filtshift_sro_estimation(
-                                                wPos=residualPosteriori,
-                                                wPri=residualPriori,
+                            sroRes, apr = subs.cohdrift_sro_estimation(
+                                                wPos=cohPosteriori,
+                                                wPri=cohPriori,
                                                 avg_res_prod=avgProdResiduals[k][:, q],
                                                 Ns=Ns,
                                                 ld=ld,
-                                                method=settings.asynchronicity.filtShiftsMethod.estimationMethod,
-                                                alpha=settings.asynchronicity.filtShiftsMethod.alpha,
+                                                method=settings.asynchronicity.cohDriftMethod.estimationMethod,
+                                                alpha=settings.asynchronicity.cohDriftMethod.alpha,
                                                 flagFirstSROEstimate=flagFirstSROEstimate,
                                                 )
                         
-                            SROsEstimates[k][q] = sroEst
+                            SROsResiduals[k][q] = sroRes
                             avgProdResiduals[k][:, q] = apr
 
-                    SROresidualThroughTime[k][i[k]:] = SROsEstimates[k][0]  # save for plotting / debugging
+                    SROresidualThroughTime[k][i[k]:] = SROsResiduals[k][0]  # save for plotting / debugging
                         
                 elif settings.asynchronicity.estimateSROs == 'DWACD':
                     # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
@@ -578,10 +579,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Update phase shifts for SRO compensation
                 if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
+                        if settings.asynchronicity.estimateSROs == 'CohDrift':
+                            # Increment estimate using SRO residual
+                            SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
                         # Increment phase shift factor recursively
-                        a[k][yLocalCurr.shape[-1] + q] += SROsEstimates[k][q] * Ns * settings.asynchronicity.filtShiftsMethod.alphaEps
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= a[k][yLocalCurr.shape[-1] + q]
-                        # phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid direclty for oracle SRO ``estimation''
                     if k == 0:
                         phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
 

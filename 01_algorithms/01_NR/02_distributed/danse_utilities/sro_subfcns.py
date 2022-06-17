@@ -4,8 +4,8 @@ from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters
 
 
-def filtshift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
-    """Estimates residual SRO using the filter shift technique.
+def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
+    """Estimates residual SRO using a coherence drift technique.
     
     Parameters
     ----------

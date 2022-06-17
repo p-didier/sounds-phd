@@ -31,10 +31,10 @@ class PrintoutsParameters:
 
 
 @dataclass
-class FiltShiftSROEstimationParameters():
+class CohDriftSROEstimationParameters():
     """
     Dataclass containing the required parameters for the
-    "Filter-shift" SRO estimation method.
+    "Coherence drift" SRO estimation method.
 
     Attributes
     ----------
@@ -136,12 +136,12 @@ class SamplingRateOffsets():
     compensateSTOs: bool = False            # if True, compensate STOs
     estimateSTOs: bool = False              # if True, estimate STOs
     dwacd: DWACDParameters = DWACDParameters()  # parameters for Dynamic Weighted Average Coherence Drift SRO estimation
-    filtShiftsMethod: FiltShiftSROEstimationParameters = FiltShiftSROEstimationParameters()     # parameters for "Filter-shift" SRO estimation method
+    cohDriftMethod: CohDriftSROEstimationParameters = CohDriftSROEstimationParameters()     # parameters for "Coherence drift" SRO estimation method
 
     def __post_init__(self):
         # Base checks
-        if self.estimateSROs not in ['Oracle', 'FiltShift', 'DWACD']:
-            raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "FiltShift", "DWACD".')
+        if self.estimateSROs not in ['Oracle', 'CohDrift', 'DWACD']:
+            raise ValueError(f'The SRO estimation method provided ("{self.estimateSROs}") is invalid. Possible options: "Oracle", "CohDrift", "DWACD".')
         
         elif isinstance(self.SROsppm, float) or isinstance(self.SROsppm, int):
             self.SROsppm = [self.SROsppm]

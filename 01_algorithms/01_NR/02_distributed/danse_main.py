@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters, FiltShiftSROEstimationParameters
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters, CohDriftSROEstimationParameters
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -73,12 +73,12 @@ mySettings = ProgramSettings(
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
-        estimateSROs='FiltShift',   # <-- Filter shift method (inspired by Thüne & Enzner + Nokia work)
+        estimateSROs='CohDrift',    # <-- Coherence drift method
         # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
         dwacd=DWACDParameters(
             seg_shift=2**11,
         ),
-        filtShiftsMethod=FiltShiftSROEstimationParameters(
+        cohDriftMethod=CohDriftSROEstimationParameters(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
