@@ -72,9 +72,9 @@ class CohDriftSROEstimationParameters():
     ----------
     alpha : float
         Exponential averaging constant.
-    nFiltUpdatePerSeg : int 
+    segLength : int 
         Number of DANSE filter updates per SRO estimation segment
-    TODO: ADD `estEvery`
+    TODO: ADD `estEvery` and `alphaEps`
     startAfterNupdates : int 
         Minimum number of DANSE filter updates before first SRO estimation
 
@@ -97,8 +97,8 @@ class CohDriftSROEstimationParameters():
         (2017): 674-686.
     """
     alpha : float = .95                 
-    nFiltUpdatePerSeg : int = 10        # segment length: use phase angle between values
-                                        # spaced by `nFiltUpdatePerSeg` signal frames
+    segLength : int = 10                # segment length: use phase angle between values
+                                        # spaced by `segLength` signal frames
                                         # to estimate the SRO
     estEvery : int = 1                  # estimate SRO every `estEvery` signal frames
     startAfterNupdates : int = 11       # only start estimating the SRO after `startAfterNupdates`
@@ -106,7 +106,7 @@ class CohDriftSROEstimationParameters():
     estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
                                         # "mean" (similar to Online WACD implementation [2]),
                                         # "ls" (least-squares estimate over frequency bins [3])
-    alphaEps : float = .01              # residual SRO incrementation factor:
+    alphaEps : float = .05              # residual SRO incrementation factor:
                                         # $\hat{\varepsilon}^i = \hat{\varepsilon}^{i-1} + `alphaEps` * \Delta\varepsilon^i$
 
 @dataclass

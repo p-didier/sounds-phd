@@ -43,17 +43,17 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # broadcastLength=8,                  # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastLength=2**9,                 # number of (compressed) samples to be broadcasted at a time to other nodes -- only used if `danseUpdating == "simultaneous"`
     broadcastDomain='f',
-    performGEVD=0,
+    performGEVD=1,
     #
     asynchronicity=SamplingRateOffsets(
         plotResult=True,
-        # compensateSROs=True,
-        compensateSROs=False,
+        compensateSROs=True,
+        # compensateSROs=False,
         # estimateSROs='DWACD',
         estimateSROs='CohDrift',
         dwacd=DWACDParameters(
             seg_shift=2**11,
-        )
+        ),
     ),
 )
 

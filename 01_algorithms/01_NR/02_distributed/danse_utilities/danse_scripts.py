@@ -479,6 +479,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
                 if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
                     startUpdates[k] = True
+                # startUpdates[k] = True
 
                 if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
                     # No `for`-loop versions
@@ -517,7 +518,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 if settings.asynchronicity.estimateSROs == 'CohDrift':
                     
-                    ld = settings.asynchronicity.cohDriftMethod.nFiltUpdatePerSeg
+                    ld = settings.asynchronicity.cohDriftMethod.segLength
 
                     if i[k] in cohDriftSROupdateIndices:
 
@@ -630,25 +631,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(6,3))
-    # ax = fig.add_subplot(211)
-    # ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
-    # ax.invert_yaxis()
-    # ax.set_aspect('auto')
-    # ax.set_ylabel('Freq. bin $\kappa$')
-    # ax = fig.add_subplot(212)
-    # for k in range(len(SROresidualThroughTime)):
-    #     ax.plot(SROresidualThroughTime[k] * 1e6, label=f'Estimated SRO, node {k+1}')
-    # ax.grid()
-    # ax.set_ylabel('SRO [ppm]')
-    # ax.set_xlabel('DANSE iteration $i$')
-    # ax.set_xlim([0, len(SROresidualThroughTime[k])])
-    # plt.hlines(y=settings.asynchronicity.SROsppm[settings.asynchronicity.SROsppm != 0], xmin=0, xmax=len(SROresidualThroughTime[0]), colors='k', label='True SRO')
-    # plt.legend()
-    # plt.tight_layout()	
-    # plt.show()
+    # Debugging
+    sroData.plotSROdata()
+    plt.show()
 
-    # stop = 1
+    stop = 1
 
     return d, dLocal, sroData

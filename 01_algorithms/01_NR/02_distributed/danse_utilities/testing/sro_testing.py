@@ -7,7 +7,7 @@ from matplotlib.pyplot import plot
 
 import danse_main
 from itertools import combinations
-from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, DWACDParameters
+from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, DWACDParameters, CohDriftSROEstimationParameters
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)

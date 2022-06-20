@@ -71,8 +71,8 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
     elif method == 'ls':
         # --------- Least-squares solution over frequency bins
         kappa = np.arange(0, len(wPri))    # freq. bins indices
-        b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
-        # b = np.pi * kappa * (ld * Ns) / len(kappa)
+        # b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
+        b = np.pi * kappa * (ld * Ns) / (len(kappa) * 2)
         sro_est = - b.T @ np.angle(avg_res_prod[-len(kappa):]) / (b.T @ b)
 
     return sro_est, avg_res_prod

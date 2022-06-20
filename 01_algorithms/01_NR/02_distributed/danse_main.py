@@ -37,6 +37,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     samplingFrequency=8000,
+    # samplingFrequency=16000,
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
     #
@@ -49,7 +50,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=10,
+    signalDuration=15,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -71,6 +72,7 @@ mySettings = ProgramSettings(
         # SROsppm=[0, 50],
         # SROsppm=[0, 75],
         SROsppm=[0, 100],
+        # SROsppm=[0, 3000],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
@@ -83,10 +85,14 @@ mySettings = ProgramSettings(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
-            nFiltUpdatePerSeg=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
+            segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
             startAfterNupdates=11,
             # alpha=0
+            alphaEps=0.01,
+            # alphaEps=0.05,
+            # alphaEps=0.25,
+            # alphaEps=0.5,
         )
     ),
     # bypassFilterUpdates=True,

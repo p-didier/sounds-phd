@@ -35,7 +35,7 @@ sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 # ylimsFwSNRseg = [0, 6.5]
 
 # ----------------------------------
-# Only anechoic, DWACD estimation + compensation
+# Only anechoic, SRO estimation + compensation
 # ----------------------------------
 resultsBaseFolder = [f'{Path(__file__).parent}/automated/{ii}' for ii in \
     [
@@ -47,12 +47,19 @@ resultsBaseFolder = [f'{Path(__file__).parent}/automated/{ii}' for ii in \
     #    '20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/anechoic_comp',
         # '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/nocomp',
         # '20220520_hugeSROs/J2Mk[1_1]_Ns1_Nn1/comp',
-        '20220617_cohDriftSROestcomp/noGEVD/J2Mk[1_1]_Ns1_Nn1',
+        # '20220617_cohDriftSROestcomp/noGEVD/J2Mk[1_1]_Ns1_Nn1/uncomp',
+        # '20220617_cohDriftSROestcomp/noGEVD/J2Mk[1_1]_Ns1_Nn1/comp',
+        '20220617_cohDriftSROestcomp/withGEVD/J2Mk[1_1]_Ns1_Nn1/uncomp',
+        '20220617_cohDriftSROestcomp/withGEVD/J2Mk[1_1]_Ns1_Nn1/comp_alphaEps0p01',
+        '20220617_cohDriftSROestcomp/withGEVD/J2Mk[1_1]_Ns1_Nn1/comp_alphaEps0p05',
     ]]
 givenFormats = ['C0o-','C1o:','C2o--']
 givenLegend = ['No compensation',
             # 'Oracle SRO',
-            'DWACD-based SRO estimation']
+            # 'DWACD-based SRO estimation'
+            'Compensation using $\\hat{{\\varepsilon}}^{{\\mathrm{{CD}}}}_{{kq}}$ ($\\alpha_{{\\varepsilon}} = 0.01$)',
+            'Compensation using $\\hat{{\\varepsilon}}^{{\\mathrm{{CD}}}}_{{kq}}$ ($\\alpha_{{\\varepsilon}} = 0.05$)',
+            ]
 ylimsFwSNRseg = [0, 7.5]
 # EXPORTPATH = f'{Path(__file__).parent}/automated/20220518_SROestimation_withDWACD/J2Mk[1_1]_Ns1_Nn1/figs/metrics_onlyAnechoic'
 EXPORTPATH = f'{Path(__file__).parent}/automated/20220518_SROestimation_withDWACD/J2Mk[3_1]_Ns1_Nn1/figs/metrics_onlyAnechoic'
@@ -172,6 +179,8 @@ def _subplot(ax, nNodes, sros, metric, refs, colors, styles, markers, flagDelta,
                     fmt = f'{colors[ii]}{styles[0]}{markers[0]}'
             ax.plot(sros[ii], metric[ii][idxNode, :],\
                         fmt,label=f'Node {idxNode+1} -- {refs[ii]}', markersize=5)
+            if (sros[ii] == 0).any():
+                ax.hlines(y=metric[ii][idxNode, sros[ii] == 0], xmin=0, xmax=np.amax(sros), color='k')
     ax.grid()
     ax.set_xlabel('Absolute SRO with neighbor node [ppm]')
     if flagDelta:

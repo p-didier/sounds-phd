@@ -1,4 +1,5 @@
 
+from random import random
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
@@ -918,13 +919,18 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
 
+    # Add random activation delays
+    # activationDelays = np.random.randint(0, Ns, nNodes)     # <-- experiment, see Word journal week24, FRI
+    activationDelays = np.zeros(nNodes)
+    
     # Get expected DANSE update instants
     numUpdatesInTtot = np.floor(Ttot * fs / Ns)   # expected number of DANSE update per node over total signal length
-    updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] for k in range(nNodes)]  # expected DANSE update instants
+    updateInstants = [np.arange(np.ceil(N / Ns), int(numUpdatesInTtot[k])) * Ns/fs[k] + activationDelays[k]/fs[k] for k in range(nNodes)]  # expected DANSE update instants
     #                               ^ note that we only start updating when we have enough samples
+    
     # Get expected broadcast instants
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
-    broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]   # expected broadcast instants
+    broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] + activationDelays[k]/fs[k] for k in range(nNodes)]   # expected broadcast instants
     #                              ^ note that we only start broadcasting when we have enough samples to perform compression
     # Ensure that all nodes have broadcasted at least once before performing any update
     minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
