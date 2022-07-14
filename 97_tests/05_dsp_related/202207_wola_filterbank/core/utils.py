@@ -101,6 +101,7 @@ def wola_td_broadcast(x, Nh, w, updateFilterEveryXsamples=1):
                 term = np.fft.fft(W ** (kappa * np.arange(len(h))) * h, Nh, axis=0)\
                     * w[kappa]\
                     * np.fft.fft(W ** (kappa * np.arange(len(h))) * f, Nh, axis=0)
+                term /= h.sum()     # normalize for analysis window
 
                 terms[kappa, :] = term
 
@@ -126,6 +127,16 @@ def wola_td_broadcast(x, Nh, w, updateFilterEveryXsamples=1):
             t = np.real_if_close(t)
             lastUpdate = n
 
+    
+            fig, axes = plt.subplots(1,1)
+            fig.set_size_inches(8.5, 3.5)
+            axes.plot(t, label='IFFT(T)')
+            axes.plot(np.real_if_close(np.fft.ifft(w)), '--', label='IFFT(w)')
+            axes.grid()
+            axes.legend()
+            plt.tight_layout()	
+            plt.show()
+
         # Perform convolution
         if n < Nh:
             currChunk = np.concatenate((np.zeros(Nh - n), x[:n]))
@@ -141,6 +152,26 @@ def wola_td_broadcast(x, Nh, w, updateFilterEveryXsamples=1):
     return ztd
 
 
+def wola_td_broadcast_naive(x, w):
+    """
+    Parameters
+    ----------
+    x : np.ndarray
+        Input signal (1-dimensional).
+    w : np.ndarray
+        Filter coefficients in the frequency domain.
+    """
+
+    # Get time-domain version of `w`
+    wtd = np.fft.ifft(w)
+    wtd = np.real_if_close(wtd)
+
+    # Convolve
+    ztd = sig.convolve(x, wtd)
+
+    return ztd
+
+
 def plotit(z, z_fromtd, idx, unwrapPhase=False):
 
     fig, axes = plt.subplots(2,1)
@@ -149,7 +180,7 @@ def plotit(z, z_fromtd, idx, unwrapPhase=False):
     axes[0].plot(20*np.log10(np.abs(z_fromtd[:, idx])), label='From TD')
     axes[0].legend()
     axes[0].grid()
-    axes[0].set_title('Magnitude [dB]')
+    axes[0].set_title(f'Frame #{idx+1} -- Magnitude [dB]')
     # Filter coefficients
     if not unwrapPhase:
         axes[1].plot(np.angle(z[:, idx]), label='From FD')

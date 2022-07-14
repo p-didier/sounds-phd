@@ -36,13 +36,21 @@ def main():
 
     # Run TD-WOLA "equivalent"
     ztd = c.wola_td_broadcast(x, p.Nh, w, updateFilterEveryXsamples=1000)
+
+    # Run TD-WOLA "naive" (direct filtering by `w`)
+    ztd_naive = c.wola_td_broadcast_naive(x, w)
+
     # Subdivide in blocks and go to freq. domain
     nchunks = z.shape[1] - 1
     zchunkedtd = np.zeros((p.Nh, nchunks))
     zchunked = np.zeros((p.Nh, nchunks), dtype=complex)
+    zchunkedtd_naive = np.zeros((p.Nh, nchunks))
+    zchunked_naive = np.zeros((p.Nh, nchunks), dtype=complex)
     for ii in range(nchunks):
         zchunkedtd[:, ii] = copy.copy(ztd[(ii * p.R):(ii * p.R + p.Nh)])
         zchunked[:, ii] = np.fft.fft(zchunkedtd[:, ii] * np.sqrt(np.hanning(p.Nh)), p.Nh, axis=0)
+        zchunkedtd_naive[:, ii] = copy.copy(ztd_naive[(ii * p.R):(ii * p.R + p.Nh)])
+        zchunked_naive[:, ii] = np.fft.fft(zchunkedtd_naive[:, ii] * np.sqrt(np.hanning(p.Nh)), p.Nh, axis=0)
 
     # import simpleaudio as sa
     # import time
@@ -53,13 +61,19 @@ def main():
     # audio_array = ztd * 32767 / max(abs(ztd))
     # audio_array = audio_array.astype(np.int16)
     # sa.play_buffer(audio_array,1,2,fs)
+    # time.sleep(p.T)
+    # audio_array = ztd_naive * 32767 / max(abs(ztd_naive))
+    # audio_array = audio_array.astype(np.int16)
+    # sa.play_buffer(audio_array,1,2,fs)
 
     
     # import matplotlib.pyplot as plt
     # fig, axes = plt.subplots(1,1)
     # fig.set_size_inches(8.5, 3.5)
-    # # axes.plot(ztd / np.amax(ztd))
-    # # axes.plot(x / np.amax(x))
+    # axes.plot(x, label='original $x$')
+    # axes.plot(ztd, label='$z$ TD, equivalent WOLA')
+    # axes.plot(ztd_naive, label='$z$ TD, naive')
+    # axes.legend()
     # # axes[0].plot(chunks.T / np.amax(chunks))
     # # axes[1].plot(zchunkedtd / np.amax(zchunkedtd))
     # # axes.plot(20*np.log10(np.abs(zchunked)))
@@ -69,7 +83,8 @@ def main():
     # plt.show()
 
     # Plot
-    c.plotit(z, zchunked, 100, unwrapPhase=True)
+    # c.plotit(z, zchunked, 100, unwrapPhase=True)
+    c.plotit(z, zchunked_naive, 75, unwrapPhase=True)
 
     stop = 1
 
