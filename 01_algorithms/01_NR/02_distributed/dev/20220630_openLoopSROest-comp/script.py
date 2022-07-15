@@ -1,17 +1,23 @@
+from copy import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import fcns.myfcns as f
-from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 
 # Simulation parameters
-p = f.simParams(
+p = f.SimParams(
     T=10,        # signal duration [s]
     eps=100,
     blockSize=2048,
     overlap=0.5,
-    ld=1,
-    alpha=.95
+    # ld=np.linspace(1, 10, num=5, dtype=int),
+    ld=5,
+    # alpha=np.linspace(0, 1, num=5, endpoint=False)
+    alpha=0.95,
+    compensateSRO=True,
+    alphaEps=0.01,
+    # compType='closedloop',
+    compType='openloop',
 )
 
 def main():
@@ -21,62 +27,36 @@ def main():
     y.apply_sro(p.eps, channelIdx=1)
     # y.plot_waveform()
 
-    # WOLA params
-    analysisWin = np.sqrt(np.hanning(p.blockSize))
-    analysisWin = analysisWin[:, np.newaxis]
+    lenAlpha = 1
+    lenLd = 1
+    legLabels = None
+    if isinstance(p.alpha, np.ndarray):
+        lenAlpha = len(p.alpha)
+        legLabels = [f'$\\alpha$ = {a}' for a in p.alpha]
+    elif isinstance(p.ld, np.ndarray):
+        lenLd = len(p.ld)
+        legLabels = [f'$l_\\mathrm{{d}}$ = {a}' for a in p.ld]
 
-    # Block-wise processing
-    l = 0
-    acr = 0     # initial average coherences product
-    nChunks = int(y.data.shape[0] // (p.blockSize * (1 - p.overlap)))
-    yyH = np.zeros((nChunks, int(p.blockSize / 2 + 1), y.nChannels, y.nChannels), dtype=complex)
-    sroEst = np.zeros(nChunks)
-
-    flagFirstEstimate = True
-    while 1:
-        # Corresponding time instant
-        t = int(l * p.blockSize * (1 - p.overlap) + p.blockSize) / y.fs[0]
-        idxEnd = int(t * y.fs[0])
-        idxBeg = idxEnd - p.blockSize
-        if idxEnd > y.data.shape[0] - 1:
-            break   # breaking point
-
-        # Current chunk
-        ycurr = y.data[idxBeg:idxEnd, :]
-
-        # Go to freq. domain
-        ycurrhat = 1 / analysisWin.sum() * np.fft.fft(ycurr * analysisWin, p.blockSize, axis=0)
-        ycurrhat = ycurrhat[:int(ycurrhat.shape[0] / 2 + 1), :]     # keep only >0 freqs.
-
-        # Compute correlation matrix
-        yyH[l, :, :, :] = np.einsum('ij,ik->ijk', ycurrhat, ycurrhat.conj())
-
-        if l >= p.ld:
-
-            cohPosteriori = yyH[l, :, 0, 1] / np.sqrt(yyH[l, :, 0, 0] * yyH[l, :, 1, 1])     # a posteriori coherence
-            cohPriori = yyH[l - p.ld, :, 0, 1] / np.sqrt(yyH[l - p.ld, :, 0, 0] * yyH[l - p.ld, :, 1, 1])     # a posteriori coherence
-                
-            res_prod = cohPosteriori * cohPriori.conj()
-            # Prep for ISTFT (negative frequency bins too)
-            res_prod = np.concatenate(
-                [res_prod[:-1],
-                    np.conj(res_prod)[::-1][:-1]],
-                -1
-            )
-            # Update the average coherence product
-            if flagFirstEstimate:
-                acr = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
-                flagFirstEstimate = False
-            else:
-                acr = p.alpha * acr + (1 - p.alpha) * res_prod  
-
-            # Estimate SRO
-            sroEst[l] = - max_time_lag_search(acr) / (p.ld * int(p.blockSize * (1 - p.overlap)))
-
-        l += 1
+    # Number of signal frames
+    nFrames = int(y.data.shape[0] // (p.blockSize * (1 - p.overlap)) + 1)
+    # Initialize results array
+    sroEst = np.zeros((nFrames, lenAlpha, lenLd))
+    sroResEst = np.zeros((nFrames, lenAlpha, lenLd))
+    pcopy = copy(p)
+    for ii in range(lenAlpha):
+        if lenAlpha > 1:
+            pcopy.alpha = p.alpha[ii]            
+        for jj in range(lenLd):
+            if lenLd > 1:
+                pcopy.ld = p.ld[jj]
+            print(f'Computing SRO for alpha={pcopy.alpha} & ld={pcopy.ld}...')
+            sroEst[:, ii, jj], sroResEst[:, ii, jj] = f.run(y, pcopy)     # <-- run SRO estimation
+    sroEst = sroEst.squeeze()           # eliminate unused dimensions
+    sroResEst = sroResEst.squeeze()     # eliminate unused dimensions
+    print('All done. Plotting...')
 
     # Plot
-    f.plotit(sroEst, gt=p.eps)
+    f.plotit(sroEst, sroResEst, legLabels, gt=p.eps)
 
     stop = 1
 

@@ -1,2 +1,0 @@
-
-Reference: https://dev.to/yamakanto/how-i-set-up-vscode-for-python-tests-coverage-profiling-2jf4

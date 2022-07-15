@@ -495,9 +495,12 @@ def danse_compression(yq, wHat, n):
     wIR = back_to_time_domain(wHat, n, axis=0)      # TODO: 2022/03/25 -- the IR is not causal (increasing amplitude at the tail) [see Word journal week12 FRI]
     wIR = np.real_if_close(wIR)
 
-    # GcOLS = np.zeros((n, n))
-    # GcOLS[:int(n/2), :int(n/2)] = np.eye(int(n/2))  	
-    # wHatFull = np.fft.fft(GcOLS @ wIR, n, axis=0)
+    # Append zeros for OLS processing (matching input signal chunk length)
+    nTotal = yq.shape[0]
+    if flagSingleSensor:
+        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0],))), axis=0)
+    else:
+        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
 
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(8,4))
@@ -507,17 +510,11 @@ def danse_compression(yq, wHat, n):
     # plt.tight_layout()	
     # plt.show()
 
-    # Append zeros for OLS processing (matching input signal chunk length)
-    nTotal = yq.shape[0]
-    if flagSingleSensor:
-        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0],))), axis=0)
-    else:
-        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
-
     # Go (back) to frequency domain
     wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding (combined with the non-causality of the IR?) creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
     yqHat = np.fft.fft(np.squeeze(yq), nTotal, axis=0)
 
+    # Apply compression
     if flagSingleSensor:
         # Keep only positive frequencies
         wHatFull = wHatFull[:int(nTotal/2 + 1)]
@@ -537,16 +534,6 @@ def danse_compression(yq, wHat, n):
 
     # Discard oldest (incorrect) samples
     zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
-
-    
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(yq[int(len(yq)/2):])
-    # ax.plot(zq)
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
 
     stop = 1
 

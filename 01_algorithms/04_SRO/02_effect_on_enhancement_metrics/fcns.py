@@ -56,19 +56,17 @@ def compute_metrics(referenceSignal, signalWithSRO, fs, metricsToCompute):
     return metrics
 
 
-def plot_metrics(metrics, x):
+def plot_metrics(axes, metrics, x, color='k'):
 
     metricNames = list(metrics.keys())
 
-    fig = plt.figure(figsize=(8,3))
     for ii in range(len(metricNames)):
-        ax = fig.add_subplot(100 + len(metricNames) * 10 + ii + 1)
-        ax.plot(x, metrics[metricNames[ii]], 'k.-')
-        ax.grid()
-        ax.set_title(metricNames[ii])
+        axes[ii].plot(x, metrics[metricNames[ii]], f'{color}.-')
+        axes[ii].set_title(metricNames[ii])
+        axes[ii].grid(visible=True)
         if metricNames[ii] in ['stoi', 'STOI']:
-            ax.set_ylim([0,1])
-        ax.set_xlabel('SRO [ppm]')
+            axes[ii].set_ylim([0,1])
+        axes[ii].set_xlabel('SRO [ppm]')
     plt.tight_layout()
     plt.show()
 

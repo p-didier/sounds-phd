@@ -6,7 +6,7 @@ from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 import soundfile as sf
 
 @dataclass
-class simParams:
+class SimParams:
     T : float   # signal duration [s]
     eps : int   # SRO [ppm]
     blockSize : int   # FFT size
@@ -14,7 +14,9 @@ class simParams:
     ld : int            # number of frames between two ``consecutive`` coherence functions
     seed : int = 12345  # random generator seed
     alpha : float = .95 # coherence product exp. avg. constant
-
+    compensateSRO : bool = False    # if True, compensate SROs
+    alphaEps : float = .01          # damping constant for combined SRO est.+comp.
+    compType : str = 'closedloop'   # closed vs. open-loop compensation (see 2022 Word journal week26)
 
 class Signal:
     def __init__(self, T, nChannels=1, seed=12345) -> None:
@@ -46,7 +48,6 @@ class Signal:
         axes.grid()
         plt.tight_layout()	
         plt.show()
-
 
 
 def sro_est(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, flagFirstSROEstimate=False):
@@ -100,12 +101,87 @@ def sro_est(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95
     return sro_est, avg_res_prod
 
 
-def plotit(sroEst, gt):
+def plotit(sroEst, sroResEst, legLabels, gt):
+
+    flagCompensation = (sroResEst != 0).any()
 
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(14.5, 6.5)
-    axes.plot(sroEst * 1e6, 'k')
-    # axes.hlines(gt, xmin=0, xmax=len(sroEst), colors='k')
+    if sroEst.ndim == 1:
+        axes.plot(sroEst * 1e6, label='$\\hat{{\\varepsilon}}_{{kq}}[l]$')
+        if flagCompensation:
+            axes.plot(sroResEst * 1e6, label='$\\Delta\\hat{{\\varepsilon}}_{{kq}}[l]$')
+    else:
+        for ii in range(sroEst.shape[-1]):
+            axes.plot(sroEst[:, ii] * 1e6, label=f'$\\hat{{\\varepsilon}}_{{kq}}[l]$ -- {legLabels[ii]}')
+            if flagCompensation:
+                axes.plot(sroResEst[:, ii] * 1e6, label=f'$\\Delta\\hat{{\\varepsilon}}_{{kq}}[l]$ -- {legLabels[ii]}')
+    axes.legend()
+    axes.hlines(gt, xmin=0, xmax=len(sroEst), colors='r', linestyles='--')
     axes.grid()
+    axes.set_xlabel('Frame index')
+    axes.set_ylabel('[ppm]')
     plt.tight_layout()	
     plt.show()
+
+
+def run(y, p: SimParams):
+    """Performs frame-wise SRO estimation"""
+
+    Ns = int(p.blockSize * (1 - p.overlap))
+    nFrames = int(y.data.shape[0] // Ns + 1)
+
+    # Frame-wise processing
+    l = 0
+    acr = 0     # initial average coherences product
+    varphi = 0
+    yyH = np.zeros((nFrames, int(p.blockSize / 2 + 1), y.nChannels, y.nChannels), dtype=complex)
+    sroResEst = np.zeros(nFrames)
+    sroEst = np.zeros(nFrames)
+    while 1:
+        # Corresponding time instant
+        idxBeg = l * Ns
+        idxEnd = idxBeg + p.blockSize
+        if idxEnd > y.data.shape[0] - 1:
+            break   # breaking point
+
+        # Current chunk
+        ycurr = y.data[idxBeg:idxEnd, :]
+
+        # Go to freq. domain
+        ycurrhat = np.fft.fft(ycurr, p.blockSize, axis=0)
+        ycurrhat = ycurrhat[:int(ycurrhat.shape[0] / 2 + 1), :]     # keep only >0 freqs.
+
+        if p.compensateSRO and p.compType == 'closedloop':
+            # Compensate SROs
+            ycurrhat[:, 1] *= np.exp(1j * 2 * np.pi / p.blockSize * np.arange(ycurrhat.shape[0]) * varphi)
+
+        # Compute correlation matrix
+        yyH[l, :, :, :] = np.einsum('ij,ik->ijk', ycurrhat, ycurrhat.conj())
+
+        if l >= p.ld:
+
+            cohPosteriori = yyH[l, :, 0, 1] / np.sqrt(yyH[l, :, 0, 0] * yyH[l, :, 1, 1])     # a posteriori coherence
+            cohPriori = yyH[l - p.ld, :, 0, 1] / np.sqrt(yyH[l - p.ld, :, 0, 0] * yyH[l - p.ld, :, 1, 1])     # a posteriori coherence
+
+            sroEstCurr, acr = sro_est(wPos=cohPosteriori,
+                                wPri=cohPriori,
+                                avg_res_prod=acr,
+                                Ns=Ns,
+                                ld=p.ld,
+                                alpha=p.alpha,
+                                flagFirstSROEstimate=l==p.ld)
+
+            if p.compensateSRO:
+                sroResEst[l] = sroEstCurr
+                if p.compType == 'closedloop':
+                    sroEst[l] = sroEst[l - 1] + p.alphaEps * sroResEst[l]
+                    varphi += sroEst[l] * Ns
+                elif p.compType == 'openloop':
+                    varphi += sroEstCurr * Ns
+            else:
+                sroEst[l] = sroEstCurr
+
+        l += 1  # next frame
+
+    return sroEst, sroResEst

@@ -38,6 +38,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 mySettings = ProgramSettings(
     samplingFrequency=8000,
     # samplingFrequency=16000,
+    # samplingFrequency=44100,
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
     #
@@ -50,7 +51,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=20,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -68,13 +69,13 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
-        # SROsppm=0,
+        SROsppm=0,
         # SROsppm=[0, 50],
         # SROsppm=[0, 75],
-        SROsppm=[0, 100],
+        # SROsppm=[0, 100],
         # SROsppm=[0, 3000],
-        compensateSROs=True,
-        # compensateSROs=False,
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
@@ -88,11 +89,14 @@ mySettings = ProgramSettings(
             segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
             startAfterNupdates=11,
-            # alpha=0
-            alphaEps=0.01,
+            alpha=0.95,
+            # alphaEps=0.01,
             # alphaEps=0.05,
+            alphaEps=0.10,
             # alphaEps=0.25,
             # alphaEps=0.5,
+            loop='open',
+            # loop='closed',
         )
     ),
     # bypassFilterUpdates=True,
@@ -120,7 +124,7 @@ mySettings = ProgramSettings(
     )
 
 # Subfolder for export
-subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySettings.acousticScenarioPath).parent.name}'
+subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/forIWAENCsatWS/{Path(mySettings.acousticScenarioPath).parent.name}'
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
 experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.asynchronicity.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label

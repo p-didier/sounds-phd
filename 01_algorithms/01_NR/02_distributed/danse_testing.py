@@ -33,7 +33,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # fs=16000,    
     specificDesiredSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    sigDur=40,
+    sigDur=30,
     baseSNR=5,
     possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
     # possibleSROs=[int(ii) for ii in np.linspace(0, 1000, num=10)],
@@ -50,7 +50,8 @@ danseTestingParams = sro_testing.DanseTestingParameters(
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='DWACD',
-        estimateSROs='CohDrift',
+        # estimateSROs='CohDrift',
+        estimateSROs='Oracle',
         dwacd=DWACDParameters(
             seg_shift=2**11,
         ),

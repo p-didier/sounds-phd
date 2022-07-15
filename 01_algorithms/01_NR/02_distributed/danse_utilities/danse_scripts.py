@@ -220,6 +220,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     yyH = []                                        # instantaneous autocorrelation product
+    yyHuncomp = []                                  # instantaneous autocorrelation product with no SRO compensation (`CohDrift`, `loop='open'` SRO estimation setting)
     ryd = []                                        # cross-correlation between observations and estimations
     ytilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
@@ -266,6 +267,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
         Ryytilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # speech + noise
         yyH.append(np.zeros((numIterations, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
+        yyHuncomp.append(np.zeros((numIterations, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
         #
         bufferFlags.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
@@ -449,8 +451,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-                # Save uncompensated \tilde{y} (for DWACD-based SRO estimation)
+                # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
                 ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
+                yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
                 # Compensate SROs
                 if settings.asynchronicity.compensateSROs:
                     # Account for buffer flags
@@ -530,10 +533,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         for q in range(len(neighbourNodes[k])):
 
                             idxq = yLocalCurr.shape[-1] + q     # index of the compressed signal from node `q` inside `yyH`
-                            cohPosteriori = (yyH[k][i[k], :, 0, idxq]
-                                                    / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                            cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
-                                                    / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
+                            if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                                # Use SRO-compensated correlation matrix entries (closed-loop SRO est. + comp.)
+                                cohPosteriori = (yyH[k][i[k], :, 0, idxq]
+                                                        / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
+                                cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
+                                                        / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
+                            elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                                # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
+                                cohPosteriori = (yyHuncomp[k][i[k], :, 0, idxq]
+                                                        / np.sqrt(yyHuncomp[k][i[k], :, 0, 0] * yyHuncomp[k][i[k], :, idxq, idxq]))     # a posteriori coherence
+                                cohPriori = (yyHuncomp[k][i[k] - ld, :, 0, idxq]
+                                                        / np.sqrt(yyHuncomp[k][i[k] - ld, :, 0, 0] * yyHuncomp[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
 
                             sroRes, apr = subs.cohdrift_sro_estimation(
                                                 wPos=cohPosteriori,
@@ -583,14 +594,22 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if settings.asynchronicity.compensateSROs:
                     for q in range(len(neighbourNodes[k])):
                         if settings.asynchronicity.estimateSROs == 'CohDrift':
-                            # Increment estimate using SRO residual
-                            SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
+                            if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                                # Increment estimate using SRO residual
+                                SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
+                            elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                                # Use SRO "residual" as estimates
+                                SROsEstimates[k][q] = SROsResiduals[k][q]
                         # Save estimate evolution for later plotting
                         SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
                         # Increment phase shift factor recursively
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid direclty for oracle SRO ``estimation''
+                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
                     if k == 0:
                         phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
+
+                # import pandas as pd
+                # pd.DataFrame(np.real(wTilde[k][:, i[k], 0])).to_csv('U:/py/sounds-phd/97_tests/05_dsp_related/20220704_fir_design/sampleFilt_r.csv')   
+                # pd.DataFrame(np.imag(wTilde[k][:, i[k], 0])).to_csv('U:/py/sounds-phd/97_tests/05_dsp_related/20220704_fir_design/sampleFilt_i.csv')   
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
@@ -631,9 +650,22 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
+    # import matplotlib.pyplot as plt
+    # fig = plt.figure(figsize=(6,1.5))
+    # ax = fig.add_subplot(111)
+    # ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
+    # ax.invert_yaxis()
+    # ax.set_aspect('auto')
+    # ax.set_ylabel('Freq. bin $\kappa$')
+    # plt.show()
+    # stop = 1
+
     # Debugging
-    sroData.plotSROdata()
-    plt.show()
+    # fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
+    # plt.show()
+    # if 0:
+    #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.png')
+    #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.pdf')
 
     stop = 1
 

@@ -32,22 +32,46 @@ class SROdata:
     estimate : np.ndarray   # SRO estimates through time
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
 
-    def plotSROdata(self):
-        """Show evolution of SRO estimates / residuals through time."""
+    def plotSROdata(self, xaxistype='iterations', fs=16000, Ns=512):
+        """Show evolution of SRO estimates / residuals through time.
+        
+        Parameters
+        ----------
+        xaxistype : str
+            Type of x-axis ticks/label: "iterations" = DANSE iteration indices
+            "time" = time instants [s]
+        fs : float or int
+            Sampling frequency of the reference node [Hz].
+        Ns : int
+            Number of new samples per DANSE iteration. 
+
+        Returns
+        -------
+        fig : figure handle
+            Figure handle for further processing.
+        """
         
         nNodes = len(self.residuals)
 
         fig = plt.figure(figsize=(6,2))
         ax = fig.add_subplot(111)
         for k in range(nNodes):
-            ax.plot(self.residuals[k] * 1e6, f'C{k}--', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
-            ax.plot(self.estimate[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+            if self.compensation:
+                ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+                ax.plot(self.estimate[k] * 1e6, f'C{k}--', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+            else:
+                ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
             ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
                         xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
         ax.grid()
         ax.set_ylabel('[ppm]')
-        ax.set_xlabel('DANSE iteration $i$')
+        ax.set_xlabel('DANSE iteration $i$ [-]')
         ax.set_xlim([0, len(self.residuals[k])])
+        if xaxistype == 'time':
+            xticks = np.linspace(start=0, stop=len(self.residuals[0]), num=9)
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(np.round(xticks * Ns / fs, 1))
+            ax.set_xlabel('Time $t$ [s]')
         plt.legend(bbox_to_anchor=(1.05, 1.05))
         plt.title('SRO estimation through time')
         plt.tight_layout()
@@ -74,9 +98,18 @@ class CohDriftSROEstimationParameters():
         Exponential averaging constant.
     segLength : int 
         Number of DANSE filter updates per SRO estimation segment
-    TODO: ADD `estEvery` and `alphaEps`
+    estEvery : int
+        Estimate SRO every `estEvery` signal frames.
     startAfterNupdates : int 
         Minimum number of DANSE filter updates before first SRO estimation
+    estimationMethod : str
+        SRO estimation methods once frequency-wise estimates are obtained.
+        Options: "gs" (golden section search in time domain [1]), 
+                "mean" (similar to Online WACD implementation [2]),
+                "ls" (least-squares estimate over frequency bins [3])
+    alphaEps : float
+        Residual SRO incrementation factor:
+        $\\hat{\\varepsilon}^i = \\hat{\\varepsilon}^{i-1} + `alphaEps` * \\Delta\\varepsilon^i$
 
     References
     ----------
@@ -106,9 +139,11 @@ class CohDriftSROEstimationParameters():
     estimationMethod : str = 'gs'       # options: "gs" (golden section search in time domain [1]), 
                                         # "mean" (similar to Online WACD implementation [2]),
                                         # "ls" (least-squares estimate over frequency bins [3])
-    alphaEps : float = .05              # residual SRO incrementation factor:
-                                        # $\hat{\varepsilon}^i = \hat{\varepsilon}^{i-1} + `alphaEps` * \Delta\varepsilon^i$
-
+    alphaEps : float = .05              # residual SRO incrementation factor
+    loop : str = 'closed'               # SRO estimation + compensation loop type
+                                        # "closed": feedback loop, using SRO-compensated signals for estimation
+                                        # "open": no feedback, using SRO-uncompensated signals for estimation
+    
 @dataclass
 class DWACDParameters():
     """
@@ -184,6 +219,7 @@ class SamplingRateOffsets():
                 if inn in ['Y', 'y']:
                     print('Setting `compensateSROs` to `False`.')
                     self.compensateSROs = False
+                    self.plotResult = False     # <-- no need to plot
                 else:
                     print('Keeping `compensateSROs` as `True`.')
 
