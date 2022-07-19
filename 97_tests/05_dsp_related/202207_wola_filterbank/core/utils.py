@@ -34,7 +34,7 @@ def wola_fd_broadcast(x, Nh, R, w):
     ii = 0
     chunks = np.zeros((nframes, Nh))
     while True:
-        idxBeg = ii*R
+        idxBeg = ii * R
         idxEnd = idxBeg + Nh
         if idxEnd > len(x):
             break
@@ -97,51 +97,69 @@ def wola_td_broadcast(x, Nh, w, updateFilterEveryXsamples=1):
             for kappa in range(Nh):
 
                 # w[kappa] = 1
+                # w = 1
 
                 term = np.fft.fft(W ** (kappa * np.arange(len(h))) * h, Nh, axis=0)\
                     * w[kappa]\
                     * np.fft.fft(W ** (kappa * np.arange(len(h))) * f, Nh, axis=0)
+                # term = np.fft.fft(W ** (kappa * np.arange(len(h))) * h, Nh, axis=0)\
+                #     * w\
+                #     * np.fft.fft(W ** (kappa * np.arange(len(h))) * f, Nh, axis=0)
+                # term = np.fft.fft(W ** (kappa * np.arange(len(h))) * h, Nh, axis=0)
                 term /= h.sum()     # normalize for analysis window
+                # term /= Nh     # normalize for analysis window
+                
 
                 terms[kappa, :] = term
 
+                T += term
+
                 # if kappa == Nh - 1:
-                #     fig, axes = plt.subplots(1,1)
+                #     fig, axes = plt.subplots(2,1)
                 #     fig.set_size_inches(6.5, 2.5)
-                #     axes.plot(20*np.log10(np.abs(terms.T)), label='individual channel filters')
+                #     axes[0].plot(20*np.log10(np.abs(terms.T)), label='individual channel filters')
                 #     # axes.plot(np.sum(20*np.log10(np.abs(terms)), axis=0), 'k')
-                #     axes.plot(20*np.log10(np.abs(T)), 'k', label='fullband filter')
-                #     axes.plot(20*np.log10(np.abs(w)), 'r--', label='spectral modifications')
-                #     axes.grid()
-                #     axes.set_ylim([-50, 100])
-                #     axes.set_title(f'Sample #{n+1}')
+                #     axes[0].plot(20*np.log10(np.abs(T)), 'k', label='fullband filter')
+                #     axes[0].plot(20*np.log10(np.abs(w)), 'r--', label='spectral modifications $w$')
+                #     axes[0].grid()
+                #     # axes[0].legend()
+                #     # axes[0].set_ylim([-50, 100])
+                #     axes[0].set_title(f'Sample #{n+1} -- Magnitude of $T(z)$ [dB]')
+                #     # axes[0].set_title(f'Magnitude of $T(z)$ [dB]')
+                #     axes[1].plot(np.angle(terms.T), label='individual channel filters')
+                #     axes[1].plot(np.angle(T), 'k', label='fullband filter')
+                #     axes[1].plot(np.angle(w), 'r--', label='spectral modifications $w$')
+                #     axes[1].set_title('Phase angle of $T(z)$ [rad]')
+                #     axes[1].grid()
+                #     # axes[1].legend()
                 #     plt.tight_layout()	
                 #     plt.show()
 
                 #     stop = 1
 
-                T += term
             T /= Nh
+            # DEBUGGING vvv
+            # T = np.ones_like(T)
             # Time-domain version of distortion filter
             t = np.fft.ifft(T, Nh, axis=0)
             t = np.real_if_close(t)
             lastUpdate = n
 
     
-            fig, axes = plt.subplots(1,1)
-            fig.set_size_inches(8.5, 3.5)
-            axes.plot(t, label='IFFT(T)')
-            axes.plot(np.real_if_close(np.fft.ifft(w)), '--', label='IFFT(w)')
-            axes.grid()
-            axes.legend()
-            plt.tight_layout()	
-            plt.show()
+            # fig, axes = plt.subplots(1,1)
+            # fig.set_size_inches(8.5, 3.5)
+            # axes.plot(t, label='IFFT(T)')
+            # axes.plot(np.real_if_close(np.fft.ifft(w)), '--', label='IFFT(w)')
+            # axes.grid()
+            # axes.legend()
+            # plt.tight_layout()	
+            # plt.show()
 
         # Perform convolution
         if n < Nh:
-            currChunk = np.concatenate((np.zeros(Nh - n), x[:n]))
+            currChunk = np.concatenate((np.zeros(Nh - n - 1), x[:n + 1]))
         else:
-            currChunk = x[(n - Nh):n]
+            currChunk = x[(n + 1 - Nh):n + 1]
 
         # # Convolve
         # tmp = sig.convolve(currChunk, t, mode='valid')
@@ -176,19 +194,19 @@ def plotit(z, z_fromtd, idx, unwrapPhase=False):
 
     fig, axes = plt.subplots(2,1)
     fig.set_size_inches(12.5, 3.5)
-    axes[0].plot(20*np.log10(np.abs(z[:, idx])), label='From FD')
-    axes[0].plot(20*np.log10(np.abs(z_fromtd[:, idx])), label='From TD')
+    axes[0].plot(20*np.log10(np.abs(z[:, idx]))[:int(len(z) // 2 + 1)], label='From FD')
+    axes[0].plot(20*np.log10(np.abs(z_fromtd[:, idx]))[:int(len(z) // 2 + 1)], label='From TD')
     axes[0].legend()
     axes[0].grid()
     axes[0].set_title(f'Frame #{idx+1} -- Magnitude [dB]')
     # Filter coefficients
     if not unwrapPhase:
-        axes[1].plot(np.angle(z[:, idx]), label='From FD')
-        axes[1].plot(np.angle(z_fromtd[:, idx]), label='From TD')
+        axes[1].plot(np.angle(z[:, idx])[:int(len(z) // 2 + 1)], label='From FD')
+        axes[1].plot(np.angle(z_fromtd[:, idx])[:int(len(z) // 2 + 1)], label='From TD')
         axes[1].set_title('Phase angle [rad]')
     else:
-        axes[1].plot(np.unwrap(np.angle(z[:, idx])), label='From FD')
-        axes[1].plot(np.unwrap(np.angle(z_fromtd[:, idx])), label='From TD')
+        axes[1].plot(np.unwrap(np.angle(z[:, idx]))[:int(len(z) // 2 + 1)], label='From FD')
+        axes[1].plot(np.unwrap(np.angle(z_fromtd[:, idx]))[:int(len(z) // 2 + 1)], label='From TD')
         axes[1].set_title('Phase angle [rad] (unwrapped)')
     axes[1].legend()
     axes[1].grid()

@@ -217,6 +217,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     wTilde = []                                     # filter coefficients - using full-observations vectors (also data coming from neighbors)
     wTildeExternal = []                             # external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` seconds
     wTildeExternalTarget = []                       # target external filter coefficients - used for broadcasting only, updated every `settings.timeBtwExternalFiltUpdates` 
+    wIR = []                                        # time-domain filters, for compressing and broadcasting 
     Rnntilde = []                                   # autocorrelation matrix when VAD=0 - using full-observations vectors (also data coming from neighbors)
     Ryytilde = []                                   # autocorrelation matrix when VAD=1 - using full-observations vectors (also data coming from neighbors)
     yyH = []                                        # instantaneous autocorrelation product
@@ -258,6 +259,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
+        wtmp = np.zeros((frameSize, sum(asc.sensorToNodeTags == k + 1)), dtype=complex)
+        wtmp[0, 0] = 1   # initialize time-domain filter as Dirac for first sensor signal
+        wIR.append(wtmp)
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
@@ -349,6 +353,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
+    previousTDfilterUpdate = np.zeros(asc.numNodes)
 
     tprint = -printingInterval      # printouts timing
 
@@ -375,11 +380,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Extract current local data chunk
                 idxEndChunk = int(np.floor(t * fs[k]))
                 if settings.broadcastDomain == 't':
-                    idxBegChunk = np.amax([idxEndChunk - 2 * frameSize, 0])   # don't go into negative sample indices!
+                    idxBegChunk = np.amax([idxEndChunk - frameSize, 0])   # don't go into negative sample indices!
                     yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
                     # Pad zeros at beginning if needed
-                    if idxEndChunk - idxBegChunk < 2 * frameSize:   # Using 2*N to keep power of 2 for FFT
-                        yLocalCurr = np.concatenate((np.zeros((2 * frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
+                    if idxEndChunk - idxBegChunk < frameSize:   # Using 2*N to keep power of 2 for FFT
+                        yLocalCurr = np.concatenate((np.zeros((frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
                 elif settings.broadcastDomain == 'f':
                     idxBegChunk = np.amax([idxEndChunk - frameSize, 0])   # don't go into negative sample indices!
                     yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
@@ -388,7 +393,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         yLocalCurr = np.concatenate((np.zeros((frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
 
                 # Perform broadcast -- update all buffers in network
-                zBuffer = subs.broadcast(
+                zBuffer, wIR[k], previousTDfilterUpdate[k] = subs.broadcast(
                             t,
                             k,
                             fs[k],
@@ -400,7 +405,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             lk,
                             zBuffer,
                             settings.broadcastDomain,
+                            previousTDfilterUpdate=previousTDfilterUpdate[k],
+                            wIRprevious=wIR[k]
                         )
+
+                stop = 1
                     
             elif event == 'update':         # <-- DANSE filter update
 
@@ -434,6 +443,14 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 if settings.broadcastDomain == 't':
                     zFull[k] = np.concatenate((zFull[k], z[k][Ns:, 0]))     # selecting the first neighbor (index 0)
+
+                # import matplotlib.pyplot as plt
+                # fig, axes = plt.subplots(1,1)
+                # fig.set_size_inches(8.5, 3.5)
+                # axes.plot(z[k])
+                # axes.grid()
+                # plt.tight_layout()	
+                # plt.show()
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -485,7 +502,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # startUpdates[k] = True
 
                 if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
-                    # No `for`-loop versions
+                    # No `for`-loop versions 
                     if settings.performGEVD:    # GEVD update
                         wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                         if settings.computeLocalEstimate:

@@ -554,7 +554,7 @@ class Signals(object):
                 txt = f'{np.round(stoiImpLocalVsGlobal, 2)}'
                 if np.round(stoiImpLocalVsGlobal, 2) > 0:
                     txt = f'+{txt}'
-                ax.set_title(f'Local vs. global STOI improvement: {txt}')
+                ax.set_title(f'Local vs. global eSTOI improvement: {txt}')
             ax = fig.add_subplot(nRows,2,4)     # Sensor signals
             data = 20 * np.log10(np.abs(np.squeeze(self.sensorSignals_STFT[:, :, effectiveSensorIdx])))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], 'Noisy')
@@ -642,26 +642,26 @@ class Signals(object):
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Best: Node {bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
+        plt.title(f'Best: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-        plt.title(f'Worst: Node {worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
+        plt.title(f'Worst: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         colorb.set_label('[dB]')
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: Node {bestNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
+            plt.title(f'Local estimate: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
-            plt.title(f'Local estimate: Node {worstNodeIdx + 1} (STOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
+            plt.title(f'Local estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             colorb.set_label('[dB]')
         plt.tight_layout()
@@ -792,7 +792,7 @@ class Results(object):
         #
         ax = fig1.add_subplot(1, 4, 3)   # STOI
         metrics_subplot(numNodes, ax, barWidth, self.enhancementEval.stoi)
-        ax.set(title='STOI')
+        ax.set(title='eSTOI')
         ax.set_ylim([0, 1])
         #
         ax = fig1.add_subplot(1, 4, 4)   # PESQ

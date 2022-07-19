@@ -134,7 +134,7 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs, extended=True)
     myStoi.diff = myStoi.after - myStoi.before
     if flagLocal:
-        myStoi.afterLocal = stoi_fcn(cleanSignal, enhancedSignalLocal, fs)
+        myStoi.afterLocal = stoi_fcn(cleanSignal, enhancedSignalLocal, fs, extended=True)
         myStoi.diffLocal = myStoi.afterLocal - myStoi.before
     # Perceptual Evaluation of Speech Quality (PESQ)
     if fs in [8e3, 16e3]:

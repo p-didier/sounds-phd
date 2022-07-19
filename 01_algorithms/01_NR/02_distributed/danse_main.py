@@ -60,9 +60,10 @@ mySettings = ProgramSettings(
     stftWinLength=2**10,
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
+    broadcastDomain='f',
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # broadcastDomain='t',
-    broadcastDomain='f',
+    # broadcastLength=16,
     # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #

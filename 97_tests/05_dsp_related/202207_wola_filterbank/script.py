@@ -49,8 +49,18 @@ def main():
     for ii in range(nchunks):
         zchunkedtd[:, ii] = copy.copy(ztd[(ii * p.R):(ii * p.R + p.Nh)])
         zchunked[:, ii] = np.fft.fft(zchunkedtd[:, ii] * np.sqrt(np.hanning(p.Nh)), p.Nh, axis=0)
+        # zchunked[:, ii] = np.fft.fft(zchunkedtd[:, ii], p.Nh, axis=0)
         zchunkedtd_naive[:, ii] = copy.copy(ztd_naive[(ii * p.R):(ii * p.R + p.Nh)])
         zchunked_naive[:, ii] = np.fft.fft(zchunkedtd_naive[:, ii] * np.sqrt(np.hanning(p.Nh)), p.Nh, axis=0)
+
+    
+    # import matplotlib.pyplot as plt
+    # fig, axes = plt.subplots(1,1)
+    # fig.set_size_inches(8.5, 3.5)
+    # idx = 100
+    # axes.plot(chunks[idx, :])
+    # axes.plot(zchunkedtd[:, idx])
+
 
     # import simpleaudio as sa
     # import time
@@ -72,19 +82,14 @@ def main():
     # fig.set_size_inches(8.5, 3.5)
     # axes.plot(x, label='original $x$')
     # axes.plot(ztd, label='$z$ TD, equivalent WOLA')
-    # axes.plot(ztd_naive, label='$z$ TD, naive')
+    # # axes.plot(ztd_naive, label='$z$ TD, naive')
     # axes.legend()
-    # # axes[0].plot(chunks.T / np.amax(chunks))
-    # # axes[1].plot(zchunkedtd / np.amax(zchunkedtd))
-    # # axes.plot(20*np.log10(np.abs(zchunked)))
-    # # axes.plot(20*np.log10(np.abs(z)))
-    # # axes.grid()
     # plt.tight_layout()	
     # plt.show()
 
     # Plot
-    # c.plotit(z, zchunked, 100, unwrapPhase=True)
-    c.plotit(z, zchunked_naive, 75, unwrapPhase=True)
+    c.plotit(z, zchunked, 100, unwrapPhase=False)
+    # c.plotit(z, zchunked_naive, 100, unwrapPhase=False)
 
     stop = 1
 

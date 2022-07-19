@@ -1,8 +1,9 @@
 
-from random import random
+import copy
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
+import scipy.signal as sig
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
@@ -466,17 +467,21 @@ def danse_compression_freq_domain(yq, wHat):
     return zqHat
 
 
-def danse_compression(yq, wHat, n):
-    """Performs local signals compression according to DANSE theory [1].
+def danse_compression_timed(yq, wqqHat, n, L, wIRprevious, updateBroadcastFilter=False):
+    """Performs local signals compression according to DANSE theory [1],
+    in the time-domain (to be able to broadcast the compressed signal sample
+    per sample between nodes).
     
     Parameters
     ----------
     yq : [Ntotal x nSensors] np.ndarray (real)
         Local sensor signals.
-    wHat : [N/2 x nSensors] np.ndarray (real or complex)
+    wqqHat : [N/2 x nSensors] np.ndarray (real or complex)
         Frequency-domain local filter estimate (from latest DANSE iteration).
     n : int
         FFT order.
+    L : int
+        Broadcast length [samples].
         
     Returns
     -------
@@ -484,60 +489,110 @@ def danse_compression(yq, wHat, n):
         Compress local sensor signals (1-D).
     """
 
-    # Check for single-sensor case
-    flagSingleSensor = False
-    if wHat.shape[-1] == 1:
-        wHat = np.squeeze(wHat)
-        yq = np.squeeze(yq)
-        flagSingleSensor = True
+    if updateBroadcastFilter:
+        # TODO: don't hard code window
+        h = np.sqrt(np.hanning(n))
+        f = copy.copy(h)
+
+        # Exponential complex factor (typical 'FFT' notation `W`)
+        Wn = np.exp(1j * 2 * np.pi / n) 
+        # Complete wqq (also negative frequencies)
+        wqqHat[0, :] = wqqHat[0, :].real      # Set DC to real value
+        wqqHat[-1, :] = wqqHat[-1, :].real    # Set Nyquist to real value
+        wqqHat = np.concatenate((wqqHat, np.flip(wqqHat[:-1, :].conj(), axis=0)[:-1, :]), axis=0)  # make symmetric
+        # Compute distortion transfer function
+        Tdist = np.zeros_like(wqqHat, dtype=complex)
+        for kappa in range(n):
+            term = np.fft.fft(Wn ** (kappa * np.arange(len(h))) * h, n, axis=0)\
+                * wqqHat[kappa, :]\
+                * np.fft.fft(Wn ** (kappa * np.arange(len(h))) * f, n, axis=0)
+            term /= h.sum()     # normalize for analysis window
+            if term.ndim == 1:
+                term = term[:, np.newaxis]
+            Tdist += term
+        Tdist /= n
+
+        # Time-domain version of distortion transfer function
+        wIR = np.fft.ifft(Tdist, n, axis=0)
+        wIR = np.real_if_close(wIR)
+    else:
+        wIR = wIRprevious
+
+    # # Transform frequency domain filter to time domain impulse response
+    # wIR = back_to_time_domain(wqqHat, n, axis=0)
+    # wIR = np.real_if_close(wIR)
     
-    # Transform frequency domain filter to time domain impulse response
-    wIR = back_to_time_domain(wHat, n, axis=0)      # TODO: 2022/03/25 -- the IR is not causal (increasing amplitude at the tail) [see Word journal week12 FRI]
-    wIR = np.real_if_close(wIR)
+    # Basic check
+    if yq.shape != wIR.shape:
+        raise ValueError('Dimensions mismatch between the local sensor chunk and the local filters.')
 
-    # Append zeros for OLS processing (matching input signal chunk length)
-    nTotal = yq.shape[0]
-    if flagSingleSensor:
-        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0],))), axis=0)
-    else:
-        wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(8,4))
-    # ax = fig.add_subplot(111)
-    # ax.plot(wIR)
-    # ax.grid()
-    # plt.tight_layout()	
-    # plt.show()
-
-    # Go (back) to frequency domain
-    wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding (combined with the non-causality of the IR?) creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
-    yqHat = np.fft.fft(np.squeeze(yq), nTotal, axis=0)
-
-    # Apply compression
-    if flagSingleSensor:
-        # Keep only positive frequencies
-        wHatFull = wHatFull[:int(nTotal/2 + 1)]
-        yqHat = yqHat[:int(nTotal/2 + 1)]
-        # Apply linear combination to form compressed signal
-        zqHat = wHatFull.conj() * yqHat     # single sensor = simple element-wise multiplication
-    else:
-        # Keep only positive frequencies
-        wHatFull = wHatFull[:int(nTotal/2 + 1), :]
-        yqHat = yqHat[:int(nTotal/2 + 1), :]
-        # Apply linear combination to form compressed signal
-        zqHat = np.einsum('ij,ij->i', wHatFull.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-
-    # Go back to time domain 
-    zq = back_to_time_domain(zqHat, nTotal)
-    zq = np.real_if_close(zq)
-
-    # Discard oldest (incorrect) samples
-    zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
+    # Perform convolution
+    yfiltLastSamples = np.zeros((L, yq.shape[-1]))
+    for idxSensor in range(yq.shape[-1]):
+        # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
+        tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='same')
+        yfiltLastSamples[:, idxSensor] = tmp[(n // 2 + 1 - L):(n // 2 + 1)]     # extract the `L` sample preceding the middle of the convolution output
+    zq = np.sum(yfiltLastSamples, axis=1)
 
     stop = 1
 
-    return zq
+    # fig, axes = plt.subplots(1,1)
+    # fig.set_size_inches(8.5, 3.5)
+    # axes.plot(wIR)
+    # axes.grid()
+    # plt.tight_layout()	
+    # plt.show()
+    
+    # # Check for single-sensor case
+    # flagSingleSensor = False
+    # if wqqHat.shape[-1] == 1:
+    #     wqqHat = np.squeeze(wqqHat)
+    #     yq = np.squeeze(yq)
+    #     flagSingleSensor = True
+    
+    # # Append zeros for OLS processing (matching input signal chunk length)
+    # nTotal = yq.shape[0]
+    # if flagSingleSensor:
+    #     wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0],))), axis=0)
+    # else:
+    #     wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
+
+    # # import matplotlib.pyplot as plt
+    # # fig = plt.figure(figsize=(8,4))
+    # # ax = fig.add_subplot(111)
+    # # ax.plot(wIR)
+    # # ax.grid()
+    # # plt.tight_layout()	
+    # # plt.show()
+
+    # # Go (back) to frequency domain
+    # wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding (combined with the non-causality of the IR?) creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
+    # yqHat = np.fft.fft(np.squeeze(yq), nTotal, axis=0)
+
+    # # Apply compression
+    # if flagSingleSensor:
+    #     # Keep only positive frequencies
+    #     wHatFull = wHatFull[:int(nTotal/2 + 1)]
+    #     yqHat = yqHat[:int(nTotal/2 + 1)]
+    #     # Apply linear combination to form compressed signal
+    #     zqHat = wHatFull.conj() * yqHat     # single sensor = simple element-wise multiplication
+    # else:
+    #     # Keep only positive frequencies
+    #     wHatFull = wHatFull[:int(nTotal/2 + 1), :]
+    #     yqHat = yqHat[:int(nTotal/2 + 1), :]
+    #     # Apply linear combination to form compressed signal
+    #     zqHat = np.einsum('ij,ij->i', wHatFull.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+
+    # # Go back to time domain 
+    # zq = back_to_time_domain(zqHat, nTotal)
+    # zq = np.real_if_close(zq)
+
+    # # Discard oldest (incorrect) samples
+    # zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
+
+    # stop = 1
+
+    return zq, wIR
 
 
 def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize, Ns, L, lastExpectedIter, broadcastDomain):
@@ -775,6 +830,10 @@ def fill_buffers(k, neighbourNodes, lk, zBuffer, zLocalK, L):
         Updated compressed signals buffers for each node and its neighbours.
     """
 
+    # Check for sample-per-sample broadcast scheme
+    if isinstance(zLocalK, float):
+        zLocalK = [zLocalK]
+
     # Loop over neighbors of `k`
     for idxq in range(len(neighbourNodes[k])):
         q = neighbourNodes[k][idxq]                 # network-wide index of node `q` (one of node `k`'s neighbors)
@@ -919,8 +978,8 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
     numBroadcastsInTtot = np.floor(Ttot * fs / L)   # expected number of broadcasts per node over total signal length
     broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] + activationDelays[k]/fs[k] for k in range(nNodes)]   # expected broadcast instants
     #                              ^ note that we only start broadcasting when we have enough samples to perform compression
-    # Ensure that all nodes have broadcasted at least once before performing any update
-    minWaitBeforeUpdate = np.amax([v[0] for v in broadcastInstants])
+    # Ensure that all nodes have broadcasted enough times to perform any update
+    minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
     for k in range(nNodes):
         updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
     
@@ -1043,7 +1102,7 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
     return outputEvents
 
 
-def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomain):
+def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomain, previousTDfilterUpdate, wIRprevious):
     """Performs the broadcast of data from node `k` to its neighbours.
     
     Parameters
@@ -1083,8 +1142,14 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomai
 
     else:
         if broadcastDomain == 't':
+            updateBroadcastFilter = False
+            if np.abs(t - previousTDfilterUpdate) >= 1:
+                updateBroadcastFilter = True
+                previousTDfilterUpdate = t
             # Compress current data chunk in the frequency domain
-            zLocal = danse_compression(yk, w, n)              # local compressed signals
+            zLocal, wIR = danse_compression_timed(yk, w, n, L,
+                                wIRprevious=wIRprevious,
+                                updateBroadcastFilter=updateBroadcastFilter)              # local compressed signals
 
             zBuffer = fill_buffers(k, neighbourNodes, lk, zBuffer, zLocal, L)
 
@@ -1092,11 +1157,13 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer, broadcastDomai
             # Frequency-domain broadcasting
             zLocalHat = danse_compression_freq_domain(yk, w)  # local compressed signals (freq.-domain)
 
-            zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat)  
+            zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat) 
+
+            wIR = None  # freq.-domain broadcasting: no IR filter 
 
         lk[k] += 1  # increment local broadcast index
 
-    return zBuffer
+    return zBuffer, wIR, previousTDfilterUpdate
 
 
 def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
