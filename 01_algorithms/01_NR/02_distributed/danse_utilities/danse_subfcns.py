@@ -1207,3 +1207,41 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
         Rnn = beta * Rnn + (1 - beta) * yyH  # update noise-only matrix
 
     return Ryy, Rnn, yyH
+
+
+def local_chunk_for_broadcast(y, t, fs, bd, N):
+    """Extract correct chunk of local signals for broadcasting.
+    
+    Parameters
+    ----------
+    y : [Ntot x Mk] np.ndarray (float)
+        Time-domain locally recorded signal (at `Mk` sensors).
+    t : float
+        Current time instant [s].
+    fs : int or float
+        Transmitting node's sampling frequency [Hz].
+    bd : str
+        Inter-node data broadcasting domain:
+        -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
+        -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
+        -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
+    N : int
+        Frame size (= FFT size in DANSE).
+
+    Returns
+    -------
+    Ryy : [N x M x M] np.ndarray (real or complex)
+        New Ryy matrices (for each time frame /or/ each frequency line).
+    """
+
+    idxEnd = int(np.floor(t * fs))
+    if bd == 'wholeChunk_fd':
+        idxBeg = np.amax([idxEnd - N, 0])   # don't go into negative sample indices!
+        chunk = y[idxBeg:idxEnd, :]
+        # Pad zeros at beginning if needed
+        if idxEnd - idxBeg < N:
+            chunk = np.concatenate((np.zeros((N - chunk.shape[0], chunk.shape[1])), chunk))
+    elif bd == 'wholeChunk_td':
+        raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: Implement this
+
+    return chunk

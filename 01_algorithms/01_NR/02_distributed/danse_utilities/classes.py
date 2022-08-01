@@ -261,7 +261,7 @@ class ProgramSettings(object):
     broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
                                             # -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
                                             # -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
-                                            # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, bnoadcast L≪N_s samples at a time.
+                                            # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
@@ -519,9 +519,9 @@ class Signals(object):
             # -------- Desired signal _local_ estimate waveform -------- 
             if settings.computeLocalEstimate:
                 ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
-                deltaNextWaveform = 6*delta
+                deltaNextWaveform = 6 * delta
             else:
-                deltaNextWaveform = 4*delta
+                deltaNextWaveform = 4 * delta
             ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')

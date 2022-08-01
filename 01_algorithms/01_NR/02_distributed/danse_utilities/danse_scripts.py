@@ -277,12 +277,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         bufferFlags.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
         bufferLengths.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))
         #
-        if settings.broadcastDomain == 't':
+        if settings.broadcastDomain == 'wholeChunk_td':
             z.append(np.empty((frameSize, 0), dtype=float))
-        elif settings.broadcastDomain == 'f':
+        elif settings.broadcastDomain == 'wholeChunk_fd':
             z.append(np.empty((numFreqLines, 0), dtype=complex))
-        zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        elif settings.broadcastDomain == 'fewSamples_td':
+            raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: Implement this
         #
+        zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        # SRO stuff vvv
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
@@ -294,7 +297,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         avgProdResiduals.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
         avgProdResidualsRyy.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
         avgProdResidualsRnn.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
-        #
+        # If local estimate is to be computed vvv
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
             wtmp = np.zeros((numFreqLines, numIterations + 1, dimYLocal[k]), dtype=complex)
@@ -377,21 +380,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             if event == 'broadcast':        # <-- data compression + broadcast to neighbour nodes
                 
                 # Extract current local data chunk
-                idxEndChunk = int(np.floor(t * fs[k]))
-                if settings.broadcastDomain == 't':
-                    idxBegChunk = np.amax([idxEndChunk - frameSize, 0])   # don't go into negative sample indices!
-                    yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-                    # Pad zeros at beginning if needed
-                    if idxEndChunk - idxBegChunk < frameSize:   # Using 2*N to keep power of 2 for FFT
-                        yLocalCurr = np.concatenate((np.zeros((frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
-                elif settings.broadcastDomain == 'f':
-                    idxBegChunk = np.amax([idxEndChunk - frameSize, 0])   # don't go into negative sample indices!
-                    yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
-                    # Pad zeros at beginning if needed
-                    if idxEndChunk - idxBegChunk < frameSize:
-                        yLocalCurr = np.concatenate((np.zeros((frameSize - yLocalCurr.shape[0], yLocalCurr.shape[1])), yLocalCurr))
+                yLocalCurr = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
+                                                            t,
+                                                            fs[k],
+                                                            settings.broadcastDomain,
+                                                            frameSize)
 
-                # Perform broadcast -- update all buffers in network
+                # Perform broadcast -- update all relevant buffers in network
                 zBuffer, wIR[k], previousTDfilterUpdate[k] = subs.broadcast(
                             t,
                             k,
