@@ -126,7 +126,7 @@ mySettings = ProgramSettings(
     )
 
 # Subfolder for export
-subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/forIWAENCsatWS/{Path(mySettings.acousticScenarioPath).parent.name}'
+subfolder = f'testing_SROs/single_tests/{mySettings.danseUpdating}/{Path(mySettings.acousticScenarioPath).parent.name}'
 # experimentName = f'SROcompTesting/SROs{mySettings.SROsppm}' # experiment reference label
 # experimentName = f'testing_SROs/single_tests/{mySettings.danseUpdating}_{[int(sro) for sro in mySettings.SROsppm]}ppm' # experiment reference label
 experimentName = f'{Path(mySettings.acousticScenarioPath).name}_{[int(sro) for sro in mySettings.asynchronicity.SROsppm]}ppm_{int(mySettings.signalDuration)}s' # experiment reference label

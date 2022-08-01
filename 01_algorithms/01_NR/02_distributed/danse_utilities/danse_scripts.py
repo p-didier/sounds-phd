@@ -422,6 +422,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 else:
                     numUpdatesRnn[k] += 1
                 
+                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
                 # Process buffers
                 z[k], bufferFlags = subs.process_incoming_signals_buffers(
@@ -435,6 +437,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     lastExpectedIter=numIterations - 1,
                                     broadcastDomain=settings.broadcastDomain)
 
+                # raise ValueError('[WAIT UP]') # TODO: adapt 'settings.broadcastDomain'
                 if settings.broadcastDomain == 't':
                     zFull[k] = np.concatenate((zFull[k], z[k][Ns:, 0]))     # selecting the first neighbor (index 0)
 
@@ -448,11 +451,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Go to frequency domain
                     ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                     ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
-                elif settings.broadcastDomain == 'f':
+                elif settings.broadcastDomain == 'wholeChunk_fd':
                     # Broadcasting done in frequency-domain
                     yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
                 # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
                 ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])

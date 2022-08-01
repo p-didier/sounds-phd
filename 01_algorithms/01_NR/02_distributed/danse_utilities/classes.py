@@ -294,14 +294,14 @@ class ProgramSettings(object):
             else:
                 self.asynchronicity.dwacd.nFiltUpdatePerSeg = nFilterUpdatesBtwConsecutiveDWACDSROupdates
         # Check for frequency-domain broadcasting option
-        if self.broadcastDomain == 'wholeChunk_fd':
+        if 'wholeChunk' in self.broadcastDomain:
             if self.broadcastLength != self.stftWinLength / 2:
-                val = input(f'Frequency-domain broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
+                val = input(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
                 if val in ['y', 'Y']:
                     self.broadcastLength = self.stftWinLength / 2
                 else:
                     raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
-        elif self.broadcastDomain != 'wholeChunk_td' and self.broadcastDomain != 'fewSamples_td':
+        if self.broadcastDomain not in ['wholeChunk_td', 'wholeChunk_fd', 'fewSamples_td']:
             raise ValueError(f'The broadcasting domain must be "wholeChunk_fd", "wholeChunk_td", or "fewSamples_td" (current value: "{self.broadcastDomain}").')
         # Adapt formats
         self.asynchronicity.SROsppm = sto_sro_formatting(self.asynchronicity.SROsppm)
