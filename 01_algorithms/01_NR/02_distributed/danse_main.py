@@ -108,8 +108,8 @@ mySettings = ProgramSettings(
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
-    # performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
-    performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
+    performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
+    # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node

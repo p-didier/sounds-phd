@@ -257,7 +257,7 @@ class ProgramSettings(object):
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
-    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
+    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'wholeChunk' or time 't' [default]
     # Broadcasting parameters
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     # Speech enhancement metrics parameters

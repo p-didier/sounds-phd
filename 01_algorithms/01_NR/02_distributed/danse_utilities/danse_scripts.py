@@ -294,7 +294,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         avgProdResiduals.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
         avgProdResidualsRyy.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
         avgProdResidualsRnn.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
-        # avgProdResiduals.append(0+0j)   # <-- are actually initialized with arrays at the first SRO estimation iteration
         #
         if settings.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
@@ -341,7 +340,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                             asc.nodeLinks
                                             )
 
-    # Extra variables -- TEMPORARY: TODO -- to be treated and integrated more neatly
+    # Extra variables -- TEMPORARY: TODO: -- to be treated and integrated more neatly
     zFull = []
     SROresidualThroughTime = []
     SROestimateThroughTime = []
@@ -443,14 +442,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 if settings.broadcastDomain == 't':
                     zFull[k] = np.concatenate((zFull[k], z[k][Ns:, 0]))     # selecting the first neighbor (index 0)
-
-                # import matplotlib.pyplot as plt
-                # fig, axes = plt.subplots(1,1)
-                # fig.set_size_inches(8.5, 3.5)
-                # axes.plot(z[k])
-                # axes.grid()
-                # plt.tight_layout()	
-                # plt.show()
 
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -623,10 +614,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
                     if k == 0:
                         phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
-
-                # import pandas as pd
-                # pd.DataFrame(np.real(wTilde[k][:, i[k], 0])).to_csv('U:/py/sounds-phd/97_tests/05_dsp_related/20220704_fir_design/sampleFilt_r.csv')   
-                # pd.DataFrame(np.imag(wTilde[k][:, i[k], 0])).to_csv('U:/py/sounds-phd/97_tests/05_dsp_related/20220704_fir_design/sampleFilt_i.csv')   
 
                 # ----- Compute desired signal chunk estimate -----
                 dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850

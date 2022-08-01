@@ -692,10 +692,13 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, frameSize
                 zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
             
             elif Bq == nExpectedFreqLines:     # correctly filled-in buffer
-                # if ik == 0: # first DANSE iteration case -- we are expecting an abnormally full buffer, with an entire DANSE chunk size inside of it
-                zCurrBuffer = zBufferk[idxq]
-                # else:
-                #     zCurrBuffer = np.concatenate((zPreviousk[-(frameSize - Bq):, idxq], zBufferk[idxq]), axis=0)
+                # if ik == 0:     # first iteration, no "previous" buffer yet
+                    zCurrBuffer = zBufferk[idxq]
+                # else:             # vvvvv TRIALS on WED, week 30, 2022
+                #     zk_td = np.fft.ifft(zBufferk[idxq], frameSize, axis=0)
+                #     zk_td_prev = np.fft.ifft(zPreviousk[:, idxq], frameSize, axis=0)
+                #     zk_td_w = zk_td * np.sqrt(np.hanning(frameSize))   # multiply by synthesis window
+                #     zk_td_prev_w = zk_td_prev * np.sqrt(np.hanning(frameSize))   # multiply by synthesis window
 
         # Stack compressed signals
         zk = np.concatenate((zk, zCurrBuffer[:, np.newaxis]), axis=1)
@@ -783,7 +786,7 @@ def fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalK):
         Current node index.
     neighbourNodes : [numNodes x 1] list of [nNeighbours[n] x 1] lists (int)
         Network indices of neighbours, per node.
-    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays (float)
+    zBuffer : [numNodes x 1] list of [nNeighbours[n] x 1] lists of [variable length] np.ndarrays (complex)
         Compressed signals buffers for each node and its neighbours.
     zLocal : [N x 1] np.ndarray (float)
         Latest compressed local signals to be broadcasted from node `k`.

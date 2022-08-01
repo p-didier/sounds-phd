@@ -1,4 +1,3 @@
-from cProfile import label
 import sys, copy
 from pathlib import Path, PurePath
 import matplotlib.pyplot as plt
@@ -31,11 +30,8 @@ ascBasePath = f'{pathToRoot}/02_data/01_acoustic_scenarios'
 signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
-    # samplingFrequency=16000,
     samplingFrequency=8000,
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS1_anechoic',
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1, 1]_Ns1_Nn1/AS2_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2, 2]_Ns1_Nn1/AS1_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/speech1.wav'],
     noiseSignalFile=[f'{signalsPath}/02_noise/whitenoise_signal_1.wav'],
     #
@@ -44,10 +40,8 @@ mySettings = ProgramSettings(
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     chunkOverlap=0.5,           # Overlap between DANSE iteration processing chunks [/100%]
     SROsppm=0,
-    # SROsppm=[100,0],
     #
     selfnoiseSNR=-50,
-    # expAvg50PercentTime=0.05,
     )
 
 
@@ -316,17 +310,6 @@ def run_danse(y, K, asc, neighbourNodes, nf, nFrames, applyCompression, sequenti
             d[k][:, l] = np.einsum('ij,ij->i', w[k].conj(), ytildecurr)
 
         u = (u + 1) % K     # update updating node index (for sequential processing)
-
-
-    fig = plt.figure(figsize=(8,4))
-    ax = fig.add_subplot(111)
-    ax.plot(sroresidual[0] * 1e6)
-    ax.grid()
-    plt.tight_layout()	
-    plt.show()
-
-
-    stop = 1
 
     return d, wThroughFrames
 
