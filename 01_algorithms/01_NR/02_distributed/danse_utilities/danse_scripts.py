@@ -228,6 +228,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     ytildeHatUncomp = []                            # local full observation vectors, frequency-domain, SRO-uncompensated
     z = []                                          # current-iteration compressed signals used in DANSE update
     zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
+    zLocal = []                                     # last local frame (entire frame) of compressed signal (used for time-domain chunk-wise broadcast: overlap-add)
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
@@ -285,6 +286,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: Implement this
         #
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
+        zLocal.append(np.array([])) 
         # SRO stuff vvv
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
@@ -344,12 +346,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                             )
 
     # Extra variables -- TEMPORARY: TODO: -- to be treated and integrated more neatly
-    zFull = []
     SROresidualThroughTime = []
     SROestimateThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
     for k in range(asc.numNodes):
-        zFull.append(np.empty((0,)))
         SROresidualThroughTime.append(np.zeros(numIterations))
         SROestimateThroughTime.append(np.zeros(numIterations))
 
@@ -387,7 +387,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                                             frameSize)
 
                 # Perform broadcast -- update all relevant buffers in network
-                zBuffer, wIR[k], previousTDfilterUpdate[k] = subs.broadcast(
+                zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
                             t,
                             k,
                             fs[k],
@@ -400,23 +400,25 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             zBuffer,
                             settings.broadcastDomain,
                             previousTDfilterUpdate=previousTDfilterUpdate[k],
-                            wIRprevious=wIR[k]
+                            wIRprevious=wIR[k],
+                            zTDpreviousFrame=zLocal[k]
                         )
-
-                stop = 1
                     
             elif event == 'update':         # <-- DANSE filter update
 
                 skipUpdate = False  # flag to skip update if needed
 
                 # Extract current local data chunk
-                idxEndChunk = int(np.floor(t * fs[k]))
-                idxBegChunk = idxEndChunk - frameSize     # <N> samples long chunk
-                yLocalCurr = yin[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == k+1]
+                yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
+                                                            t,
+                                                            fs[k],
+                                                            settings.broadcastDomain,
+                                                            frameSize,
+                                                            Ns)
 
                 # Compute VAD
-                VADinFrame = oVAD[idxBegChunk:idxEndChunk]
-                oVADframes[i[k]] = sum(VADinFrame == 0) <= frameSize / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
+                VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
+                oVADframes[i[k]] = sum(VADinFrame == 0) <= len(VADinFrame) / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
                 if oVADframes[i[k]]:    # Count number of spatial covariance matrices updates
                     numUpdatesRyy[k] += 1
                 else:
@@ -437,24 +439,20 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     lastExpectedIter=numIterations - 1,
                                     broadcastDomain=settings.broadcastDomain)
 
-                # raise ValueError('[WAIT UP]') # TODO: adapt 'settings.broadcastDomain'
-                if settings.broadcastDomain == 't':
-                    zFull[k] = np.concatenate((zFull[k], z[k][Ns:, 0]))     # selecting the first neighbor (index 0)
-
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
 
-                if settings.broadcastDomain == 't':
+                if settings.broadcastDomain == 'wholeChunk_fd':
+                    # Broadcasting done in frequency-domain
+                    yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                    ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
+                elif settings.broadcastDomain == 'wholeChunk_td':
                     # Build full available observation vector
                     yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                     ytilde[k][:, i[k], :] = yTildeCurr
                     # Go to frequency domain
                     ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                     ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
-                elif settings.broadcastDomain == 'wholeChunk_fd':
-                    # Broadcasting done in frequency-domain
-                    yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
                 # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
