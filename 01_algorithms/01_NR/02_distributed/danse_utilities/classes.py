@@ -257,8 +257,11 @@ class ProgramSettings(object):
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
-    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'wholeChunk' or time 't' [default]
-    # Broadcasting parameters
+    # Inter-node broadcasting parameters
+    broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
+                                            # -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
+                                            # -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
+                                            # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, bnoadcast L≪N_s samples at a time.
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
@@ -291,15 +294,15 @@ class ProgramSettings(object):
             else:
                 self.asynchronicity.dwacd.nFiltUpdatePerSeg = nFilterUpdatesBtwConsecutiveDWACDSROupdates
         # Check for frequency-domain broadcasting option
-        if self.broadcastDomain == 'f':
+        if self.broadcastDomain == 'wholeChunk_fd':
             if self.broadcastLength != self.stftWinLength / 2:
                 val = input(f'Frequency-domain broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
                 if val in ['y', 'Y']:
                     self.broadcastLength = self.stftWinLength / 2
                 else:
                     raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
-        elif self.broadcastDomain != 't':
-            raise ValueError(f'The broadcasting domain must be "t" or "f" (current value: "{self.broadcastDomain}").')
+        elif self.broadcastDomain != 'wholeChunk_td' and self.broadcastDomain != 'fewSamples_td':
+            raise ValueError(f'The broadcasting domain must be "wholeChunk_fd", "wholeChunk_td", or "fewSamples_td" (current value: "{self.broadcastDomain}").')
         # Adapt formats
         self.asynchronicity.SROsppm = sto_sro_formatting(self.asynchronicity.SROsppm)
         self.asynchronicity.STOinducedDelays = sto_sro_formatting(self.asynchronicity.STOinducedDelays)
