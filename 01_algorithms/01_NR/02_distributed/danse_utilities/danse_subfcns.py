@@ -423,7 +423,7 @@ def back_to_time_domain(x, n, axis=0):
     return xout
 
 
-def danse_compression_whole_chunk(yq, wHat, zqPrevious=None):
+def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
     """Performs local signals compression in the frequency domain.
 
     Parameters
@@ -432,6 +432,10 @@ def danse_compression_whole_chunk(yq, wHat, zqPrevious=None):
         Local sensor signals.
     wHat : [N/2 x nSensors] np.ndarray (float or complex)
         Frequency-domain local filter estimate (from latest DANSE iteration).
+    h : [`n` x 1] np.ndarray (float)
+        WOLA analysis window (time-domain to WOLA-domain).
+    f : [`n` x 1] np.ndarray (float)
+        WOLA synthesis window (WOLA-domain to time-domain).
     zqPrevious : [N x 1] np.ndarray (float)
         Previous time-domain chunk of compressed signal.
 
@@ -439,6 +443,8 @@ def danse_compression_whole_chunk(yq, wHat, zqPrevious=None):
     -------
     zqHat : [N/2 x 1] np.ndarray (complex)
         Frequency-domain compressed signal for current frame.
+    zq : [N x 1] np.ndarray (float)
+        Time-domain latest WOLA chunk of compressed signal (after OLA).
     """
 
     # Check for single-sensor case
@@ -450,29 +456,30 @@ def danse_compression_whole_chunk(yq, wHat, zqPrevious=None):
     
     # Transfer local observations to frequency domain
     n = len(yq)     # DFT order
-    window = np.sqrt(np.hanning(n))             # TODO: hard-coded <--- must be neatly integrated
 
+    # WOLA analysis stage
     if flagSingleSensor:
-        yqHat = np.fft.fft(np.squeeze(yq) * window, n, axis=0)
+        yqHat = np.fft.fft(np.squeeze(yq) * h, n, axis=0)
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1)]
         # Apply linear combination to form compressed signal
         zqHat = wHat.conj() * yqHat     # single sensor = simple element-wise multiplication
     else:
-        yqHat = np.fft.fft(np.squeeze(yq) * window[:, np.newaxis], n, axis=0)
+        yqHat = np.fft.fft(np.squeeze(yq) * h[:, np.newaxis], n, axis=0)
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1), :]
         # Apply linear combination to form compressed signal
         zqHat = np.einsum('ij,ij->i', wHat.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
 
+    # WOLA synthesis stage
     if zqPrevious is not None:
         # IDFT
         zqCurr = back_to_time_domain(zqHat, n, axis=0)
         zqCurr = np.real_if_close(zqCurr)
-        zqCurr *= window
+        zqCurr *= f    # multiply by synthesis window
 
         if not np.any(zqPrevious):
-            # No previous frame, keep only first half of compressed time frame
+            # No previous frame, keep current frame
             zq = zqCurr
         else:
             # Overlap-add
@@ -980,7 +987,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
+def get_events_matrix(timeInstants, N, Ns, L):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -996,9 +1003,7 @@ def get_events_matrix(timeInstants, N, Ns, L, nodeLinks):
         Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap) (Ns < N).
     L : int
         Number of (compressed) signal samples to be broadcasted at a time to other nodes.
-    nodeLinks : [Nn x Nn] np.ndarray (bools)
-        Node links matrix. Element `(i,j)` is `True` if node `i` and `j` are connected, `False` otherwise.
-    
+
     Returns
     -------
     outputEvents : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
@@ -1181,7 +1186,8 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
 
 
 def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
-            broadcastDomain, previousTDfilterUpdate, wIRprevious,
+            broadcastDomain, winWOLAanalysis, winWOLAsynthesis,
+            previousTDfilterUpdate, wIRprevious,
             zTDpreviousFrame):
     """Performs the broadcast of data from node `k` to its neighbours.
     
@@ -1212,6 +1218,10 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
         -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
         -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
+    winWOLAanalysis : [`n` x 1] np.ndarray (float)
+        WOLA analysis window (time-domain to WOLA-domain).
+    winWOLAsynthesis : [`n` x 1] np.ndarray (float)
+        WOLA synthesis window (WOLA-domain to time-domain).
     
     Returns
     -------
@@ -1228,7 +1238,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
     else:
         if broadcastDomain == 'wholeChunk_fd':
             # Frequency-domain chunk-wise broadcasting
-            zLocalHat, _ = danse_compression_whole_chunk(yk, w)  # local compressed signals (freq.-domain)
+            zLocalHat, _ = danse_compression_whole_chunk(yk, w,
+                                        winWOLAanalysis, winWOLAsynthesis)  # local compressed signals (freq.-domain)
 
             zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat) 
 
@@ -1236,17 +1247,9 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
             
         elif broadcastDomain == 'wholeChunk_td':
             # Time-domain chunk-wise broadcasting
-            _, zLocal = danse_compression_whole_chunk(yk, w, zqPrevious=zTDpreviousFrame)  # local compressed signals (time-domain)
-
-            if 0:
-                import matplotlib.pyplot as plt
-                fig, axes = plt.subplots(1,1)
-                fig.set_size_inches(8.5, 3.5)
-                # axes.plot(zTDpreviousFrame[k][0])
-                axes.plot(zLocal)
-                axes.grid()
-                plt.tight_layout()	
-                plt.show()
+            _, zLocal = danse_compression_whole_chunk(yk, w,
+                                        winWOLAanalysis, winWOLAsynthesis,
+                                        zqPrevious=zTDpreviousFrame)  # local compressed signals (time-domain)
 
             zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes,
                                                 zBuffer,
