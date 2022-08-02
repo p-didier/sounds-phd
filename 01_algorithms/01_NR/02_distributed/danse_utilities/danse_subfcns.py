@@ -492,7 +492,7 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
     return zqHat, zq
 
 
-def danse_compression_td_few_samples(yq, wqqHat, n, L, wIRprevious, updateBroadcastFilter=False):
+def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious, updateBroadcastFilter=False):
     """Performs local signals compression according to DANSE theory [1],
     in the time-domain (to be able to broadcast the compressed signal sample
     per sample between nodes).
@@ -515,8 +515,7 @@ def danse_compression_td_few_samples(yq, wqqHat, n, L, wIRprevious, updateBroadc
     """
 
     if updateBroadcastFilter:
-        # TODO: don't hard code window
-        h = np.sqrt(np.hanning(n))
+        h = np.sqrt(np.hanning(n))  # TODO: don't hard code windows
         f = copy.copy(h)
 
         # Exponential complex factor (typical 'FFT' notation `W`)
@@ -542,10 +541,6 @@ def danse_compression_td_few_samples(yq, wqqHat, n, L, wIRprevious, updateBroadc
         wIR = np.real_if_close(wIR)
     else:
         wIR = wIRprevious
-
-    # # Transform frequency domain filter to time domain impulse response
-    # wIR = back_to_time_domain(wqqHat, n, axis=0)
-    # wIR = np.real_if_close(wIR)
     
     # Basic check
     if yq.shape != wIR.shape:
@@ -558,64 +553,6 @@ def danse_compression_td_few_samples(yq, wqqHat, n, L, wIRprevious, updateBroadc
         tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='same')
         yfiltLastSamples[:, idxSensor] = tmp[(n // 2 + 1 - L):(n // 2 + 1)]     # extract the `L` sample preceding the middle of the convolution output
     zq = np.sum(yfiltLastSamples, axis=1)
-
-    stop = 1
-
-    # fig, axes = plt.subplots(1,1)
-    # fig.set_size_inches(8.5, 3.5)
-    # axes.plot(wIR)
-    # axes.grid()
-    # plt.tight_layout()	
-    # plt.show()
-    
-    # # Check for single-sensor case
-    # flagSingleSensor = False
-    # if wqqHat.shape[-1] == 1:
-    #     wqqHat = np.squeeze(wqqHat)
-    #     yq = np.squeeze(yq)
-    #     flagSingleSensor = True
-    
-    # # Append zeros for OLS processing (matching input signal chunk length)
-    # nTotal = yq.shape[0]
-    # if flagSingleSensor:
-    #     wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0],))), axis=0)
-    # else:
-    #     wIRzp = np.concatenate((wIR, np.zeros((nTotal - wIR.shape[0], wIR.shape[-1]))), axis=0)
-
-    # # import matplotlib.pyplot as plt
-    # # fig = plt.figure(figsize=(8,4))
-    # # ax = fig.add_subplot(111)
-    # # ax.plot(wIR)
-    # # ax.grid()
-    # # plt.tight_layout()	
-    # # plt.show()
-
-    # # Go (back) to frequency domain
-    # wHatFull = np.fft.fft(np.squeeze(wIRzp), nTotal, axis=0)    # TODO: 2022/03/25 -- the zero-padding (combined with the non-causality of the IR?) creates lots of ringing in the FD-version of w [see Word journal week12 FRI]
-    # yqHat = np.fft.fft(np.squeeze(yq), nTotal, axis=0)
-
-    # # Apply compression
-    # if flagSingleSensor:
-    #     # Keep only positive frequencies
-    #     wHatFull = wHatFull[:int(nTotal/2 + 1)]
-    #     yqHat = yqHat[:int(nTotal/2 + 1)]
-    #     # Apply linear combination to form compressed signal
-    #     zqHat = wHatFull.conj() * yqHat     # single sensor = simple element-wise multiplication
-    # else:
-    #     # Keep only positive frequencies
-    #     wHatFull = wHatFull[:int(nTotal/2 + 1), :]
-    #     yqHat = yqHat[:int(nTotal/2 + 1), :]
-    #     # Apply linear combination to form compressed signal
-    #     zqHat = np.einsum('ij,ij->i', wHatFull.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-
-    # # Go back to time domain 
-    # zq = back_to_time_domain(zqHat, nTotal)
-    # zq = np.real_if_close(zq)
-
-    # # Discard oldest (incorrect) samples
-    # zq = zq[n:]     # TODO: work on that stuff -- discard the right amount of samples, fill in buffers correctly, etc.
-
-    # stop = 1
 
     return zq, wIR
 
@@ -1243,7 +1180,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
             zBuffer = fill_buffers_freq_domain(k, neighbourNodes, zBuffer, zLocalHat) 
 
-            wIR = None  # chunk-wise broadcasting: no IR filter 
+            wIR = None      # chunk-wise broadcasting: no IR filter 
+            zLocal = None   # FD BC -- no `zLocal` variable computed
             
         elif broadcastDomain == 'wholeChunk_td':
             # Time-domain chunk-wise broadcasting
@@ -1251,21 +1189,19 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                                         winWOLAanalysis, winWOLAsynthesis,
                                         zqPrevious=zTDpreviousFrame)  # local compressed signals (time-domain)
 
-            zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes,
-                                                zBuffer,
-                                                zLocal[:(n // 2)])
+            zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes, zBuffer, zLocal[:(n // 2)])
             
             wIR = None  # chunk-wise broadcasting: no IR filter 
         
         elif broadcastDomain == 'fewSamples_td':
-            raise ValueError('[NOT IMPLEMENTED YET]')    # TODO: do that
-            
+            # Time-domain broadcasting, `L` samples at a time,
+            # via linear-convolution approximation of WOLA filtering process
             updateBroadcastFilter = False
-            if np.abs(t - previousTDfilterUpdate) >= 1:
+            if np.abs(t - previousTDfilterUpdate) >= 1: # TODO: don't hard-code frequency of TD filter update
                 updateBroadcastFilter = True
                 previousTDfilterUpdate = t
 
-            zLocal, wIR = danse_compression_td_few_samples(yk, w, n, L,
+            zLocal, wIR = danse_compression_few_samples(yk, w, n, L,
                                 wIRprevious=wIRprevious,
                                 updateBroadcastFilter=updateBroadcastFilter)  # local compressed signals
             zBuffer = fill_buffers_td_few_samples(k, neighbourNodes, lk, zBuffer, zLocal, L)

@@ -205,7 +205,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.start()
     
     # Initialization (extracting/defining useful quantities)
-    _, winWOLAanalysis, winWOLAsynthesis, frameSize, Ns, numIterations, _, neighbourNodes = subs.danse_init(yin, settings, asc)
+    _, winWOLAanalysis, winWOLAsynthesis,\
+        frameSize, Ns, numIterations, _,\
+            neighbourNodes = subs.danse_init(yin, settings, asc)
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
@@ -341,8 +343,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             Ns,
-                                            settings.broadcastLength,
-                                            asc.nodeLinks
+                                            settings.broadcastLength
                                             )
 
     # Extra variables -- TEMPORARY: TODO: -- to be treated and integrated more neatly
@@ -399,9 +400,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             lk,
                             zBuffer,
                             settings.broadcastDomain,
+                            winWOLAanalysis,
+                            winWOLAsynthesis,
                             previousTDfilterUpdate=previousTDfilterUpdate[k],
                             wIRprevious=wIR[k],
-                            zTDpreviousFrame=zLocal[k]
+                            zTDpreviousFrame=zLocal[k],
                         )
                     
             elif event == 'update':         # <-- DANSE filter update
