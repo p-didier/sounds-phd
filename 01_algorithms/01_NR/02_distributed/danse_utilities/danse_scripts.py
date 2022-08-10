@@ -200,9 +200,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     printingInterval = 2            # [s] minimum time between two "% done" printouts
     alphaExternalFilters = 0.5      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
 
-    # Profiling
-    profiler = Profiler()
-    profiler.start()
+    # # Profiling
+    # profiler = Profiler()
+    # profiler.start()
     
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis,\
@@ -262,8 +262,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
-        wtmp = np.zeros((frameSize, sum(asc.sensorToNodeTags == k + 1)), dtype=complex)
-        wtmp[0, 0] = 1   # initialize time-domain filter as Dirac for first sensor signal
+        wtmp = np.zeros((frameSize, sum(asc.sensorToNodeTags == k + 1)))
+        wtmp[0, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
         wIR.append(wtmp)
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
@@ -285,7 +285,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         elif settings.broadcastDomain == 'wholeChunk_fd':
             z.append(np.empty((numFreqLines, 0), dtype=complex))
         elif settings.broadcastDomain == 'fewSamples_td':
-            raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: Implement this
+            z.append(np.empty((frameSize, 0), dtype=float))
         #
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
         zLocal.append(np.array([])) 
@@ -343,7 +343,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     eventsMatrix, fs = subs.get_events_matrix(timeInstants,
                                             frameSize,
                                             Ns,
-                                            settings.broadcastLength
+                                            settings.broadcastLength,
+                                            settings.broadcastDomain
                                             )
 
     # Extra variables -- TEMPORARY: TODO: -- to be treated and integrated more neatly
@@ -353,6 +354,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     for k in range(asc.numNodes):
         SROresidualThroughTime.append(np.zeros(numIterations))
         SROestimateThroughTime.append(np.zeros(numIterations))
+    zFullk0 = np.empty((0,))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -402,10 +404,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             settings.broadcastDomain,
                             winWOLAanalysis,
                             winWOLAsynthesis,
+                            winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
                             previousTDfilterUpdate=previousTDfilterUpdate[k],
                             wIRprevious=wIR[k],
                             zTDpreviousFrame=zLocal[k],
                         )
+
+                stop = 1
                     
             elif event == 'update':         # <-- DANSE filter update
 
@@ -417,7 +422,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                                             fs[k],
                                                             settings.broadcastDomain,
                                                             frameSize,
-                                                            Ns)
+                                                            Ns,
+                                                            settings.broadcastLength)
 
                 # Compute VAD
                 VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
@@ -442,6 +448,24 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                     lastExpectedIter=numIterations - 1,
                                     broadcastDomain=settings.broadcastDomain)
 
+                # Save full z vector for DEBUGGING PURPOSES
+                if k == 0:
+                    zFullk0 = np.concatenate((zFullk0, z[k][Ns:, 0]))
+
+                # if k == 0 and oVADframes[i[k]] and i[k] > 16*4:
+                #     import matplotlib.pyplot as plt
+                #     fig, axes = plt.subplots(1,1)
+                #     fig.set_size_inches(8.5, 3.5)
+                #     axes.plot(yLocalCurr,label='Current local sensor chunk')
+                #     axes.plot(z[k], label='Current z[k]')
+                #     # axes.plot(zFullk0, label='Full compressed signal')
+                #     # axes.plot(yin[:idxEndChunk, asc.sensorToNodeTags == k+1], label='Full local sensor signal')
+                #     axes.legend()
+                #     axes.grid()
+                #     axes.set_title(f'L = {settings.broadcastLength} samples (i = {i[k]})')
+                #     plt.tight_layout()	
+                #     plt.show()
+
                 # Wipe local buffers
                 zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
 
@@ -449,7 +473,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     # Broadcasting done in frequency-domain
                     yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                     ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
-                elif settings.broadcastDomain == 'wholeChunk_td':
+                elif settings.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
                     # Build full available observation vector
                     yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
                     ytilde[k][:, i[k], :] = yTildeCurr
@@ -621,7 +645,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 dhat[:, i[k], k] = dhatCurr
                 # Transform back to time domain (WOLA processing)
                 dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
-                d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                    d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+                else:
+                    d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
                 
                 if settings.computeLocalEstimate:
                     # Local observations only
@@ -629,7 +656,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dhatLocal[:, i[k], k] = dhatLocalCurr
                     # Transform back to time domain (WOLA processing)
                     dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
-                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
+                    if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                        dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+                    else:
+                        dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
                 # -----------------------------------------------------------------------
                 
                 # Increment DANSE iteration index
@@ -651,9 +681,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             estimate=SROestimateThroughTime,
                             groundTruth=settings.asynchronicity.SROsppm / 1e6)
 
-    # Profiling
-    profiler.stop()
-    profiler.print()
+    # # Profiling
+    # profiler.stop()
+    # profiler.print()
 
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(6,1.5))

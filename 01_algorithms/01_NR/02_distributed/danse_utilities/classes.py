@@ -298,7 +298,7 @@ class ProgramSettings(object):
             if self.broadcastLength != self.stftWinLength / 2:
                 val = input(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
                 if val in ['y', 'Y']:
-                    self.broadcastLength = self.stftWinLength / 2
+                    self.broadcastLength = int(self.stftWinLength / 2)
                 else:
                     raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
         if self.broadcastDomain not in ['wholeChunk_td', 'wholeChunk_fd', 'fewSamples_td']:

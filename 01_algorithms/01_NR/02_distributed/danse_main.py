@@ -39,7 +39,9 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     # samplingFrequency=16000,
     # samplingFrequency=44100,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
     #
     # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
@@ -51,7 +53,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=20,
+    signalDuration=15,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -61,10 +63,11 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
-    broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
-    # broadcastDomain='fewSamples_td',    # BC L-per-L samples in the TD
-    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    # broadcastLength=16,
+    # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
+    broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
+    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    broadcastLength=1,
+    # broadcastLength=2**8,
     # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
