@@ -494,18 +494,6 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
     return zqHat, zq
 
 
-@njit
-def convolve_fast(n, L, wIRflipped, yq, idxSensor):
-
-    idDesired = np.arange(start=n - 1 - L, stop=n - 1)   # indices required from convolution output
-    out = np.zeros(L)
-    yqzp = np.concatenate((np.zeros(len(wIRflipped)), yq[:, idxSensor], np.zeros(len(wIRflipped))))
-    for ii in range(len(idDesired)):
-        out[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIRflipped)], wIRflipped)
-
-    return out
-
-
 def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
                             winWOLAanalysis, winWOLAsynthesis, R, 
                             updateBroadcastFilter=False):
@@ -551,17 +539,14 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     for idxSensor in range(yq.shape[-1]):
         # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
         # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
-        
-        # idDesired = np.arange(start=len(tmp)-(n + L), stop=len(tmp)-n)
-        # out = convolve_fast(n, L, np.flip(wIR), yq, idxSensor)   # IN PROGRESS
-        wIRflipped = np.flip(wIR)
-        idDesired = np.arange(start=n - 1 - L, stop=n - 1)   # indices required from convolution output
-        out = np.zeros(L)
-        yqzp = np.concatenate((np.zeros(len(wIRflipped)), yq[:, idxSensor], np.zeros(len(wIRflipped))))
-        for ii in range(len(idDesired)):
-            out[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIRflipped)], wIRflipped)
 
-        yfiltLastSamples[:, idxSensor] = out
+        # idDesired = np.arange(start=len(tmp)-(n + L), stop=len(tmp)-n)
+        idDesired = np.arange(start=len(wIR) - 1 - L, stop=len(wIR) - 1)   # indices required from convolution output
+        tmp2 = np.zeros(L)
+        yqzp = np.concatenate((np.zeros(len(wIR)), yq[:, idxSensor], np.zeros(len(wIR))))
+        for ii in range(len(idDesired)):
+            tmp2[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIR)], np.flip(wIR))
+        yfiltLastSamples[:, idxSensor] = tmp2
 
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
     zq = np.sum(yfiltLastSamples, axis=1)
