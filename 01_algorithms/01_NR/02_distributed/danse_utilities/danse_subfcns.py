@@ -494,22 +494,16 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
     return zqHat, zq
 
 
-# @njit
-# def compute_distortion_fct_approx(Hmat, n, f, h, R):
+@njit
+def convolve_fast(n, L, wIRflipped, yq, idxSensor):
 
-#     Amat = np.diag(f) @ Hmat @ np.diag(h)
-#     # wIR = np.array([np.sum(np.diagonal(Amat, ii)) for ii in np.arange(start=-n+1, stop=n)])
-#     wIR = np.zeros(2 * n - 1)
-#     for ii in np.arange(start=-n+1, stop=n):
-#         wIR[ii + n - 1] = np.sum(np.diagonal(Amat, ii))
-#     wIR /= R
+    idDesired = np.arange(start=n - 1 - L, stop=n - 1)   # indices required from convolution output
+    out = np.zeros(L)
+    yqzp = np.concatenate((np.zeros(len(wIRflipped)), yq[:, idxSensor], np.zeros(len(wIRflipped))))
+    for ii in range(len(idDesired)):
+        out[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIRflipped)], wIRflipped)
 
-#     return wIR
-
-
-# @njit
-# def amat_jitted(Hmat, h, f):
-#     return np.diag(f) @ Hmat @ np.diag(h)
+    return out
 
 
 def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
@@ -538,8 +532,6 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     """
 
     # Profiling
-    # profiler = Profiler()
-    # profiler.start()
     if updateBroadcastFilter:
         # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
         wqq = back_to_time_domain(wqqHat, n, axis=0)
@@ -548,23 +540,30 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         for m in range(wqq.shape[1]):
             Hmat = sla.circulant(np.flip(wqq[:, m]))
             Amat = np.diag(winWOLAsynthesis) @ Hmat @ np.diag(winWOLAanalysis)
-            # wIR = np.array([np.sum(np.diagonal(Amat, ii)) for ii in np.arange(start=-n+1, stop=n)])
             for ii in np.arange(start=-n+1, stop=n):
                 wIR[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
         wIR /= R
     else:
         wIR = wIRprevious
-
-    # profiler.stop()
-    # profiler.print(show_all=True)
-    
     
     # Perform convolution
     yfiltLastSamples = np.zeros((L, yq.shape[-1]))
     for idxSensor in range(yq.shape[-1]):
         # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
-        tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
-        yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
+        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
+        
+        # idDesired = np.arange(start=len(tmp)-(n + L), stop=len(tmp)-n)
+        # out = convolve_fast(n, L, np.flip(wIR), yq, idxSensor)   # IN PROGRESS
+        wIRflipped = np.flip(wIR)
+        idDesired = np.arange(start=n - 1 - L, stop=n - 1)   # indices required from convolution output
+        out = np.zeros(L)
+        yqzp = np.concatenate((np.zeros(len(wIRflipped)), yq[:, idxSensor], np.zeros(len(wIRflipped))))
+        for ii in range(len(idDesired)):
+            out[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIRflipped)], wIRflipped)
+
+        yfiltLastSamples[:, idxSensor] = out
+
+        # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
     zq = np.sum(yfiltLastSamples, axis=1)
 
     return zq, wIR
