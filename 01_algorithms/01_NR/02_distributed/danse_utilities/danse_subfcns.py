@@ -1,17 +1,22 @@
 
-import copy
-import winsound
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
-import scipy.signal as sig
-from sympy import nextprime
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
 from collections import deque
 import matplotlib.pyplot as plt
-from pyinstrument import Profiler
+from pathlib import Path, PurePath
+import sys
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+if not any("_general_fcts" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/_general_fcts')
+import dsp.linalg
 
 """
 References:
@@ -538,17 +543,13 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     yfiltLastSamples = np.zeros((L, yq.shape[-1]))
     for idxSensor in range(yq.shape[-1]):
         # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
-        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
-
-        # idDesired = np.arange(start=len(tmp)-(n + L), stop=len(tmp)-n)
-        idDesired = np.arange(start=len(wIR) - 1 - L, stop=len(wIR) - 1)   # indices required from convolution output
-        tmp2 = np.zeros(L)
-        yqzp = np.concatenate((np.zeros(len(wIR)), yq[:, idxSensor], np.zeros(len(wIR))))
-        for ii in range(len(idDesired)):
-            tmp2[ii] = np.dot(yqzp[idDesired[ii] + 1:idDesired[ii] + 1 + len(wIR)], np.flip(wIR))
-        yfiltLastSamples[:, idxSensor] = tmp2
-
+        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full'
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
+
+        idDesired = np.arange(start=len(wIR) - 1 - L, stop=len(wIR) - 1)   # indices required from convolution output
+        tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
+        yfiltLastSamples[:, idxSensor] = tmp
+
     zq = np.sum(yfiltLastSamples, axis=1)
 
     return zq, wIR
