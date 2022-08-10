@@ -263,6 +263,7 @@ class ProgramSettings(object):
                                             # -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
                                             # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
+    updateTDfilterEvery : float = 1.        # [s] duration of pause between two consecutive time-domain filter updates.
     # Speech enhancement metrics parameters
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
