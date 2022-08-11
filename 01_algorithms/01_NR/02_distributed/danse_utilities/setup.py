@@ -128,7 +128,8 @@ def resample_for_sro(x, baseFs, SROppm):
     numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
     # xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
     xResamp = resampy.core.resample(x, baseFs, fsSRO)
-    t = np.arange(0, numSamplesPostResamp) * (tOriginal[1] - tOriginal[0]) * x.shape[0] / float(numSamplesPostResamp) + tOriginal[0]    # based on line 3116 in `scipy.signal.resample`
+    # t = np.arange(0, numSamplesPostResamp) * (tOriginal[1] - tOriginal[0]) * x.shape[0] / float(numSamplesPostResamp) + tOriginal[0]    # based on line 3116 in `scipy.signal.resample`
+    t = np.arange(len(xResamp)) / fsSRO
 
     if len(xResamp) >= len(x):
         xResamp = xResamp[:len(x)]

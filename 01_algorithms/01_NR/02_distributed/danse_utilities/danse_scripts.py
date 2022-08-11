@@ -200,9 +200,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     printingInterval = 2            # [s] minimum time between two "% done" printouts
     alphaExternalFilters = 0.5      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
 
-    # # Profiling
-    # profiler = Profiler()
-    # profiler.start()
+    # Profiling
+    profiler = Profiler()
+    profiler.start()
     
     # Initialization (extracting/defining useful quantities)
     _, winWOLAanalysis, winWOLAsynthesis,\
@@ -408,17 +408,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         zTDpreviousFrame=zLocal[k],
                     )
 
-        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Check for SRO flags ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        sroFlagsCurr = subs.detect_sro_flags(zBuffer, neighbourNodes)
-        if idxInstant == 0:
-            sroFlags = sroFlagsCurr
-        else:
-            for k in range(len(sroFlags)):
-                for q in range(len(sroFlags[k])):
-                    sroFlags[k][q] += sroFlagsCurr[k][q]
-
-        stop = 1
-
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with updates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
         for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
 
@@ -446,7 +435,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             # Process buffers
-            z[k], bufferFlags = subs.process_incoming_signals_buffers(  # TODO: get rid of `bufferFlags` if not needed
+            z[k], bufferFlags = subs.process_incoming_signals_buffers(
                                 zBuffer[k],
                                 z[k],
                                 neighbourNodes[k],
@@ -456,6 +445,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                 L=settings.broadcastLength,
                                 lastExpectedIter=numIterations - 1,
                                 broadcastDomain=settings.broadcastDomain)
+                                
+            # TODO: DEBUGGING PURPOSES
+            bufferFlags = np.zeros_like(bufferFlags)
 
             # Save full z vector for DEBUGGING PURPOSES
             if k == 0:
@@ -550,6 +542,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ld = settings.asynchronicity.cohDriftMethod.segLength
 
                 if i[k] in cohDriftSROupdateIndices:
+
+                    if k == 1:
+                        stop = 1
 
                     flagFirstSROEstimate = False
                     if i[k] == np.amin(cohDriftSROupdateIndices):
@@ -674,9 +669,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             estimate=SROestimateThroughTime,
                             groundTruth=settings.asynchronicity.SROsppm / 1e6)
 
-    # # Profiling
-    # profiler.stop()
-    # profiler.print()
+    # Profiling
+    profiler.stop()
+    profiler.print()
+
+
 
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(6,1.5))
@@ -689,7 +686,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # stop = 1
 
     # Debugging
-    # fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
+    fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
     # plt.show()
     # if 0:
     #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.png')

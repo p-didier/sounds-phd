@@ -53,7 +53,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=10,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -77,10 +77,11 @@ mySettings = ProgramSettings(
         # SROsppm=0,
         # SROsppm=[0, 50],
         # SROsppm=[0, 75],
-        SROsppm=[0, 100],
+        # SROsppm=[0, 100],
+        SROsppm=[50, 0],
         # SROsppm=[0, 3000],
-        # compensateSROs=True,
-        compensateSROs=False,
+        compensateSROs=True,
+        # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
@@ -95,13 +96,13 @@ mySettings = ProgramSettings(
             estEvery=1,
             startAfterNupdates=11,
             alpha=0.95,
-            # alphaEps=0.01,
+            alphaEps=0.01,  # only if `loop=='closed'`
             # alphaEps=0.05,
-            alphaEps=0.10,
+            # alphaEps=0.10,
             # alphaEps=0.25,
             # alphaEps=0.5,
-            loop='open',
-            # loop='closed',
+            # loop='open',
+            loop='closed',
         )
     ),
     # bypassFilterUpdates=True,
