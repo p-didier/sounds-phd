@@ -517,7 +517,15 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         FFT order.
     L : int
         Broadcast length [samples].
-        
+    winWOLAanalysis : [`n` x 1] np.ndarray (float)
+        WOLA analysis window (time-domain to WOLA-domain).
+    winWOLAsynthesis : [`n` x 1] np.ndarray (float)
+        WOLA synthesis window (WOLA-domain to time-domain).
+    R : int
+        Sample shift between adjacent windows.
+    updateBroadcastFilter : bool
+        If True, update TD filter for broadcast.
+
     Returns
     -------
     zq : [N x 1] np.ndarray (real)
@@ -1103,9 +1111,13 @@ def build_events_matrix(updateInstants, broadcastInstants, nNodes):
 
 
 def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
-            broadcastDomain, winWOLAanalysis, winWOLAsynthesis,
+            broadcastDomain,
+            winWOLAanalysis,
+            winWOLAsynthesis,
             winShift,
-            previousTDfilterUpdate, wIRprevious,
+            previousTDfilterUpdate,
+            updateTDfilterEvery, 
+            wIRprevious,
             zTDpreviousFrame):
     """Performs the broadcast of data from node `k` to its neighbours.
     
@@ -1140,6 +1152,20 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
         WOLA analysis window (time-domain to WOLA-domain).
     winWOLAsynthesis : [`n` x 1] np.ndarray (float)
         WOLA synthesis window (WOLA-domain to time-domain).
+    winShift : int
+        Sample shift between adjacent windows.
+    previousTDfilterUpdate : float
+        Instant at which the previous time-domain filters update occurred [s]
+        (only used if `broadcastDomain=='fewSamples_td'`).
+    updateTDfilterEvery : float
+        Duration of pause between two consecutive time-domain filter updates.
+        (only used if `broadcastDomain=='fewSamples_td'`).
+    wIRprevious : [2*`n` - 1 x nSensors] np.ndarray (float)
+        Time-domain filters used for the previous broadcast.
+        (only used if `broadcastDomain=='fewSamples_td'`).
+    zTDpreviousFrame : [`L` x 1] np.ndarray (complex)
+        Previously broadcasted frame for current node (`k`).
+        (only used if `broadcastDomain=='wholeChunk_td'`).
     
     Returns
     -------
@@ -1180,7 +1206,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
             # Only update filter every so often
             updateBroadcastFilter = False
-            if np.abs(t - previousTDfilterUpdate) >= 1: # TODO: don't hard-code frequency of TD filter update
+            if np.abs(t - previousTDfilterUpdate) >= updateTDfilterEvery:
                 updateBroadcastFilter = True
                 previousTDfilterUpdate = t
 

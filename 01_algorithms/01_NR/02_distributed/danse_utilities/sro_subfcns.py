@@ -245,3 +245,12 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         sro_est = - max_time_lag_search(avg_coh_prod) / temp_dist
 
     return sro_est, avg_coh_prod
+
+
+def detect_sro_flags(zBuffer, L):
+
+
+
+    stop = 1
+
+    return 0

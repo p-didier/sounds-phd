@@ -373,297 +373,285 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100)}% done -----')
             tprint = t
 
-        # Loop over events
-        for idxEvent in range(len(eventTypes)):
+        eventIndices = np.arange(len(eventTypes))
+        # Deal with broadcasts first
+        for idxBroadcastEvent in eventIndices[[True if ii == 'broadcast' else False for ii in eventTypes]]:
 
             # Node index
-            k = int(nodesConcerned[idxEvent])
-            event = eventTypes[idxEvent]
+            k = int(nodesConcerned[idxBroadcastEvent])# Extract current local data chunk
 
-            if event == 'broadcast':        # <-- data compression + broadcast to neighbour nodes
-                
-                # Extract current local data chunk
-                yLocalCurr = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
-                                                            t,
-                                                            fs[k],
-                                                            settings.broadcastDomain,
-                                                            frameSize)
+            yLocalCurr = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
+                                                        t,
+                                                        fs[k],
+                                                        settings.broadcastDomain,
+                                                        frameSize)
 
-                # Perform broadcast -- update all relevant buffers in network
-                zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
-                            t,
-                            k,
-                            fs[k],
-                            settings.broadcastLength,
-                            yLocalCurr,
-                            wTildeExternal[k],
-                            frameSize,
-                            neighbourNodes,
-                            lk,
-                            zBuffer,
-                            settings.broadcastDomain,
-                            winWOLAanalysis,
-                            winWOLAsynthesis,
-                            winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
-                            previousTDfilterUpdate=previousTDfilterUpdate[k],
-                            wIRprevious=wIR[k],
-                            zTDpreviousFrame=zLocal[k],
-                        )
+            # Perform broadcast -- update all relevant buffers in network
+            zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
+                        t,
+                        k,
+                        fs[k],
+                        settings.broadcastLength,
+                        yLocalCurr,
+                        wTildeExternal[k],
+                        frameSize,
+                        neighbourNodes,
+                        lk,
+                        zBuffer,
+                        settings.broadcastDomain,
+                        winWOLAanalysis,
+                        winWOLAsynthesis,
+                        winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                        previousTDfilterUpdate=previousTDfilterUpdate[k],
+                        updateTDfilterEvery=settings.updateTDfilterEvery,
+                        wIRprevious=wIR[k],
+                        zTDpreviousFrame=zLocal[k],
+                    )
 
-                stop = 1
-                    
-            elif event == 'update':         # <-- DANSE filter update
+            stop = 1
 
-                skipUpdate = False  # flag to skip update if needed
+        # Deal with updates next
+        for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
 
-                # Extract current local data chunk
-                yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
-                                                            t,
-                                                            fs[k],
-                                                            settings.broadcastDomain,
-                                                            frameSize,
-                                                            Ns,
-                                                            settings.broadcastLength)
+            # Node index
+            k = int(nodesConcerned[idxUpdateEvent])
+            
+            skipUpdate = False  # flag to skip update if needed
 
-                # Compute VAD
-                VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
-                oVADframes[i[k]] = sum(VADinFrame == 0) <= len(VADinFrame) / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
-                if oVADframes[i[k]]:    # Count number of spatial covariance matrices updates
-                    numUpdatesRyy[k] += 1
-                else:
-                    numUpdatesRnn[k] += 1
-                
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                # Process buffers
-                z[k], bufferFlags = subs.process_incoming_signals_buffers(
-                                    zBuffer[k],
-                                    z[k],
-                                    neighbourNodes[k],
-                                    i[k],
-                                    frameSize,
-                                    Ns=Ns,
-                                    L=settings.broadcastLength,
-                                    lastExpectedIter=numIterations - 1,
-                                    broadcastDomain=settings.broadcastDomain)
+            # Extract current local data chunk
+            yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
+                                                        t,
+                                                        fs[k],
+                                                        settings.broadcastDomain,
+                                                        frameSize,
+                                                        Ns,
+                                                        settings.broadcastLength)
 
-                # Save full z vector for DEBUGGING PURPOSES
-                if k == 0:
-                    zFullk0 = np.concatenate((zFullk0, z[k][Ns:, 0]))
+            # Compute VAD
+            VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
+            oVADframes[i[k]] = sum(VADinFrame == 0) <= len(VADinFrame) / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
+            if oVADframes[i[k]]:    # Count number of spatial covariance matrices updates
+                numUpdatesRyy[k] += 1
+            else:
+                numUpdatesRnn[k] += 1
+            
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            # Process buffers
+            z[k], bufferFlags = subs.process_incoming_signals_buffers(
+                                zBuffer[k],
+                                z[k],
+                                neighbourNodes[k],
+                                i[k],
+                                frameSize,
+                                Ns=Ns,
+                                L=settings.broadcastLength,
+                                lastExpectedIter=numIterations - 1,
+                                broadcastDomain=settings.broadcastDomain)
 
-                # if k == 0 and oVADframes[i[k]] and i[k] > 16*4:
-                #     import matplotlib.pyplot as plt
-                #     fig, axes = plt.subplots(1,1)
-                #     fig.set_size_inches(8.5, 3.5)
-                #     axes.plot(yLocalCurr,label='Current local sensor chunk')
-                #     axes.plot(z[k], label='Current z[k]')
-                #     # axes.plot(zFullk0, label='Full compressed signal')
-                #     # axes.plot(yin[:idxEndChunk, asc.sensorToNodeTags == k+1], label='Full local sensor signal')
-                #     axes.legend()
-                #     axes.grid()
-                #     axes.set_title(f'L = {settings.broadcastLength} samples (i = {i[k]})')
-                #     plt.tight_layout()	
-                #     plt.show()
+            # Save full z vector for DEBUGGING PURPOSES
+            if k == 0:
+                zFullk0 = np.concatenate((zFullk0, z[k][Ns:, 0]))
 
-                # Wipe local buffers
-                zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
+            # Wipe local buffers
+            zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
 
-                if settings.broadcastDomain == 'wholeChunk_fd':
-                    # Broadcasting done in frequency-domain
-                    yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
-                elif settings.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
-                    # Build full available observation vector
-                    yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
-                    ytilde[k][:, i[k], :] = yTildeCurr
-                    # Go to frequency domain
-                    ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            if settings.broadcastDomain == 'wholeChunk_fd':
+                # Broadcasting done in frequency-domain
+                yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / winWOLAanalysis.sum() * z[k]), axis=1)
+            elif settings.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
+                # Build full available observation vector
+                yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
+                ytilde[k][:, i[k], :] = yTildeCurr
+                # Go to frequency domain
+                ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-                # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
-                ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
-                yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
-                # Compensate SROs
-                if settings.asynchronicity.compensateSROs:
-                    # Account for buffer flags
-                    extraPhaseShiftFactor = np.zeros(dimYTilde[k])
-                    for q in range(len(neighbourNodes[k])):
-                        if not np.isnan(bufferFlags[q]):
-                            extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[q] * settings.broadcastLength
-                            # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
-                        else:
-                            # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
-                            skipUpdate = True
-                    # Complete phase shift factors
-                    phaseShiftFactors[k] += extraPhaseShiftFactor
-                    # Apply phase shift factors
-                    ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
-
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
-                                                Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
-                if settings.computeLocalEstimate:
-                    # Local observations only
-                    Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
-                                                    Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-                
-                # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
-                if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
-                    startUpdates[k] = True
-                # startUpdates[k] = True
-
-                if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
-                    # No `for`-loop versions 
-                    if settings.performGEVD:    # GEVD update
-                        wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
-                        if settings.computeLocalEstimate:
-                            wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
-
-                    else:                       # regular update (no GEVD)
-                        wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], settings.referenceSensor)
-                        if settings.computeLocalEstimate:
-                            wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
-                    # Count the number of internal filter updates
-                    nInternalFilterUpdates[k] += 1  
-                else:
-                    # Do not update the filter coefficients
-                    wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
-                    if settings.computeLocalEstimate:
-                        wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
-                    if skipUpdate:
-                        print(f'Node {k+1}: {i[k] + 1}^th update skipped.')
-                if settings.bypassFilterUpdates:
-                    print('!! User-forced bypass of filter coefficients updates !!')
-
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                wTildeExternal[k] = settings.expAvgBeta * wTildeExternal[k] + (1 - settings.expAvgBeta) * wTildeExternalTarget[k]
-                # Update targets
-                if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
-                    wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
-                    # Update last external filter update instant [s]
-                    lastExternalFiltUpdateInstant[k] = t
-                    if settings.printouts.externalFilterUpdates:    # inform user
-                        print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-
-                # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-                if settings.asynchronicity.estimateSROs == 'CohDrift':
-                    
-                    ld = settings.asynchronicity.cohDriftMethod.segLength
-
-                    if i[k] in cohDriftSROupdateIndices:
-
-                        flagFirstSROEstimate = False
-                        if i[k] == np.amin(cohDriftSROupdateIndices):
-                            flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
-
-                        # Residuals method
-                        for q in range(len(neighbourNodes[k])):
-
-                            idxq = yLocalCurr.shape[-1] + q     # index of the compressed signal from node `q` inside `yyH`
-                            if settings.asynchronicity.cohDriftMethod.loop == 'closed':
-                                # Use SRO-compensated correlation matrix entries (closed-loop SRO est. + comp.)
-                                cohPosteriori = (yyH[k][i[k], :, 0, idxq]
-                                                        / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                                cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
-                                                        / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
-                            elif settings.asynchronicity.cohDriftMethod.loop == 'open':
-                                # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
-                                cohPosteriori = (yyHuncomp[k][i[k], :, 0, idxq]
-                                                        / np.sqrt(yyHuncomp[k][i[k], :, 0, 0] * yyHuncomp[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                                cohPriori = (yyHuncomp[k][i[k] - ld, :, 0, idxq]
-                                                        / np.sqrt(yyHuncomp[k][i[k] - ld, :, 0, 0] * yyHuncomp[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
-
-                            sroRes, apr = subs.cohdrift_sro_estimation(
-                                                wPos=cohPosteriori,
-                                                wPri=cohPriori,
-                                                avg_res_prod=avgProdResiduals[k][:, q],
-                                                Ns=Ns,
-                                                ld=ld,
-                                                method=settings.asynchronicity.cohDriftMethod.estimationMethod,
-                                                alpha=settings.asynchronicity.cohDriftMethod.alpha,
-                                                flagFirstSROEstimate=flagFirstSROEstimate,
-                                                )
-                        
-                            SROsResiduals[k][q] = sroRes
-                            avgProdResiduals[k][:, q] = apr
-
-                    SROresidualThroughTime[k][i[k]:] = SROsResiduals[k][0]  # save for plotting / debugging
-                        
-                elif settings.asynchronicity.estimateSROs == 'DWACD':
-                    # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
-
-                    if i[k] in dwacdSROupdateIndices:
-
-                        for q in range(len(neighbourNodes[k])):
-                            sroEst, acp = subs.dwacd_sro_estimation(
-                                    sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
-                                    ref_sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, 0],   # local sensor signal
-                                    activity_sig=oVADframes[:i[k]+1],    
-                                    activity_ref_sig=oVADframes[:i[k]+1],
-                                    paramsDWACD=settings.asynchronicity.dwacd,
-                                    seg_idx=dwacdSegIdx[k],
-                                    sro_est=SROsEstimates[k][q],     # previous SRO estimate
-                                    # sro_est=0,     # previous SRO estimate
-                                    avg_coh_prod=avgCohProdDWACD[k][q, :]
-                            )
-                            SROsEstimates[k][q] = sroEst
-                            avgCohProdDWACD[k][q, :] = acp
-
-                        dwacdSegIdx[k] += 1
-
-                elif settings.asynchronicity.estimateSROs == 'Oracle':
-                    # no data-based dynamic SRO estimation: use oracle knowledge
-                    SROsEstimates[k] = (settings.asynchronicity.SROsppm[neighbourNodes[k]] -\
-                                        settings.asynchronicity.SROsppm[k]) * 1e-6
-                # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-
-                # Update phase shifts for SRO compensation
-                if settings.asynchronicity.compensateSROs:
-                    for q in range(len(neighbourNodes[k])):
-                        if settings.asynchronicity.estimateSROs == 'CohDrift':
-                            if settings.asynchronicity.cohDriftMethod.loop == 'closed':
-                                # Increment estimate using SRO residual
-                                SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
-                            elif settings.asynchronicity.cohDriftMethod.loop == 'open':
-                                # Use SRO "residual" as estimates
-                                SROsEstimates[k][q] = SROsResiduals[k][q]
-                        # Save estimate evolution for later plotting
-                        SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
-                        # Increment phase shift factor recursively
-                        phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
-                    if k == 0:
-                        phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
-
-                # ----- Compute desired signal chunk estimate -----
-                dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                dhat[:, i[k], k] = dhatCurr
-                # Transform back to time domain (WOLA processing)
-                dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
-                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-                    d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
-                else:
-                    d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
-                
-                if settings.computeLocalEstimate:
-                    # Local observations only
-                    dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :dimYLocal[k]])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                    dhatLocal[:, i[k], k] = dhatLocalCurr
-                    # Transform back to time domain (WOLA processing)
-                    dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
-                    if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-                        dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+            # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
+            ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
+            yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
+            # Compensate SROs
+            if settings.asynchronicity.compensateSROs:
+                # Account for buffer flags
+                extraPhaseShiftFactor = np.zeros(dimYTilde[k])
+                for q in range(len(neighbourNodes[k])):
+                    if not np.isnan(bufferFlags[q]):
+                        extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[q] * settings.broadcastLength
+                        # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
                     else:
-                        dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
-                # -----------------------------------------------------------------------
+                        # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
+                        skipUpdate = True
+                # Complete phase shift factors
+                phaseShiftFactors[k] += extraPhaseShiftFactor
+                # Apply phase shift factors
+                ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
+
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
+                                            Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
+            if settings.computeLocalEstimate:
+                # Local observations only
+                Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
+                                                Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+            
+            # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
+            if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
+                startUpdates[k] = True
+            # startUpdates[k] = True
+
+            if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
+                # No `for`-loop versions 
+                if settings.performGEVD:    # GEVD update
+                    wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
+                    if settings.computeLocalEstimate:
+                        wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
+
+                else:                       # regular update (no GEVD)
+                    wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], settings.referenceSensor)
+                    if settings.computeLocalEstimate:
+                        wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
+                # Count the number of internal filter updates
+                nInternalFilterUpdates[k] += 1  
+            else:
+                # Do not update the filter coefficients
+                wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
+                if settings.computeLocalEstimate:
+                    wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                if skipUpdate:
+                    print(f'Node {k+1}: {i[k] + 1}^th update skipped.')
+            if settings.bypassFilterUpdates:
+                print('!! User-forced bypass of filter coefficients updates !!')
+
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            wTildeExternal[k] = settings.expAvgBeta * wTildeExternal[k] + (1 - settings.expAvgBeta) * wTildeExternalTarget[k]
+            # Update targets
+            if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
+                wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
+                # Update last external filter update instant [s]
+                lastExternalFiltUpdateInstant[k] = t
+                if settings.printouts.externalFilterUpdates:    # inform user
+                    print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+
+            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            if settings.asynchronicity.estimateSROs == 'CohDrift':
                 
-                # Increment DANSE iteration index
-                i[k] += 1
+                ld = settings.asynchronicity.cohDriftMethod.segLength
+
+                if i[k] in cohDriftSROupdateIndices:
+
+                    flagFirstSROEstimate = False
+                    if i[k] == np.amin(cohDriftSROupdateIndices):
+                        flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
+
+                    # Residuals method
+                    for q in range(len(neighbourNodes[k])):
+
+                        idxq = yLocalCurr.shape[-1] + q     # index of the compressed signal from node `q` inside `yyH`
+                        if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                            # Use SRO-compensated correlation matrix entries (closed-loop SRO est. + comp.)
+                            cohPosteriori = (yyH[k][i[k], :, 0, idxq]
+                                                    / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
+                            cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
+                                                    / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
+                        elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                            # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
+                            cohPosteriori = (yyHuncomp[k][i[k], :, 0, idxq]
+                                                    / np.sqrt(yyHuncomp[k][i[k], :, 0, 0] * yyHuncomp[k][i[k], :, idxq, idxq]))     # a posteriori coherence
+                            cohPriori = (yyHuncomp[k][i[k] - ld, :, 0, idxq]
+                                                    / np.sqrt(yyHuncomp[k][i[k] - ld, :, 0, 0] * yyHuncomp[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
+
+                        sroRes, apr = subs.cohdrift_sro_estimation(
+                                            wPos=cohPosteriori,
+                                            wPri=cohPriori,
+                                            avg_res_prod=avgProdResiduals[k][:, q],
+                                            Ns=Ns,
+                                            ld=ld,
+                                            method=settings.asynchronicity.cohDriftMethod.estimationMethod,
+                                            alpha=settings.asynchronicity.cohDriftMethod.alpha,
+                                            flagFirstSROEstimate=flagFirstSROEstimate,
+                                            )
+                    
+                        SROsResiduals[k][q] = sroRes
+                        avgProdResiduals[k][:, q] = apr
+
+                SROresidualThroughTime[k][i[k]:] = SROsResiduals[k][0]  # save for plotting / debugging
+                    
+            elif settings.asynchronicity.estimateSROs == 'DWACD':
+                # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
+
+                if i[k] in dwacdSROupdateIndices:
+
+                    for q in range(len(neighbourNodes[k])):
+                        sroEst, acp = subs.dwacd_sro_estimation(
+                                sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
+                                ref_sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, 0],   # local sensor signal
+                                activity_sig=oVADframes[:i[k]+1],    
+                                activity_ref_sig=oVADframes[:i[k]+1],
+                                paramsDWACD=settings.asynchronicity.dwacd,
+                                seg_idx=dwacdSegIdx[k],
+                                sro_est=SROsEstimates[k][q],     # previous SRO estimate
+                                # sro_est=0,     # previous SRO estimate
+                                avg_coh_prod=avgCohProdDWACD[k][q, :]
+                        )
+                        SROsEstimates[k][q] = sroEst
+                        avgCohProdDWACD[k][q, :] = acp
+
+                    dwacdSegIdx[k] += 1
+
+            elif settings.asynchronicity.estimateSROs == 'Oracle':
+                # no data-based dynamic SRO estimation: use oracle knowledge
+                SROsEstimates[k] = (settings.asynchronicity.SROsppm[neighbourNodes[k]] -\
+                                    settings.asynchronicity.SROsppm[k]) * 1e-6
+            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
+
+            # Update phase shifts for SRO compensation
+            if settings.asynchronicity.compensateSROs:
+                for q in range(len(neighbourNodes[k])):
+                    if settings.asynchronicity.estimateSROs == 'CohDrift':
+                        if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                            # Increment estimate using SRO residual
+                            SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
+                        elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                            # Use SRO "residual" as estimates
+                            SROsEstimates[k][q] = SROsResiduals[k][q]
+                    # Save estimate evolution for later plotting
+                    SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
+                    # Increment phase shift factor recursively
+                    phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
+                if k == 0:
+                    phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
+
+            # ----- Compute desired signal chunk estimate -----
+            dhatCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+            dhat[:, i[k], k] = dhatCurr
+            # Transform back to time domain (WOLA processing)
+            dChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurr, frameSize)
+            if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+            else:
+                d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+            
+            if settings.computeLocalEstimate:
+                # Local observations only
+                dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :dimYLocal[k]])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dhatLocal[:, i[k], k] = dhatLocalCurr
+                # Transform back to time domain (WOLA processing)
+                dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
+                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+                else:
+                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
+            # -----------------------------------------------------------------------
+            
+            # Increment DANSE iteration index
+            i[k] += 1
 
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
