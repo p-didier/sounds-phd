@@ -978,10 +978,10 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
     fs = np.zeros(nNodes)
     for k in range(nNodes):
         deltas = np.diff(timeInstants[:, k])
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1000))))  # allowing computer precision errors down to 1e-3*mean delta.
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e7))))  # allowing computer precision errors down to 1e-4*mean delta.
         if len(np.unique(np.round(deltas, precision))) > 1:
             raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
-        fs[k] = 1 / np.unique(np.round(deltas, precision))[0]
+        fs[k] = np.round(1 / np.unique(np.round(deltas, precision))[0], 3)  # np.round(): not going below 1PPM precision for typical fs >= 8 kHz
 
     # Total signal duration [s] per node (after truncation during signal generation)
     Ttot = timeInstants[-1, :]
@@ -999,15 +999,6 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
     elif 'fewSamples' in bd:
         broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
-
-    # import matplotlib.pyplot as plt
-    # fig, axes = plt.subplots(1,1)
-    # fig.set_size_inches(8.5, 3.5)
-    # axes.plot(broadcastInstants[0][:10] - broadcastInstants[1][:10], '.-')
-    # axes.grid()
-    # plt.tight_layout()	
-    # plt.show()
-
 
     # Ensure that all nodes have broadcasted enough times to perform any update
     minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])

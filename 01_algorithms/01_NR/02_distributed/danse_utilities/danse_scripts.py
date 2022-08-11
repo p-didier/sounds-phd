@@ -364,7 +364,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
-    for events in eventsMatrix:
+    for idxInstant, events in enumerate(eventsMatrix):
 
         # Parse event matrix (+ inform user)
         t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=settings.printouts.events_parser)
@@ -374,7 +374,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             tprint = t
 
         eventIndices = np.arange(len(eventTypes))
-        # Deal with broadcasts first
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with broadcasts first ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
         for idxBroadcastEvent in eventIndices[[True if ii == 'broadcast' else False for ii in eventTypes]]:
 
             # Node index
@@ -408,9 +408,18 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         zTDpreviousFrame=zLocal[k],
                     )
 
-            stop = 1
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Check for SRO flags ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+        sroFlagsCurr = subs.detect_sro_flags(zBuffer, neighbourNodes)
+        if idxInstant == 0:
+            sroFlags = sroFlagsCurr
+        else:
+            for k in range(len(sroFlags)):
+                for q in range(len(sroFlags[k])):
+                    sroFlags[k][q] += sroFlagsCurr[k][q]
 
-        # Deal with updates next
+        stop = 1
+
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with updates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
         for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
 
             # Node index
@@ -435,11 +444,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             else:
                 numUpdatesRnn[k] += 1
             
-            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-            # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             # Process buffers
-            z[k], bufferFlags = subs.process_incoming_signals_buffers(
+            z[k], bufferFlags = subs.process_incoming_signals_buffers(  # TODO: get rid of `bufferFlags` if not needed
                                 zBuffer[k],
                                 z[k],
                                 neighbourNodes[k],
@@ -469,8 +476,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
-            # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
             ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])

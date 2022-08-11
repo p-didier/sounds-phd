@@ -247,10 +247,44 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     return sro_est, avg_coh_prod
 
 
-def detect_sro_flags(zBuffer, L):
+def detect_sro_flags(zBuffer, neighbourNodes):
+    """
+    Detect over-/under-flow flags for SRO compensation based
+    on DANSE compressed signals (`z`) buffers.
 
+    Parameters
+    ----------
+    zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float or complex)
+        For each node, buffers at current iteration.
+    neighbourNodes : [nNodes x 1] list of [Nneighbors[n] x 1] lists (int)
+        Network indices of neighbours, per node.
 
+    Returns
+    -------
+    flags : [nNodes x 1] list of [Nneighbors x 1] np.ndarrays (int)
+        For each node, flags associated to its neighbors (in # of samples over-/under-flown).
+    """
+
+    flags = [np.zeros(len(zBuffer[k])) for k in range(len(zBuffer))]  # init
+    for k in range(len(zBuffer)):
+        # Find how many samples have been broadcasted from node `k`
+        sizeBuffer_k = None
+        for ii in range(len(neighbourNodes)):
+            if ii != k and k in neighbourNodes[ii]:
+                zBufferii = np.array(zBuffer[ii])  # convert to np.ndarray (easier manipulations with boolean indices)
+                buffer_k = zBufferii[neighbourNodes[ii] == k]  # extract buffer corresponding to node `k`
+                # Special case: node `k` is the only neighbor of node `ii` and it contains more than 1 sample
+                if not isinstance(buffer_k[0], float) and not isinstance(buffer_k[0], complex):
+                    buffer_k = buffer_k[0]
+                sizeBuffer_k = len(buffer_k)
+                break
+        if sizeBuffer_k is None:
+            raise ValueError('SRO-flag raising: incorrect evaluation of buffer size for current node.')
+
+        # Compare that number to what has been broadcasted by neighbor nodes
+        for q in range(len(zBuffer[k])):
+            flags[k][q] = len(zBuffer[k][q]) - sizeBuffer_k
 
     stop = 1
 
-    return 0
+    return flags
