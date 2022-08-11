@@ -1000,6 +1000,15 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
 
+    # import matplotlib.pyplot as plt
+    # fig, axes = plt.subplots(1,1)
+    # fig.set_size_inches(8.5, 3.5)
+    # axes.plot(broadcastInstants[0][:10] - broadcastInstants[1][:10], '.-')
+    # axes.grid()
+    # plt.tight_layout()	
+    # plt.show()
+
+
     # Ensure that all nodes have broadcasted enough times to perform any update
     minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
     for k in range(nNodes):
@@ -1169,8 +1178,9 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
     
     Returns
     -------
-    zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float)
+    zBuffer : [nNodes x 1] list of [Nneighbors x 1] lists of np.ndarrays (float or complex)
         For each node, buffers at current iteration.
+        # TODO: other outputs
     """
     # Check inputs
     if np.round(t * fs) != np.round(t * fs, 9):
