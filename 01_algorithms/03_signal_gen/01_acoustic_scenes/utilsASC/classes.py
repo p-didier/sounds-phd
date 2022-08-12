@@ -152,6 +152,7 @@ class ASCProgramSettings:
     """Class for keeping track of global simulation settings"""
     roomDimBounds: list[float] = field(default_factory=list)   # [m] [smallest, largest] room dimension possible 
     minDistFromWalls: float = 0.                    # [m] minimum distance between room boundaries and elements in the room
+    maxDistFromNoise: float = 99.                   # [m] maximum distance between nodes and noise source (only if `numNoiseSources==1`)
     numScenarios: int = 1                           # number of AS to generate
     samplingFrequency: int = 16e3                   # [samples/s] sampling frequency 
     rirLength: int = 2**12                          # [samples] RIR length 

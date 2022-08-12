@@ -39,7 +39,8 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     # samplingFrequency=16000,
     # samplingFrequency=44100,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_3]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
@@ -53,7 +54,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=10,
+    signalDuration=5,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -62,11 +63,11 @@ mySettings = ProgramSettings(
     stftWinLength=2**10,
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
-    # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
+    broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
     # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
-    broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
-    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=1,
+    # broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=1,
     # broadcastLength=2**8,
     # selfnoiseSNR=-np.Inf,
     # broadcastLength=8,       # broadcast chunk size `L` [samples]
@@ -74,14 +75,14 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
-        # SROsppm=0,
-        SROsppm=[0, 50],
+        SROsppm=0,
+        # SROsppm=[0, 50],
         # SROsppm=[0, 75],
         # SROsppm=[0, 100],
         # SROsppm=[50, 0],
         # SROsppm=[0, 3000],
-        compensateSROs=True,
-        # compensateSROs=False,
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
@@ -98,13 +99,13 @@ mySettings = ProgramSettings(
             startAfterNupdates=11,
             alpha=0.95,
             # alpha=0,
-            # alphaEps=0.01,  # only if `loop=='closed'`
+            alphaEps=0.01,  # only if `loop=='closed'`
             # alphaEps=0.05,
-            alphaEps=0.10,
+            # alphaEps=0.10,
             # alphaEps=0.25,
             # alphaEps=0.5,
-            loop='open',
-            # loop='closed',
+            # loop='open',
+            loop='closed',
         )
     ),
     # bypassFilterUpdates=True,
@@ -118,8 +119,8 @@ mySettings = ProgramSettings(
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    # timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,

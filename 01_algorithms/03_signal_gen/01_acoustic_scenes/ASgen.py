@@ -25,30 +25,31 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios=1,                   # Number of AS to generate
+    numScenarios=5,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
-    # roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
-    roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
+    roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
+    # roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
     minDistFromWalls = 0.2,
+    maxDistFromNoise = 1.5,           # maximum distance between nodes and noise source (only if `numNoiseSources==1`)
     numSpeechSources=1,               # nr. of speech sources
-    numNoiseSources=0,                # nr. of noise sources
-    numNodes=10,                       # nr. of nodes
+    numNoiseSources=1,                # nr. of noise sources
+    numNodes=2,                       # nr. of nodes
     # numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
-    # numSensorPerNode=[2,2],               # nr. of sensor per node,
+    numSensorPerNode=[3,3],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
     # numSensorPerNode=[1,2,3],               # nr. of sensor per node,
-    numSensorPerNode=1,               # nr. of sensor per node,
+    # numSensorPerNode=1,               # nr. of sensor per node,
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation=1,                 # separation between sensor in array (only used if numSensorPerNode > 1)
+    sensorSeparation=0.05,            # separation between sensor in array (only used if numSensorPerNode > 1) [m]
     revTime=0.0,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases
 )
 
 basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
-customASCname = 'testforTIDANSE'
-# customASCname = None
+# customASCname = 'testforTIDANSE'
+customASCname = None
 plotit = 1  
 exportit = 1    # If True, export the ASC, settings, and figures.
 globalSeed = 12345
@@ -171,7 +172,20 @@ def genAS(sets: ASCProgramSettings):
         nodesCoords = np.repeat(nodesCoords, sets.numNodes, axis=0)
         sets.sensorSeparation = 0.0
     else:
-        nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+        if sets.numNoiseSources == 1:
+            # Consider maximum distance from noise source
+            # boxForNodes = noiseSourceCoords - 2 * sets.maxDistFromNoise
+            # boxForNodes[boxForNodes < sets.minDistFromWalls] = sets.minDistFromWalls
+            # boxForNodes[boxForNodes > roomDimensions - sets.minDistFromWalls] = roomDimensions[boxForNodes > roomDimensions - sets.minDistFromWalls] - sets.minDistFromWalls
+            # nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), boxForNodes) + noiseSourceCoords
+            nodesCoords = np.zeros((sets.numNodes, 3))
+            for ii in range(sets.numNodes):
+                distToNoiseSource = np.inf
+                while distToNoiseSource > sets.maxDistFromNoise:
+                    nodesCoords[ii, :] = np.multiply(rng.uniform(0, 1, (1, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+                    distToNoiseSource = np.sqrt(np.sum((nodesCoords[ii, :] - noiseSourceCoords) ** 2))
+        else:
+            nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
     
     # Generate sensor arrays
     totalNumSensors = np.sum(sets.numSensorPerNode, dtype=int)
