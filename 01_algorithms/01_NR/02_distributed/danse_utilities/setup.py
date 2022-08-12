@@ -123,12 +123,14 @@ def resample_for_sro(x, baseFs, SROppm):
     fsSRO : float
         Re-sampled signal's sampling frequency [Hz].
     """
-    tOriginal = np.arange(len(x)) / baseFs
     fsSRO = baseFs * (1 + SROppm / 1e6)
-    numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
-    # xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
     xResamp = resampy.core.resample(x, baseFs, fsSRO)
+
+    # tOriginal = np.arange(len(x)) / baseFs
+    # numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
+    # xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
     # t = np.arange(0, numSamplesPostResamp) * (tOriginal[1] - tOriginal[0]) * x.shape[0] / float(numSamplesPostResamp) + tOriginal[0]    # based on line 3116 in `scipy.signal.resample`
+
     t = np.arange(len(xResamp)) / fsSRO
 
     if len(xResamp) >= len(x):

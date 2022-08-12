@@ -277,7 +277,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         yyHuncomp.append(np.zeros((numIterations, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
         #
-        bufferFlags.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
+        bufferFlags.append(np.zeros((numIterations, len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
         bufferLengths.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))
         #
         if settings.broadcastDomain == 'wholeChunk_td':
@@ -384,7 +384,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                                         t,
                                                         fs[k],
                                                         settings.broadcastDomain,
-                                                        frameSize)
+                                                        frameSize, k, lk[k])
 
             # Perform broadcast -- update all relevant buffers in network
             zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
@@ -425,6 +425,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                                         Ns,
                                                         settings.broadcastLength)
 
+            if i[k] >= 14:
+                stop = 1
+
             # Compute VAD
             VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
             oVADframes[i[k]] = sum(VADinFrame == 0) <= len(VADinFrame) / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
@@ -432,10 +435,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 numUpdatesRyy[k] += 1
             else:
                 numUpdatesRnn[k] += 1
-            
+
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Build local observations vector ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             # Process buffers
-            z[k], bufferFlags = subs.process_incoming_signals_buffers(
+            z[k], bufferFlags[k][i[k], :] = subs.process_incoming_signals_buffers(
                                 zBuffer[k],
                                 z[k],
                                 neighbourNodes[k],
@@ -445,9 +448,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                 L=settings.broadcastLength,
                                 lastExpectedIter=numIterations - 1,
                                 broadcastDomain=settings.broadcastDomain)
-                                
-            # TODO: DEBUGGING PURPOSES
-            bufferFlags = np.zeros_like(bufferFlags)
 
             # Save full z vector for DEBUGGING PURPOSES
             if k == 0:
@@ -477,9 +477,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Account for buffer flags
                 extraPhaseShiftFactor = np.zeros(dimYTilde[k])
                 for q in range(len(neighbourNodes[k])):
-                    if not np.isnan(bufferFlags[q]):
-                        extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[q] * settings.broadcastLength
-                        # ↑↑↑ if `bufferFlags[q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
+                    if not np.isnan(bufferFlags[k][i[k], q]):
+                        extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[k][i[k], q] * settings.broadcastLength
+                        # ↑↑↑ if `bufferFlags[k][i[k], q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
                     else:
                         # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
                         skipUpdate = True
@@ -500,7 +500,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
             if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
                 startUpdates[k] = True
-            # startUpdates[k] = True
+            else:
+                # As long as we have not started DANSE updates,
+                # prevent updating of the time-domain filters used for broadcasting.
+                previousTDfilterUpdate[k] = t
 
             if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
                 # No `for`-loop versions 
@@ -543,9 +546,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
                 if i[k] in cohDriftSROupdateIndices:
 
-                    if k == 1:
-                        stop = 1
-
                     flagFirstSROEstimate = False
                     if i[k] == np.amin(cohDriftSROupdateIndices):
                         flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
@@ -577,6 +577,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                             alpha=settings.asynchronicity.cohDriftMethod.alpha,
                                             flagFirstSROEstimate=flagFirstSROEstimate,
                                             )
+
+                        if i[k] >= 14:
+                            stop = 1
                     
                         SROsResiduals[k][q] = sroRes
                         avgProdResiduals[k][:, q] = apr
@@ -617,10 +620,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     if settings.asynchronicity.estimateSROs == 'CohDrift':
                         if settings.asynchronicity.cohDriftMethod.loop == 'closed':
                             # Increment estimate using SRO residual
-                            SROsEstimates[k][q] += SROsResiduals[k][q] * settings.asynchronicity.cohDriftMethod.alphaEps
+                            SROsEstimates[k][q] += SROsResiduals[k][q] / (1 + SROsResiduals[k][q]) * settings.asynchronicity.cohDriftMethod.alphaEps
                         elif settings.asynchronicity.cohDriftMethod.loop == 'open':
                             # Use SRO "residual" as estimates
-                            SROsEstimates[k][q] = SROsResiduals[k][q]
+                            SROsEstimates[k][q] = SROsResiduals[k][q] / (1 + SROsResiduals[k][q])
                     # Save estimate evolution for later plotting
                     SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
                     # Increment phase shift factor recursively
@@ -653,6 +656,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # Increment DANSE iteration index
             i[k] += 1
 
+    
+        if i[k] > 30:
+            stop = 1
+
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
     print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
@@ -673,8 +680,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
-
-
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(6,1.5))
     # ax = fig.add_subplot(111)
@@ -687,7 +692,17 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     # Debugging
     fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
+    # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
+    plt.show()
+
+    # import matplotlib.pyplot as plt
+    # fig, axes = plt.subplots(1,1)
+    # fig.set_size_inches(8.5, 3.5)
+    # axes.plot(bufferFlags[0][:, 0])
+    # axes.grid()
+    # plt.tight_layout()	
     # plt.show()
+
     # if 0:
     #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.png')
     #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.pdf')

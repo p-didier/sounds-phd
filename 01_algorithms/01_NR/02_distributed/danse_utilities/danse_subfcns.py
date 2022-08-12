@@ -2,6 +2,7 @@
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
+import scipy.signal as sig
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
@@ -551,10 +552,10 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     yfiltLastSamples = np.zeros((L, yq.shape[-1]))
     for idxSensor in range(yq.shape[-1]):
         # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
-        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full'
+        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
 
-        idDesired = np.arange(start=len(wIR) - 1 - L, stop=len(wIR) - 1)   # indices required from convolution output
+        idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
         tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 
@@ -978,7 +979,7 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
     fs = np.zeros(nNodes)
     for k in range(nNodes):
         deltas = np.diff(timeInstants[:, k])
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e7))))  # allowing computer precision errors down to 1e-4*mean delta.
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e3))))  # allowing computer precision errors down to 1e-4*mean delta.
         if len(np.unique(np.round(deltas, precision))) > 1:
             raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
         fs[k] = np.round(1 / np.unique(np.round(deltas, precision))[0], 3)  # np.round(): not going below 1PPM precision for typical fs >= 8 kHz
@@ -1215,7 +1216,13 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                                             wIRprevious,
                                             winWOLAanalysis, winWOLAsynthesis, winShift,
                                             updateBroadcastFilter=updateBroadcastFilter)  # local compressed signals
+
             zBuffer = fill_buffers_td_few_samples(k, neighbourNodes, lk, zBuffer, zLocal, L)
+
+        # if lk[k] > 1000 and k == 1:
+        #     print(yk[-1])
+        #     print(t)
+        #     stop = 1
 
         lk[k] += 1  # increment local broadcast index
 
@@ -1257,7 +1264,7 @@ def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):
     return Ryy, Rnn, yyH
 
 
-def local_chunk_for_broadcast(y, t, fs, bd, N):
+def local_chunk_for_broadcast(y, t, fs, bd, N, k, lk):
     """Extract correct chunk of local signals for broadcasting.
     
     Parameters
@@ -1282,7 +1289,7 @@ def local_chunk_for_broadcast(y, t, fs, bd, N):
         Time chunk of local sensor signals.
     """
 
-    idxEnd = int(np.floor(t * fs))
+    idxEnd = int(np.floor(np.round(t * fs, 5)))  # np.round() used to avoid issues with previous rounding/precision errors (see Word journal week 32, THU, 2022)
     # if bd in ['wholeChunk_fd', 'wholeChunk_td']:
     idxBeg = np.amax([idxEnd - N, 0])   # don't go into negative sample indices!
     chunk = y[idxBeg:idxEnd, :]
@@ -1327,14 +1334,12 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
     """
 
     # Broadcast scheme: block-wise, in freq.-domain
-    if bd == 'wholeChunk_fd':
-        idxEnd = int(np.floor(t * fs))
+    # <or> Broadcast scheme: few samples at a time, in time-domain
+    if bd in ['wholeChunk_fd', 'fewSamples_td']:
+        idxEnd = int(np.floor(np.round(t * fs, 5)))
     # Broadcast scheme: block-wise, in time-domain
     elif bd == 'wholeChunk_td':
-        idxEnd = int(np.floor(t * fs)) - Ns     # `Ns` samples delay due to time-domain WOLA
-    # Broadcast scheme: few samples at a time, in time-domain
-    elif bd == 'fewSamples_td':
-        idxEnd = int(np.floor(t * fs))
+        idxEnd = int(np.floor(np.round(t * fs, 5))) - Ns     # `Ns` samples delay due to time-domain WOLA
 
     idxBeg = np.amax([idxEnd - N, 0])       # don't go into negative sample indices!
     chunk = y[idxBeg:idxEnd, :]
