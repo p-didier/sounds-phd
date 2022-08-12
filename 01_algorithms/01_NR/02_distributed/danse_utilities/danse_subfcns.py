@@ -979,7 +979,7 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
     fs = np.zeros(nNodes)
     for k in range(nNodes):
         deltas = np.diff(timeInstants[:, k])
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e3))))  # allowing computer precision errors down to 1e-4*mean delta.
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e7))))  # allowing computer precision errors down to 1e-4*mean delta.
         if len(np.unique(np.round(deltas, precision))) > 1:
             raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
         fs[k] = np.round(1 / np.unique(np.round(deltas, precision))[0], 3)  # np.round(): not going below 1PPM precision for typical fs >= 8 kHz
