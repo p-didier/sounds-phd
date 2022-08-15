@@ -471,13 +471,13 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1)]
         # Apply linear combination to form compressed signal
-        zqHat = 1 / h.sum() * wHat.conj() * yqHat     # single sensor = simple element-wise multiplication
+        zqHat = wHat.conj() * yqHat     # single sensor = simple element-wise multiplication
     else:
         yqHat = np.fft.fft(np.squeeze(yq) * h[:, np.newaxis], n, axis=0)
         # Keep only positive frequencies
         yqHat = yqHat[:int(n/2 + 1), :]
         # Apply linear combination to form compressed signal
-        zqHat = 1 / h.sum() * np.einsum('ij,ij->i', wHat.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+        zqHat = np.einsum('ij,ij->i', wHat.conj(), yqHat)  # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
 
     # WOLA synthesis stage
     if zqPrevious is not None:
@@ -1188,8 +1188,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
-            # w = np.zeros_like(w, dtype=complex)
-            # w[:,0] = 1
+            w = np.zeros_like(w, dtype=complex)
+            w[:,0] = 1
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG

@@ -54,9 +54,9 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=5,
+    signalDuration=15,
     baseSNR=5,
-    # baseSNR=90,
+    # baseSNR=50,
     # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,

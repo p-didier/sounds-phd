@@ -1,3 +1,4 @@
+from copy import copy
 import sys, time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -124,7 +125,10 @@ def resample_for_sro(x, baseFs, SROppm):
         Re-sampled signal's sampling frequency [Hz].
     """
     fsSRO = baseFs * (1 + SROppm / 1e6)
-    xResamp = resampy.core.resample(x, baseFs, fsSRO)
+    if baseFs != fsSRO:
+        xResamp = resampy.core.resample(x, baseFs, fsSRO)
+    else:
+        xResamp = copy(x)
 
     # tOriginal = np.arange(len(x)) / baseFs
     # numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
@@ -429,7 +433,8 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal, sroData = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
+        desiredSigEst, desiredSigEstLocal, sroData = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx,
+                signals.wetSpeech)  # <-- debugging: 20220815
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -441,7 +446,8 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
 
 
 def whiten(sig, vad=[]):
-    """Renders a sequence zero-mean and unit-variance.
+    """
+    Renders a sequence zero-mean and unit-variance.
     
     Parameters
     ----------
@@ -509,8 +515,12 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs, VADener
     else:
         vad = vadGiven
 
-    # Whiten signal 
-    sig_out = whiten(rawSignal, vad)
+    # Normalize signal energy 
+    if vad == []:
+        sig_out = rawSignal / np.std(rawSignal)
+    else:
+        sig_out = rawSignal / np.std(rawSignal[vad == 1])
+    # sig_out = whiten(rawSignal, vad)
 
     return sig_out, vad
 
