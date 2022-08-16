@@ -1,5 +1,6 @@
 # `danse_env` virtual environment
 # ---------------- Imports
+from cmath import inf
 import time
 
 t00 = time.perf_counter()
@@ -54,8 +55,10 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
+    computeCentralizedEstimate = True,
     signalDuration=15,
     baseSNR=5,
+    # baseSNR=inf,
     # baseSNR=50,
     # selfnoiseSNR=-10,
     #

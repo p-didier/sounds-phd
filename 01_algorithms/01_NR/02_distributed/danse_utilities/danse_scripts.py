@@ -230,6 +230,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     ryd = []                                        # cross-correlation between observations and estimations
     ytilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
+    ytildeHatCentr = []                             # local full observation vectors, frequency-domain, as if centralized processing
     ytildeHatUncomp = []                            # local full observation vectors, frequency-domain, SRO-uncompensated
     z = []                                          # current-iteration compressed signals used in DANSE update
     zBuffer = []                                    # current-iteration "incoming signals from other nodes" buffer
@@ -256,6 +257,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
         Ryylocal = []                                   # autocorrelation matrix when VAD=1 - using only local observations (not data coming from neighbors)
         dimYLocal = np.zeros(asc.numNodes, dtype=int)   # dimension of y_k (== M_k)
+    if settings.computeCentralizedEstimate:
+        wCentr = []                                     # filter coefficients - using all observations (centralized processing)
+        RnnCentr = []                                   # autocorrelation matrix when VAD=0 - using all observations (centralized processing)
+        RyyCentr = []                                   # autocorrelation matrix when VAD=1 - using all observations (centralized processing)
         
     for k in range(asc.numNodes):
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1) + len(neighbourNodes[k])
@@ -272,6 +277,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
         ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
+        ytildeHatCentr.append(np.zeros((numFreqLines, numIterations, asc.numSensors), dtype=complex))
         ytildeHatUncomp.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
         #
         sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
@@ -315,12 +321,22 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             sliceLocal = np.finfo(float).eps * np.eye(dimYLocal[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
             Rnnlocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # noise only
             Ryylocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # speech + noise
+        # If centralized estimate is to be computed vvv
+        if settings.computeCentralizedEstimate:
+            wtmp = np.zeros((numFreqLines, numIterations + 1, asc.numSensors), dtype=complex)
+            wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
+            wCentr.append(wtmp)
+            sliceCentr = np.finfo(float).eps * np.eye(asc.numSensors, dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
+            RnnCentr.append(np.tile(sliceCentr, (numFreqLines, 1, 1)))                    # noise only
+            RyyCentr.append(np.tile(sliceCentr, (numFreqLines, 1, 1)))                    # speech + noise
     # Desired signal estimate [frames x frequencies x nodes]
     dhat = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)        # using full-observations vectors (also data coming from neighbors)
     d = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhat`
     dhatLocal = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
+    dhatCentr = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using all observations (centralized processing)
     dLocal = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
     dLocal2 = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
+    dCentr = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatCentr`
     zReconstructed = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `z` (last neighbor, for each node)
     # Autocorrelation matrices update counters
     numUpdatesRyy = np.zeros(asc.numNodes)
@@ -364,6 +380,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         SROestimateThroughTime.append(np.zeros(numIterations))
         numPSFupdates.append(np.zeros(len(neighbourNodes[k])))
     zFullk0 = np.empty((0,))
+    dLocalChunks = np.zeros((frameSize, numIterations, asc.numNodes))
+    dHatLocalChunks = np.zeros((numFreqLines, numIterations, asc.numNodes))
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -429,6 +447,55 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     )
             
 
+        # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with local estimates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+        for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
+            
+            # Node index
+            k = int(nodesConcerned[idxUpdateEvent])
+            
+            # Extract current local data chunk
+            yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
+                                                        t,
+                                                        fs[k],
+                                                        settings.broadcastDomain,
+                                                        frameSize,
+                                                        Ns,
+                                                        settings.broadcastLength)
+
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+            if settings.computeLocalEstimate:
+                yLocalHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+
+                # Local observations only
+                dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k], :].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                # dhatLocalCurr = np.einsum('ij,ij->i', wTilde[k][:, i[k], :dimYLocal[k]].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dhatLocal[:, i[k], k] = dhatLocalCurr
+                # Transform back to time domain (WOLA processing)
+                dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
+                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+                else:
+                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
+
+                # Local observations only
+                dhatLocalCurr2 = np.einsum('ij,ij->i', wTilde[k][:, i[k], :dimYLocal[k]].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                # dhatLocalCurr2 = np.einsum('ij,ij->i', wLocal[k][:, i[k], :].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dHatLocalChunks[:, i[k], k] = dhatLocalCurr2 # <-----------
+                # Transform back to time domain (WOLA processing)
+                dLocalChunk2 = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr2, frameSize))
+                dLocalChunks[:, i[k], k] = dLocalChunk2 # <-----------
+                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                    dLocal2[idxBegChunk:idxEndChunk, k] += dLocalChunk2[-idxEndChunk:]   # overlap and add construction of output time-domain signal
+                else:
+                    dLocal2[idxBegChunk:idxEndChunk, k] += dLocalChunk2   # overlap and add construction of output time-domain signal
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+            # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING # COMPUTE LOCAL ESTIMATE BEFORE ANYTHING 
+
+
+
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with updates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
         for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
 
@@ -439,6 +506,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
             # Extract current local data chunk
             yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
+                                                        t,
+                                                        fs[k],
+                                                        settings.broadcastDomain,
+                                                        frameSize,
+                                                        Ns,
+                                                        settings.broadcastLength)
+            
+            # Extract current data chunk for CENTRALIZED PROCESSING
+            yCentrCurr, _, _ = subs.local_chunk_for_update(yin,
                                                         t,
                                                         fs[k],
                                                         settings.broadcastDomain,
@@ -467,10 +543,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                 lastExpectedIter=numIterations - 1,
                                 broadcastDomain=settings.broadcastDomain)
 
-
-            if i[k] > 30 and oVADframes[i[k]]:
-                stop = 1
-
             # Accumulate flags
             bufferFlagsAccumulated[k][i[k]:, :] = bufferFlagsAccumulated[k][i[k] - 1, :] + bufferFlags[k][i[k], :]
 
@@ -493,22 +565,33 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHatCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
 
+            # Centralized estimate
+            ytildeHatCentr[k][:, i[k], :] = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
-            # if referenceSpeechOnly is not None:
-            #     for q in range(len(neighbourNodes[k])):
-            #         referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
-            #         referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
-            #         referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
-            #         #
-            #         refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-            #         ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
+            if referenceSpeechOnly is not None:
+                for q in range(len(neighbourNodes[k])):
+                    # referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
+                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
+                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
+                    # #
+                    # refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                    # # vvv for debugging only (TD not needed otherwise, here)
+                    # refCurrBackToTD = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis[:, np.newaxis] * subs.back_to_time_domain(refCurrHat[:numFreqLines, :], frameSize))
+                    # ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
+                            
+                    if t > 4 and oVADframes[i[k]]:
+                        stop = 1
+                    ytildeHat[k][:, i[k], dimYLocal[k] + q] = dHatLocalChunks[:, i[k], neighbourNodes[k][q]]
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING
             # # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
+            if t > 4 and oVADframes[i[k]]:
+                stop = 1
 
             # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
             ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
@@ -532,6 +615,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Apply phase shift factors
                 ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
+
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                             Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
@@ -539,6 +623,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Local observations only
                 Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
                                                 Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
+            if settings.computeCentralizedEstimate:
+                # All observations
+                RyyCentr[k], RnnCentr[k], _ = subs.spatial_covariance_matrix_update(ytildeHatCentr[k][:, i[k], :],
+                                                RyyCentr[k], RnnCentr[k], settings.expAvgBeta, oVADframes[i[k]])
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
             
             # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
@@ -555,11 +643,15 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
                     if settings.computeLocalEstimate:
                         wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
+                    if settings.computeCentralizedEstimate:
+                        wCentr[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(RyyCentr[k], RnnCentr[k], settings.GEVDrank, settings.referenceSensor)
 
                 else:                       # regular update (no GEVD)
                     wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], settings.referenceSensor)
                     if settings.computeLocalEstimate:
                         wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
+                    if settings.computeCentralizedEstimate:
+                        wCentr[k][:, i[k] + 1, :] = subs.perform_update_noforloop(RyyCentr[k], RnnCentr[k], settings.referenceSensor)
                 # Count the number of internal filter updates
                 nInternalFilterUpdates[k] += 1  
             else:
@@ -567,6 +659,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
                 if settings.computeLocalEstimate:
                     wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
+                if settings.computeCentralizedEstimate:
+                    wCentr[k][:, i[k] + 1, :] = wCentr[k][:, i[k], :]
                 if skipUpdate:
                     print(f'Node {k+1}: {i[k] + 1}^th update skipped.')
             if settings.bypassFilterUpdates:
@@ -689,28 +783,17 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
             else:
                 d[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunk)   # overlap and add construction of output time-domain signal
+            # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
+            if settings.computeCentralizedEstimate:
+                dhatCurrCentr = np.einsum('ij,ij->i', wCentr[k][:, i[k] + 1, :].conj(), ytildeHatCentr[k][:, i[k], :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dhatCentr[:, i[k], k] = dhatCurrCentr
+                # Transform back to time domain (WOLA processing)
+                dChunkCentr = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatCurrCentr, frameSize)
+                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+                    dCentr[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunkCentr[-idxEndChunk:])   # overlap and add construction of output time-domain signal
+                else:
+                    dCentr[idxBegChunk:idxEndChunk, k] += np.real_if_close(dChunkCentr)   # overlap and add construction of output time-domain signal
             
-            if settings.computeLocalEstimate:
-                # Local observations only
-                dhatLocalCurr = np.einsum('ij,ij->i', wLocal[k][:, i[k] + 1, :].conj(), ytildeHat[k][:, i[k], :dimYLocal[k]])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                dhatLocal[:, i[k], k] = dhatLocalCurr
-                # Transform back to time domain (WOLA processing)
-                dLocalChunk = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr, frameSize)
-                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk[-idxEndChunk:])   # overlap and add construction of output time-domain signal
-                else:
-                    dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
-
-                # Local observations only
-                dhatLocalCurr2 = np.einsum('ij,ij->i', wTilde[k][:, i[k] + 1, :dimYLocal[k]].conj(), ytildeHat[k][:, i[k], :dimYLocal[k]])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                # Transform back to time domain (WOLA processing)
-                dLocalChunk2 = winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr2, frameSize)
-                if i[k] == 0 and idxEndChunk < frameSize:   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-                    dLocal2[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk2[-idxEndChunk:])   # overlap and add construction of output time-domain signal
-                else:
-                    dLocal2[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk2)   # overlap and add construction of output time-domain signal
-
-                
             # Reconstruct (via WOLA synthesis) full TD version of z-signal
             zHatCurr = ytildeHat[k][:, i[k], -1]
             # Transform back to time domain (WOLA processing)
@@ -807,4 +890,4 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     stop = 1
 
-    return d, dLocal, sroData
+    return d, dLocal, dCentr, sroData

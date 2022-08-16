@@ -256,6 +256,7 @@ class ProgramSettings(object):
     performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
+    computeCentralizedEstimate: bool = False      # if True, compute also an estimate of the desired signal using all sensor observations, as in centralized processing
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
     # Inter-node broadcasting parameters
     broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
@@ -427,8 +428,10 @@ class Signals(object):
     sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
     desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)
+    desiredSigEstCentralized: np.ndarray = np.array([]) # Desired signal(s) estimates for each node, in time-domain -- using all observations (centralized processing)
     desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using only local observations (not data coming from neighbors)
+    desiredSigEstCentralized_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using all observations (centralized processing)
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: np.ndarray = np.array([])                       # Sensor-specific sampling frequencies [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
@@ -475,6 +478,10 @@ class Signals(object):
             self.desiredSigEstLocal_STFT, _, _ = get_stft(self.desiredSigEstLocal, fs, settings)
         else:
             print("!! Desired signal (`desiredSigEstLocal`) unavailable -- Cannot compute its STFT.")
+        if len(self.desiredSigEstCentralized) > 0:
+            self.desiredSigEstCentralized_STFT, _, _ = get_stft(self.desiredSigEstCentralized, fs, settings)
+        else:
+            print("!! Desired signal (`desiredSigEstCentralized`) unavailable -- Cannot compute its STFT.")
 
         self.stftComputed = True
 
