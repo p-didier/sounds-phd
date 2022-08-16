@@ -529,7 +529,7 @@ class Signals(object):
             if settings.computeLocalEstimate:
                 ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstLocal[:, nodeIdx] - 4 * delta, label='Enhanced (local)')
                 deltaNextWaveform += 2 * delta   
-            if settings.computeLocalEstimate:
+            if settings.computeCentralizedEstimate:
                 ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstCentralized[:, nodeIdx] - 6 * delta, label='Enhanced (centralized)')
                 deltaNextWaveform += 2 * delta
             ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
@@ -588,7 +588,7 @@ class Signals(object):
                     ax.set(xlabel='$t$ [s]')
                     plt.xticks([])
                 # -------- Desired signal centralized_ estimate STFT -------- 
-                if settings.computeLocalEstimate:
+                if settings.computeCentralizedEstimate:
                     ax = fig.add_subplot(nRows,2,8)     # Enhanced signals (centralized)
                     data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstCentralized_STFT[:, :, nodeIdx])))
                     lab = 'Enhanced (centralized)'

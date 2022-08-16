@@ -55,8 +55,8 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    computeCentralizedEstimate = True,
-    signalDuration=10,
+    computeCentralizedEstimate = False,
+    signalDuration=15,
     baseSNR=5,
     # baseSNR=inf,
     # baseSNR=50,
@@ -66,8 +66,8 @@ mySettings = ProgramSettings(
     stftWinLength=2**10,
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
-    broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
-    # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
+    # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
+    broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
     # broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # broadcastLength=1,

@@ -1188,8 +1188,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
-            w = np.zeros_like(w, dtype=complex)
-            w[:,0] = 1
+            # w = np.zeros_like(w, dtype=complex)
+            # w[:,0] = 1
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
             # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
@@ -1209,6 +1209,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                                         winWOLAanalysis, winWOLAsynthesis,
                                         zqPrevious=zTDpreviousFrame)  # local compressed signals (time-domain)
 
+            #                                                                  vvv ONLY KEEP 1ST HALF
             zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes, zBuffer, zLocal[:(n // 2)])
             
             wIR = None  # chunk-wise broadcasting: no IR filter 
@@ -1308,7 +1309,7 @@ def local_chunk_for_broadcast(y, t, fs, bd, N, k, lk):
     # elif bd == 'fewSamples_td':
     #     raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: do that
 
-    return chunk
+    return chunk, idxBeg, idxEnd
 
 
 def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
