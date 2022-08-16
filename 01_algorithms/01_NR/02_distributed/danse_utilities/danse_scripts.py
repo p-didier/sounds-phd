@@ -566,25 +566,26 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
 
             # Centralized estimate
-            ytildeHatCentr[k][:, i[k], :] = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+            if settings.computeCentralizedEstimate:
+                if settings.broadcastDomain != 'wholeChunk_fd':
+                    raise ValueError('NOT YET IMPLEMENTED FOR CENTRALIZED ESTIMATE')
+                ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                ytildeHatCentr[k][:, i[k], :] = ytildeHatCentrCurr[:numFreqLines, :]
 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
-            if referenceSpeechOnly is not None:
-                for q in range(len(neighbourNodes[k])):
-                    # referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
-                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
-                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
-                    # #
-                    # refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    # # vvv for debugging only (TD not needed otherwise, here)
-                    # refCurrBackToTD = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis[:, np.newaxis] * subs.back_to_time_domain(refCurrHat[:numFreqLines, :], frameSize))
-                    # ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
-                            
-                    if t > 4 and oVADframes[i[k]]:
-                        stop = 1
-                    ytildeHat[k][:, i[k], dimYLocal[k] + q] = dHatLocalChunks[:, i[k], neighbourNodes[k][q]]
+            # if referenceSpeechOnly is not None:
+            #     for q in range(len(neighbourNodes[k])):
+            #         referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
+            #         referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
+            #         referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
+            #         #
+            #         refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+            #         # vvv for debugging only (TD not needed otherwise, here)
+            #         refCurrBackToTD = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis[:, np.newaxis] * subs.back_to_time_domain(refCurrHat[:numFreqLines, :], frameSize))
+            #         ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
+                    # ytildeHat[k][:, i[k], dimYLocal[k] + q] = dHatLocalChunks[:, i[k], neighbourNodes[k][q]]
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING
@@ -852,15 +853,19 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
+
     # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(6,1.5))
-    # ax = fig.add_subplot(111)
-    # ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
-    # ax.invert_yaxis()
-    # ax.set_aspect('auto')
-    # ax.set_ylabel('Freq. bin $\kappa$')
+    # fig, axes = plt.subplots(asc.numNodes,1)
+    # fig.set_size_inches(8.5, 3.5)
+    # for k in range(asc.numNodes):
+    #     axes[k].plot(masterClock, d[:,k], label='DANSE estimate')
+    #     axes[k].plot(masterClock, dLocal[:,k], alpha=.5, label='Local estimate')
+    #     axes[k].plot(masterClock, dCentr[:,k], alpha=.5, label='Centralized estimate')
+    #     axes[k].grid()
+    #     axes[k].legend()
+    #     axes[k].set_title(f'Node {k+1}')
+    # plt.tight_layout()
     # plt.show()
-    # stop = 1
 
     # Debugging
     fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)

@@ -274,6 +274,11 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
             localSig = sigs.desiredSigEstLocal[startIdx:, idxNode]
         else:
             localSig = []
+        # Adapt centralized signal estimate input value to `get_metrics()` function
+        if settings.computeCentralizedEstimate:
+            centralizedSig = sigs.desiredSigEstCentralized[startIdx:, idxNode]
+        else:
+            centralizedSig = []
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
         out0, out1, out2, out3 = eval_enhancement.get_metrics(
@@ -286,6 +291,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg,
                                     localSig,
+                                    centralizedSig
                                     )
 
         snr[f'Node{idxNode + 1}'] = out0

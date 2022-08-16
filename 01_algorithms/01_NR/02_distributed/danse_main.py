@@ -56,7 +56,7 @@ mySettings = ProgramSettings(
     wasnTopology='fully_connected',
     #
     computeCentralizedEstimate = True,
-    signalDuration=15,
+    signalDuration=10,
     baseSNR=5,
     # baseSNR=inf,
     # baseSNR=50,
