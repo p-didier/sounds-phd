@@ -45,7 +45,7 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
-    #
+    #5
     # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
@@ -57,9 +57,9 @@ mySettings = ProgramSettings(
     #
     computeCentralizedEstimate = False,
     signalDuration=15,
-    # baseSNR=5,
+    baseSNR=5,
     # baseSNR=inf,
-    baseSNR=50,
+    # baseSNR=50,
     # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
