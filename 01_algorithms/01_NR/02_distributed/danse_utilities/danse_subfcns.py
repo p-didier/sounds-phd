@@ -1224,8 +1224,8 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                 updateBroadcastFilter = True
                 previousTDfilterUpdate = t
 
-            # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
-            updateBroadcastFilter = False
+            # # DEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUGDEBUG
+            # updateBroadcastFilter = False
 
             zLocal, wIR = danse_compression_few_samples(yk, w, n, L,
                                             wIRprevious,

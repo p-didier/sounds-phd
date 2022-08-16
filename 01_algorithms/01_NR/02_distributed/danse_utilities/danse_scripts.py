@@ -388,7 +388,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         numPSFupdates.append(np.zeros(len(neighbourNodes[k])))
         zFull.append(np.empty((0,)))
     dLocalChunks = np.zeros((frameSize, numIterations, asc.numNodes))
-    dHatLocalChunks = np.zeros((numFreqLines, numIterations, asc.numNodes))
+    dHatLocalChunks = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -485,8 +485,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     dLocal[idxBegChunk:idxEndChunk, k] += np.real_if_close(dLocalChunk)   # overlap and add construction of output time-domain signal
 
                 # Local observations only
-                # dhatLocalCurr2 = np.einsum('ij,ij->i', wTilde[k][:, i[k], :dimYLocal[k]].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
-                dhatLocalCurr2 = np.einsum('ij,ij->i', wLocal[k][:, i[k], :].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                dhatLocalCurr2 = np.einsum('ij,ij->i', wTilde[k][:, i[k], :dimYLocal[k]].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
+                # dhatLocalCurr2 = np.einsum('ij,ij->i', wLocal[k][:, i[k], :].conj(), yLocalHatCurr[:numFreqLines, :])   # vectorized way to do inner product on slices of a 3-D tensor https://stackoverflow.com/a/15622926/16870850
                 dHatLocalChunks[:, i[k], k] = dhatLocalCurr2 # <-----------
                 # Transform back to time domain (WOLA processing)
                 dLocalChunk2 = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis * subs.back_to_time_domain(dhatLocalCurr2, frameSize))
@@ -552,8 +552,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             bufferFlagsAccumulated[k][i[k]:, :] = bufferFlagsAccumulated[k][i[k] - 1, :] + bufferFlags[k][i[k], :]
 
             # Save full z vector for DEBUGGING PURPOSES
-            if k == 0:
-                zFull[k] = np.concatenate((zFull[k], z[k][Ns:, 0]))
+            zFull[k] = np.concatenate((zFull[k], z[k][-Ns:, 0]))
 
             # Wipe local buffers
             zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -577,22 +576,26 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
                 ytildeHatCentr[k][:, i[k], :] = ytildeHatCentrCurr[:numFreqLines, :]
 
+            localchunk = dLocal2[idxBegChunk:idxEndChunk, neighbourNodes[k][0]]
+            if (localchunk[:, np.newaxis] != z[k]).any():
+                stop = 1
+
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
-            if referenceSpeechOnly is not None:
-                for q in range(len(neighbourNodes[k])):
-                    # referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
-                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
-                    # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
-                    # #
-                    # refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
-                    # # vvv for debugging only (TD not needed otherwise, here)
-                    # refCurrBackToTD = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis[:, np.newaxis] * subs.back_to_time_domain(refCurrHat[:numFreqLines, :], frameSize))
-                    # ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
-                    # ytildeHat[k][:, i[k], dimYLocal[k] + q] = dHatLocalChunks[:, i[k], neighbourNodes[k][q]]
-                    tmp = 1 / winWOLAanalysis.sum() * np.fft.fft(dLocal2[idxBegChunk:idxEndChunk, neighbourNodes[k][q]] * winWOLAanalysis, frameSize, axis=0)
-                    ytildeHat[k][:, i[k], dimYLocal[k] + q] = tmp[:numFreqLines]
+            # if referenceSpeechOnly is not None:
+            #     for q in range(len(neighbourNodes[k])):
+            #         # referenceSpeechOnlyCurr = referenceSpeechOnly[idxBegChunk:idxEndChunk, asc.sensorToNodeTags == q + 1]
+            #         # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:,0]  # select 1st sensor only
+            #         # referenceSpeechOnlyCurr = referenceSpeechOnlyCurr[:, np.newaxis]  # select 1st sensor only
+            #         # #
+            #         # refCurrHat = 1 / winWOLAanalysis.sum() * np.fft.fft(referenceSpeechOnlyCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+            #         # # vvv for debugging only (TD not needed otherwise, here)
+            #         # refCurrBackToTD = np.real_if_close(winWOLAsynthesis.sum() * winWOLAsynthesis[:, np.newaxis] * subs.back_to_time_domain(refCurrHat[:numFreqLines, :], frameSize))
+            #         # ytildeHat[k][:, i[k], dimYLocal[k] + q] = np.squeeze(refCurrHat[:numFreqLines])      # Keep only positive frequencies
+            #         # ytildeHat[k][:, i[k], dimYLocal[k] + q] = dHatLocalChunks[:, i[k], neighbourNodes[k][q]]
+            #         tmp = 1 / winWOLAanalysis.sum() * np.fft.fft(dLocal2[idxBegChunk:idxEndChunk, neighbourNodes[k][q]] * winWOLAanalysis, frameSize, axis=0)
+            #         ytildeHat[k][:, i[k], dimYLocal[k] + q] = tmp[:numFreqLines]
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING 
             # # DEBUGGING DEBUGGING DEBUGGING DEBUGGING

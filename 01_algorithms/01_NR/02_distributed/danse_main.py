@@ -57,9 +57,9 @@ mySettings = ProgramSettings(
     #
     computeCentralizedEstimate = False,
     signalDuration=15,
-    baseSNR=5,
+    # baseSNR=5,
     # baseSNR=inf,
-    # baseSNR=50,
+    baseSNR=50,
     # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
