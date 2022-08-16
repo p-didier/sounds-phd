@@ -55,7 +55,10 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    computeCentralizedEstimate = False,
+    computeCentralizedEstimate=False,   # if True (== 1), also compute and store the centralized estimate (as if there nodes all had access to all signals in the network)
+    computeLocalEstimate=False,         # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
+    # performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
+    performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     signalDuration=15,
     baseSNR=5,
     # baseSNR=inf,
@@ -67,13 +70,13 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
-    broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
-    # broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
+    # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
+    broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=32,
     # broadcastLength=1,
-    # broadcastLength=2**8,
+    updateTDfilterEvery=512/8000,
     # selfnoiseSNR=-np.Inf,
-    # broadcastLength=8,       # broadcast chunk size `L` [samples]
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
@@ -118,17 +121,15 @@ mySettings = ProgramSettings(
     danseUpdating='simultaneous',       # node-updating scheme
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
-    computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
-    performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
-    # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
-                                    externalFilterUpdates=True,),
+                                    externalFilterUpdates=False,),
     #
+    # vvv Dynamic speech enhancement metrics parameters vvv
     dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]
                                     dynamicfwSNRseg=True,
