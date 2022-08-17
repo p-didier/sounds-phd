@@ -536,7 +536,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     # Profiling
     if updateBroadcastFilter:
         # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
-        wqq = back_to_time_domain(wqqHat, n, axis=0)
+        wqq = back_to_time_domain(wqqHat.conj(), n, axis=0)
         wqq = np.real_if_close(wqq)         
         wIR = np.zeros((2 * n - 1, wqq.shape[1]))
         for m in range(wqq.shape[1]):
@@ -556,6 +556,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
 
         idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+        # idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
         tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 

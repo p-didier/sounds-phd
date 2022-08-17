@@ -425,9 +425,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                                         Ns,
                                                         settings.broadcastLength)
 
-            if i[k] >= 14:
-                stop = 1
-
             # Compute VAD
             VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
             oVADframes[i[k]] = sum(VADinFrame == 0) <= len(VADinFrame) / 2   # if there is a majority of "VAD = 1" in the frame, set the frame-wise VAD to 1
@@ -500,10 +497,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
             if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
                 startUpdates[k] = True
-            else:
-                # As long as we have not started DANSE updates,
-                # prevent updating of the time-domain filters used for broadcasting.
-                previousTDfilterUpdate[k] = t
+            # else:
+            #     # As long as we have not started DANSE updates,
+            #     # prevent updating of the time-domain filters used for broadcasting.
+            #     previousTDfilterUpdate[k] = t
 
             if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
                 # No `for`-loop versions 
@@ -537,6 +534,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 lastExternalFiltUpdateInstant[k] = t
                 if settings.printouts.externalFilterUpdates:    # inform user
                     print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
+            
+            wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
@@ -693,7 +692,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Debugging
     fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
-    plt.show()
+    # plt.show()
 
     # import matplotlib.pyplot as plt
     # fig, axes = plt.subplots(1,1)
