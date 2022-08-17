@@ -464,7 +464,7 @@ def whiten(sig, vad=[]):
     return sig_out
 
 
-def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs, VADenergyFactor, VADwinLength, vadGiven=[]):
+def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
     """Truncates/extends, resamples, centers, and scales a signal to match a target.
     Computes VAD estimate before whitening. 
 
@@ -498,21 +498,11 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs, VADener
         # rawSignal = sig.resample(rawSignal, signalLength) 
 
     while len(rawSignal) < signalLength:
-        rawSignal = np.concatenate([rawSignal, rawSignal])             # extend too short signals
+        sig_out = np.concatenate([rawSignal, rawSignal])             # extend too short signals
     if len(rawSignal) > signalLength:
-        rawSignal = rawSignal[:int(desiredDuration * targetFs)]  # truncate too long signals
+        sig_out = rawSignal[:int(desiredDuration * targetFs)]  # truncate too long signals
 
-    # Voice Activity Detection (pre-truncation/resampling)
-    if vadGiven == []:
-        thrsVAD = np.amax(rawSignal ** 2) / VADenergyFactor
-        vad, _ = VAD.oracleVAD(rawSignal, VADwinLength, thrsVAD, targetFs)
-    else:
-        vad = vadGiven
-
-    # Whiten signal 
-    sig_out = whiten(rawSignal, vad)
-
-    return sig_out, vad
+    return sig_out
 
 
 def generate_signals(settings: classes.ProgramSettings):
@@ -585,14 +575,24 @@ def generate_signals(settings: classes.ProgramSettings):
         rawSignal, fsRawSignal = sf.read(settings.desiredSignalFile[ii])
 
         # Pre-process (resample, truncate, whiten)
-        dryDesiredSignals[:, ii], oVADsourceSpecific[:, ii] = pre_process_signal(rawSignal,
-                                                                                settings.signalDuration,
-                                                                                fsRawSignal,
-                                                                                asc.samplingFreq,
-                                                                                settings.VADenergyFactor,
-                                                                                settings.VADwinLength)
+        dryDesiredSignals[:, ii] = pre_process_signal(rawSignal,
+                                                    settings.signalDuration,
+                                                    fsRawSignal,
+                                                    asc.samplingFreq)
 
-        # Convolve with RIRs to create wet signals
+        # Convolve with RIRs to create wet signals - TO GET THE VAD
+        for jj in range(asc.numSensors):
+            tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
+            wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
+
+        # Voice Activity Detection (pre-truncation/resampling)
+        thrsVAD = np.amax(wetDesiredSignals[:, ii, 0] ** 2) / settings.VADenergyFactor
+        oVADsourceSpecific[:, ii], _ = VAD.oracleVAD(wetDesiredSignals[:, ii, 0], settings.VADwinLength, thrsVAD, asc.samplingFreq)
+
+        # Whiten dry signal 
+        dryDesiredSignals[:, ii] = whiten(dryDesiredSignals[:, ii], oVADsourceSpecific[:, ii])
+
+        # Convolve with RIRs to create wet signals - For actual use
         for jj in range(asc.numSensors):
             tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
@@ -610,13 +610,13 @@ def generate_signals(settings: classes.ProgramSettings):
     for ii in range(asc.numNoiseSources):
 
         rawSignal, fsRawSignal = sf.read(settings.noiseSignalFile[ii])
-        tmp, _ = pre_process_signal(rawSignal,
+        tmp = pre_process_signal(rawSignal,
                                     settings.signalDuration,
                                     fsRawSignal,
-                                    asc.samplingFreq,
-                                    0,
-                                    0,
-                                    oVAD)   # <-- given VAD, computed from noiseless target speech 
+                                    asc.samplingFreq)
+
+        # Whiten signal 
+        tmp = whiten(tmp, oVAD)
 
         # Set SNR
         dryNoiseSignals[:, ii] = 10 ** (-settings.baseSNR / 20) * tmp

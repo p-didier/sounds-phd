@@ -53,7 +53,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=10,
+    signalDuration=5,
     baseSNR=5,
     # baseSNR=90,
     # selfnoiseSNR=-10,
@@ -103,8 +103,8 @@ mySettings = ProgramSettings(
             alphaEps=0.10,
             # alphaEps=0.25,
             # alphaEps=0.5,
-            loop='open',
-            # loop='closed',
+            # loop='open',
+            loop='closed',
         )
     ),
     # bypassFilterUpdates=True,
