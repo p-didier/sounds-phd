@@ -44,7 +44,7 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
-    #5
+    #
     # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
@@ -56,8 +56,7 @@ mySettings = ProgramSettings(
     #
     signalDuration=5,
     baseSNR=5,
-    # baseSNR=inf,
-    # baseSNR=50,
+    # baseSNR=90,
     # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
@@ -68,13 +67,13 @@ mySettings = ProgramSettings(
     # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    # broadcastLength=32,
     broadcastLength=1,
-    # updateTDfilterEvery=512/8000,
+    # broadcastLength=2**8,
     # selfnoiseSNR=-np.Inf,
     updateTDfilterEvery=1,
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
+    
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
@@ -122,14 +121,13 @@ mySettings = ProgramSettings(
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    # timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
-                                    externalFilterUpdates=False,),
+                                    externalFilterUpdates=True,),
     #
-    # vvv Dynamic speech enhancement metrics parameters vvv
     dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]
                                     dynamicfwSNRseg=True,
