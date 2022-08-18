@@ -1,4 +1,5 @@
 
+from textwrap import fill
 import numpy as np
 import time, datetime
 from . import classes
@@ -194,6 +195,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         -Note: if `settings.computeLocalEstimate == False`, then `dLocal` is output as an all-zeros array.
     sroData : danse_subfcns.SROdata object
         Data on SRO estimation / compensation (see danse_subfcns.sro_subfcns module for details)
+    tStartForMetrics : [Nn x 1] np.ndarray (float)
+        Start instants (per node) for the computation of speech enhancement metrics.
+        --> Avoiding metric bias due to first DANSE iterations where the filters have not converged yet.
     """
 
     # Hard-coded parameters
@@ -347,7 +351,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                             settings.broadcastDomain
                                             )
 
-    # Extra variables -- TEMPORARY: TODO: -- to be treated and integrated more neatly
+    # Extra variables TODO: -- to be treated and integrated more neatly
     SROresidualThroughTime = []
     SROestimateThroughTime = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
@@ -355,6 +359,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         SROresidualThroughTime.append(np.zeros(numIterations))
         SROestimateThroughTime.append(np.zeros(numIterations))
     zFullk0 = np.empty((0,))
+    tStartForMetrics = np.full(asc.numNodes, fill_value=None)  # start instant for the computation of speech enhancement metrics
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -515,6 +520,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
                 # Count the number of internal filter updates
                 nInternalFilterUpdates[k] += 1  
+
+                if nInternalFilterUpdates[k] == settings.minFiltUpdatesForMetricsComputation:
+                    # Useful export for enhancement metrics computations
+                    tStartForMetrics[k] = t
             else:
                 # Do not update the filter coefficients
                 wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
@@ -535,6 +544,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 if settings.printouts.externalFilterUpdates:    # inform user
                     print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
             
+            # TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:
             wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
@@ -576,9 +586,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                             alpha=settings.asynchronicity.cohDriftMethod.alpha,
                                             flagFirstSROEstimate=flagFirstSROEstimate,
                                             )
-
-                        if i[k] >= 14:
-                            stop = 1
                     
                         SROsResiduals[k][q] = sroRes
                         avgProdResiduals[k][:, q] = apr
@@ -679,6 +686,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
+
     # import matplotlib.pyplot as plt
     # fig = plt.figure(figsize=(6,1.5))
     # ax = fig.add_subplot(111)
@@ -708,4 +716,4 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     stop = 1
 
-    return d, dLocal, sroData
+    return d, dLocal, sroData, tStartForMetrics

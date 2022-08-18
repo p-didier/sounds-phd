@@ -1,4 +1,5 @@
 import sys, time
+from tracemalloc import start
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -49,7 +50,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, sroData = launch_danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, sroData, tStartForMetrics = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -57,13 +58,15 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # --------------- Post-process ---------------
     # Compute speech enhancement evaluation metrics
-    enhancementEval = evaluate_enhancement_outcome(mySignals, settings)
+    enhancementEval, startIdx = evaluate_enhancement_outcome(mySignals, settings, tStartForMetrics)
     # Build output object
     results = classes.Results()
     results.signals = mySignals
     results.enhancementEval = enhancementEval
     results.acousticScenario = asc
     results.sroData = sroData
+    results.other = classes.MiscellaneousData()
+    results.other.metricsStartIdx = startIdx
 
     return results
 
@@ -223,7 +226,7 @@ def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plo
     return sigsOut, timeVectorOut, fs
 
 
-def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, minNumDANSEupdates=10):
+def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, tStartForMetrics=1):
     """Wrapper for computing and storing evaluation metrics after signal enhancement.
 
     Parameters
@@ -232,11 +235,10 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
         The signals before and after enhancement.
     settings : ProgramSettings object
         The settings for the current run.
-    minNumDANSEupdates : int
-        Number of DANSE updates before which to discard the signal before
-        computing any metric, to avoid bias due to non-stationary noise power
-        in the enhanced signals.
-
+    tStartForMetrics : [Nn x 1] np.ndarray (float)
+        Start instants (per node) for the computation of speech enhancement metrics.
+        --> Avoiding metric bias due to first DANSE iterations where the filters have not converged yet.
+    
     Returns
     -------
     measures : EnhancementMeasures object
@@ -250,34 +252,37 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     _, numSensorsPerNode = np.unique(sigs.sensorToNodeTags, return_counts=True)
     # Derive total number of nodes
     numNodes = np.amax(sigs.sensorToNodeTags)
-    # Derive starting sample for metrics computations
-    startIdx = int(np.ceil(minNumDANSEupdates * settings.stftEffectiveFrameLen))
-    print(f"""
-    Computing speech enhancement metrics from the {startIdx + 1}'th sample on
-    (avoid SNR bias due to highly non-stationary noise power in first DANSE iterations)...
-    """)
 
+    startIdx = np.zeros(numNodes, dtype=int)
     snr      = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Unweighted SNR
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
     stoi     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Short-Time Objective Intelligibility
     pesq     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
+    startIdx     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
         trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
 
+        # Derive starting sample for metrics computations
+        startIdx[idxNode] = int(tStartForMetrics[idxNode] * sigs.fs[trueIdxSensor])
+        print(f"""
+        Node {idxNode+1}: computing speech enhancement metrics from the {startIdx[idxNode] + 1}'th sample on
+        (t_start = {tStartForMetrics[idxNode]} s; avoid bias due to not-yet-converged filters in first DANSE iterations)...
+        """)
+
         # Adapt local signal estimate input value to `get_metrics()` function
         if settings.computeLocalEstimate:
-            localSig = sigs.desiredSigEstLocal[startIdx:, idxNode]
+            localSig = sigs.desiredSigEstLocal[startIdx[idxNode]:, idxNode]
         else:
             localSig = []
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
         out0, out1, out2, out3 = eval_enhancement.get_metrics(
-                                    sigs.wetSpeech[startIdx:, trueIdxSensor],
-                                    sigs.sensorSignals[startIdx:, trueIdxSensor],
-                                    sigs.desiredSigEst[startIdx:, idxNode], 
+                                    sigs.wetSpeech[startIdx[idxNode]:, trueIdxSensor],
+                                    sigs.sensorSignals[startIdx[idxNode]:, trueIdxSensor],
+                                    sigs.desiredSigEst[startIdx[idxNode]:, idxNode], 
                                     sigs.fs[trueIdxSensor],
-                                    sigs.VAD[startIdx:],
+                                    sigs.VAD[startIdx[idxNode]:],
                                     settings.dynamicMetricsParams,  # dynamic metrics computation parameters
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg,
@@ -296,7 +301,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                             pesq=pesq,
                                             snr=snr)
 
-    return measures
+    return measures, startIdx
 
 
 def get_istft(X, fs, settings: classes.ProgramSettings):
@@ -418,6 +423,9 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         -Note: if `settings.computeLocalEstimate == False`, then `desiredSigEstLocal` is output as an all-zeros array.
     sroData : danse_subfcns.SROdata object
         Data on SRO estimation / compensation (see danse_subfcns.sro_subfcns module for details).
+    tStartForMetrics : [Nn x 1] np.ndarray (float)
+        Start instants (per node) for the computation of speech enhancement metrics.
+        --> Avoiding metric bias due to first DANSE iterations where the filters have not converged yet.
     """
     # Prepare signals for Fourier transforms
     # -- Zero-padding and signals length adaptation to ensure correct FFT/IFFT operation.
@@ -429,7 +437,8 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal, sroData = danse_scripts.danse_simultaneous(y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
+        desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics = danse_scripts.danse_simultaneous(
+            y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -437,7 +446,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal, sroData
+    return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics
 
 
 def whiten(sig, vad=[]):

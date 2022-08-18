@@ -39,7 +39,8 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     # samplingFrequency=16000,
     # samplingFrequency=44100,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_3]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
@@ -63,13 +64,15 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
-    # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
-    broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
-    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=1,
+    broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
+    # broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=1,
     # broadcastLength=2**8,
     # selfnoiseSNR=-np.Inf,
-    # broadcastLength=8,       # broadcast chunk size `L` [samples]
+    performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
+    # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
+    
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
@@ -115,8 +118,6 @@ mySettings = ProgramSettings(
     # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
-    performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
-    # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
@@ -292,7 +293,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
     if showPlots:
         plt.draw()
 
-    results.signals.plot_enhanced_stft(bestNode, worstNode, results.enhancementEval)
+    results.signals.plot_enhanced_stft(bestNode, worstNode, results.enhancementEval, results.other.metricsStartIdx)
     plt.savefig(f'{pathToResults}/bestAndWorstSTFTs.png')
     if showPlots:
         plt.draw()

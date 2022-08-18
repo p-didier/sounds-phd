@@ -23,6 +23,9 @@ if not any("01_acoustic_scenes" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 from utilsASC.classes import AcousticScenario
 
+@dataclass
+class MiscellaneousData:
+    metricsStartIdx: np.ndarray = np.array([])  # start indices for the computation of speech enhancement metrics
 
 @dataclass
 class SROdata:
@@ -265,6 +268,8 @@ class ProgramSettings(object):
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     updateTDfilterEvery : float = 1.        # [s] duration of pause between two consecutive time-domain filter updates.
     # Speech enhancement metrics parameters
+    minFiltUpdatesForMetricsComputation: int = 15   # minimum number of DANSE filter updates that must have been performed
+                                                    # at the starting sample of the signal chunk used for computating the metrics
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     dynamicMetricsParams: evenh.DynamicMetricsParameters = evenh.DynamicMetricsParameters()   # dynamic objective speech enhancement metrics computation parameters
@@ -411,7 +416,6 @@ class EnhancementMeasures:
     fwSNRseg: dict    # Frequency-weighted segmental SNR
     stoi: dict        # Short-Time Objective Intelligibility
     pesq: dict        # Perceptual Evaluation of Speech Quality
-
 
 @dataclass
 class Signals(object):
@@ -590,7 +594,7 @@ class Signals(object):
         # Re-enable divide-by-zero warnings
         np.seterr(divide = 'warn') 
 
-    def plot_enhanced_stft(self, bestNodeIdx, worstNodeIdx, perf: EnhancementMeasures):
+    def plot_enhanced_stft(self, bestNodeIdx, worstNodeIdx, perf: EnhancementMeasures, startIdx):
         """Plots the STFT of the enhanced signal (best and worse nodes) side by side.
 
         Parameters
@@ -601,6 +605,9 @@ class Signals(object):
             Index of the worst performing node. 
         perf : EnhancementMeasures object
             Signal enhancement evaluation metrics.
+        startIdx : [Nn x 1] np.ndarray (float)
+            Start instants (per node) for the computation of speech enhancement metrics.
+            --> Avoiding metric bias due to first DANSE iterations where the filters have not converged yet.
         """
 
         plotLocalEstimate = len(self.desiredSigEstLocal) > 0
@@ -645,12 +652,14 @@ class Signals(object):
         # Best node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
+        vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Best: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
+        vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Worst: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
@@ -658,12 +667,14 @@ class Signals(object):
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
+            vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
+            vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
@@ -740,15 +751,15 @@ def normalize_toint16(nparray):
 @dataclass
 class Results(object):
     """Class for storing simulation results"""
-    signals : Signals = field(init=False)                       # all signals involved in run
-    enhancementEval : EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
-    acousticScenario : AcousticScenario = field(init=False)     # acoustic scenario considered
-    sroData : SROdata = field(init=False)                       # SRO estimation data
+    signals: Signals = field(init=False)                       # all signals involved in run
+    enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
+    acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
+    sroData: SROdata = field(init=False)                       # SRO estimation data
+    other: MiscellaneousData = field(init=False)               # other data
 
     def load(self, foldername: str, silent=False):
         return met.load(self, foldername, silent)
 
-        
     def __repr__(self):
         string = f'<Results> object:'
         return string
@@ -952,3 +963,14 @@ def stft_subplot(ax, t, f, data, vlims, label=''):
     ax.yaxis.label.set_size(8)
     cb = plt.colorbar(mappable)
     return cb
+
+
+def vert_bar_start_idx(ax, startIdx, fs, tFrames, yRange):
+    """Helper function for <Signals.plot_signals()>."""
+
+    startT = startIdx / fs
+    possibleFrameIndices = [t > startT for t in tFrames]
+    ax.vlines(x=possibleFrameIndices[-1],
+                ymin=np.amin(yRange),
+                ymax=np.amax(yRange),
+                linestyles='dashed')
