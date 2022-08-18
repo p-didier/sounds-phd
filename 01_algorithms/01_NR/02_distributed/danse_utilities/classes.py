@@ -34,6 +34,7 @@ class SROdata:
     residuals : np.ndarray  # SRO residuals through time
     estimate : np.ndarray   # SRO estimates through time
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
+    flagIterations: np.ndarray = np.array([])  # DANSE iteration indices where a SRO flag was raised
 
     def plotSROdata(self, xaxistype='iterations', fs=16000, Ns=512):
         """Show evolution of SRO estimates / residuals through time.
@@ -65,7 +66,11 @@ class SROdata:
             else:
                 ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
             ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
-                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dashed', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+        ylims = ax.get_ylim()
+        for k in range(nNodes):
+            ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
+                        colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
         ax.grid()
         ax.set_ylabel('[ppm]')
         ax.set_xlabel('DANSE iteration $i$ [-]')

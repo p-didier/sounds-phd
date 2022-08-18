@@ -238,6 +238,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
+    phaseShiftFactorsFlags = []                     # phase-shift factors for SRO FLAG compensation
     a = []
     tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
     SROsResiduals = []                              # SRO residuals per node (for each neighbor)
@@ -295,6 +296,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         zLocal.append(np.array([])) 
         # SRO stuff vvv
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
+        phaseShiftFactorsFlags.append(np.zeros(dimYTilde[k]))   # initiate FLAG phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsResiduals.append(np.zeros(len(neighbourNodes[k])))
@@ -334,6 +336,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             settings.asynchronicity.cohDriftMethod.estEvery,
                             stop=numIterations,
                             step=settings.asynchronicity.cohDriftMethod.estEvery)
+    flagIterations = [[] for _ in range(asc.numNodes)]
+    flagInstants = [[] for _ in range(asc.numNodes)]
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
@@ -468,20 +472,25 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Build local observations vector ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
-            # Save uncompensated \tilde{y} (for coherence-drift-based SRO estimation)
-            ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
+            # Account for buffer flags
+            extraPhaseShiftFactor = np.zeros(dimYTilde[k])
+            for q in range(len(neighbourNodes[k])):
+                if not np.isnan(bufferFlags[k][i[k], q]):
+                    extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[k][i[k], q] * settings.broadcastLength
+                    # ↑↑↑ if `bufferFlags[k][i[k], q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
+                    if bufferFlags[k][i[k], q] != 0:
+                        flagIterations[k].append(i[k])  # keep flagging iterations in memory
+                        flagInstants[k].append(t)       # keep flagging instants in memory
+                else:
+                    # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
+                    skipUpdate = True
+            phaseShiftFactorsFlags[k] += extraPhaseShiftFactor
+            # Save uncompensated \tilde{y} (including FLAG compensation!) for coherence-drift-based SRO estimation
+            ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :] *\
+                np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactorsFlags[k])))
             yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
             # Compensate SROs
             if settings.asynchronicity.compensateSROs:
-                # Account for buffer flags
-                extraPhaseShiftFactor = np.zeros(dimYTilde[k])
-                for q in range(len(neighbourNodes[k])):
-                    if not np.isnan(bufferFlags[k][i[k], q]):
-                        extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[k][i[k], q] * settings.broadcastLength
-                        # ↑↑↑ if `bufferFlags[k][i[k], q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
-                    else:
-                        # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
-                        skipUpdate = True
                 # Complete phase shift factors
                 phaseShiftFactors[k] += extraPhaseShiftFactor
                 # Apply phase shift factors
@@ -571,6 +580,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             SROsEstimates[k][q] += SROsResiduals[k][q] / (1 + SROsResiduals[k][q]) * settings.asynchronicity.cohDriftMethod.alphaEps
                         elif settings.asynchronicity.cohDriftMethod.loop == 'open':
                             # Use SRO "residual" as estimates
+                            # if i[k] >= np.amin(cohDriftSROupdateIndices):
+                            #     SROsResiduals[k][q] += bufferFlags[k][i[k], q] / (Ns * (i[k] + 1))
                             SROsEstimates[k][q] = SROsResiduals[k][q] / (1 + SROsResiduals[k][q])
                     # Save estimate evolution for later plotting
                     SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
@@ -619,7 +630,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                             compensation=settings.asynchronicity.compensateSROs,
                             residuals=SROresidualThroughTime,
                             estimate=SROestimateThroughTime,
-                            groundTruth=settings.asynchronicity.SROsppm / 1e6)
+                            groundTruth=settings.asynchronicity.SROsppm / 1e6,
+                            flagIterations=flagIterations)
 
     # Profiling
     profiler.stop()
