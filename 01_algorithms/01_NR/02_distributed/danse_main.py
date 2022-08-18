@@ -1,6 +1,5 @@
 # `danse_env` virtual environment
 # ---------------- Imports
-from cmath import inf
 import time
 
 t00 = time.perf_counter()
@@ -55,7 +54,7 @@ mySettings = ProgramSettings(
     # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=5,
     baseSNR=5,
     # baseSNR=inf,
     # baseSNR=50,
@@ -68,10 +67,10 @@ mySettings = ProgramSettings(
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
     # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
-    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     # broadcastLength=32,
-    # broadcastLength=1,
-    updateTDfilterEvery=512/8000,
+    broadcastLength=1,
+    # updateTDfilterEvery=512/8000,
     # selfnoiseSNR=-np.Inf,
     updateTDfilterEvery=1,
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
@@ -80,10 +79,10 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
-        # SROsppm=0,
+        SROsppm=0,
         # SROsppm=[0, 50],
         # SROsppm=[0, 75],
-        SROsppm=[0, 100],
+        # SROsppm=[0, 100],
         # SROsppm=[50, 0],
         # SROsppm=[0, 3000],
         # compensateSROs=True,
@@ -98,13 +97,13 @@ mySettings = ProgramSettings(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
-            # segLength=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
-            segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
+            segLength=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
+            # segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
-            startAfterNupdates=11,
-            # startAfterNupdates=2,
-            alpha=0.95,
-            # alpha=0,
+            # startAfterNupdates=11,
+            startAfterNupdates=2,
+            # alpha=0.95,
+            alpha=0,
             alphaEps=0.01,  # only if `loop=='closed'`
             # alphaEps=0.05,
             # alphaEps=0.10,

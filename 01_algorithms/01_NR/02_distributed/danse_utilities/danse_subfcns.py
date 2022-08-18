@@ -564,7 +564,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
     zq = np.sum(yfiltLastSamples, axis=1)
 
-    return zq, wIR, yfiltLastSamples
+    return zq, wIR
 
 
 
@@ -1195,7 +1195,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
             wIR = None      # chunk-wise broadcasting: no IR filter 
             zLocal = None   # FD BC -- no `zLocal` variable computed
-            yfiltLastSamples = None
             
         elif broadcastDomain == 'wholeChunk_td':
             # Time-domain chunk-wise broadcasting
@@ -1207,7 +1206,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
             zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes, zBuffer, zLocal[:(n // 2)])
             
             wIR = None  # chunk-wise broadcasting: no IR filter 
-            yfiltLastSamples = None
         
         elif broadcastDomain == 'fewSamples_td':
             # Time-domain broadcasting, `L` samples at a time,
@@ -1219,7 +1217,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                 updateBroadcastFilter = True
                 previousTDfilterUpdate = t
 
-            zLocal, wIR, yfiltLastSamples = danse_compression_few_samples(yk, w, n, L,
+            zLocal, wIR = danse_compression_few_samples(yk, w, n, L,
                                             wIRprevious,
                                             winWOLAanalysis, winWOLAsynthesis, winShift,
                                             updateBroadcastFilter=updateBroadcastFilter)  # local compressed signals
@@ -1228,7 +1226,7 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
         lk[k] += 1  # increment local broadcast index
 
-    return zBuffer, wIR, previousTDfilterUpdate, zLocal, yfiltLastSamples
+    return zBuffer, wIR, previousTDfilterUpdate, zLocal
 
 
 def spatial_covariance_matrix_update(y, Ryy, Rnn, beta, vad):

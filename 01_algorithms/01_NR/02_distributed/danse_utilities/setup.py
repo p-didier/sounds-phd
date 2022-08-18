@@ -1,6 +1,5 @@
 from copy import copy
 import sys, time
-from tracemalloc import start
 import numpy as np
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -455,7 +454,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     # Discard pre-DANSE added samples (for Fourier transform processing, see first section of this function)
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
-    desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
+    # desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
     return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics
 
