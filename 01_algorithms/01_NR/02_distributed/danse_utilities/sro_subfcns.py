@@ -1,11 +1,12 @@
 
+from this import d
 import numpy as np
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters, ProgramSettings
 import matplotlib.pyplot as plt
 
 
-def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
+def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avgResProd, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
     """Estimates residual SRO using a coherence drift technique.
     
     Parameters
@@ -47,14 +48,14 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
     )
     # Update the average coherence product
     if flagFirstSROEstimate:
-        avg_res_prod_out = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
+        avgResProd_out = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
     else:
-        avg_res_prod_out = alpha * avg_res_prod + (1 - alpha) * res_prod  
+        avgResProd_out = alpha * avgResProd + (1 - alpha) * res_prod  
 
     # Estimate SRO
     if method == 'gs':
         # --------- DWACD-inspired "golden section search"
-        sro_est = - max_time_lag_search(avg_res_prod_out) / (ld * Ns)
+        sro_est = - max_time_lag_search(avgResProd_out) / (ld * Ns)
         
     elif method == 'mean':
         # --------- Online-WACD-inspired "average phase"
@@ -63,9 +64,9 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
         epsmax = 400 * 1e-6
         kmin, kmax = 1, len(wPri)
         kappa = np.arange(kmin, kmax)    # freq. bins indices
-        norm_phase = np.angle(avg_res_prod_out[(len(avg_res_prod_out) // 2 - 1 + kmin):(len(avg_res_prod_out) // 2 - 1 + kmax)])\
+        norm_phase = np.angle(avgResProd_out[(len(avgResProd_out) // 2 - 1 + kmin):(len(avgResProd_out) // 2 - 1 + kmax)])\
                                                 * len(wPri) / (2 * (ld * Ns) * kappa * epsmax)
-        mean_phase = np.mean(np.abs(avg_res_prod_out[(len(avg_res_prod_out) // 2 - 1 + kmin):(len(avg_res_prod_out) // 2 - 1 + kmax)])\
+        mean_phase = np.mean(np.abs(avgResProd_out[(len(avgResProd_out) // 2 - 1 + kmin):(len(avgResProd_out) // 2 - 1 + kmax)])\
                                                 * np.exp(1j * norm_phase))
         sro_est = - epsmax / np.pi * np.angle(mean_phase)
 
@@ -74,12 +75,9 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
         kappa = np.arange(0, len(wPri))    # freq. bins indices
         # b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
         b = np.pi * kappa * (ld * Ns) / (len(kappa) * 2)
-        sro_est = - b.T @ np.angle(avg_res_prod_out[-len(kappa):]) / (b.T @ b)
+        sro_est = - b.T @ np.angle(avgResProd_out[-len(kappa):]) / (b.T @ b)
 
-    if sro_est > 600e-6:
-        stop = 1
-
-    return sro_est, avg_res_prod_out
+    return sro_est, avgResProd_out
 
 
 def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
@@ -267,7 +265,7 @@ def update_sro_estimates(settings: ProgramSettings, iter,
     """
 
     sroOut = np.zeros(len(neighbourNodes))
-    avgProdResOut = np.zeros((avgProdRes.shape[0], len(neighbourNodes)))
+    avgProdResOut = np.zeros((avgProdRes.shape[0], len(neighbourNodes)), dtype=complex)
 
     if settings.asynchronicity.estimateSROs == 'CohDrift':
         
@@ -299,7 +297,7 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                 sroRes, apr = cohdrift_sro_estimation(
                                     wPos=cohPosteriori,
                                     wPri=cohPriori,
-                                    avg_res_prod=avgProdRes[:, q],
+                                    avgResProd=avgProdRes[:, q],
                                     Ns=int(settings.chunkSize * (1 - settings.chunkOverlap)),
                                     ld=ld,
                                     method=settings.asynchronicity.cohDriftMethod.estimationMethod,

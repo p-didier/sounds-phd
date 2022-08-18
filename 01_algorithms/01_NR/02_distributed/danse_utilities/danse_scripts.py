@@ -558,8 +558,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 SROsResiduals[k] = sroOut
                 # Save through time (for plotting)
                 SROresidualThroughTime[k][i[k]:] = sroOut[0]
-                if sroOut[0]*1e6 > 1000:
-                    stop = 1
             elif settings.asynchronicity.estimateSROs == 'Oracle':
                 SROsEstimates[k] = sroOut
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
