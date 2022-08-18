@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from bleach import clean
 import numpy as np
 import sys
 import scipy.signal as sig
@@ -30,8 +29,10 @@ class Metric:
     before: float = 0.          # metric value before enhancement
     after: float = 0.           # metric value after enhancement
     diff: float = 0.            # difference between before and after enhancement
-    afterLocal: float = 0.      # metric value after _local_ enhancement (only using local sensors )
+    afterLocal: float = 0.      # metric value after _local_ enhancement (only using local sensors)
     diffLocal: float = 0.       # difference between before and after local enhancement
+    afterCentr: float = 0.      # metric value after _centralized_ enhancement (only all sensors in network)
+    diffCentr: float = 0.       # difference between before and after centralized enhancement
     dynamicFlag: bool = False   # True if a dynamic version of the metric was computed
 
     def import_dynamic_metric(self, dynObject):
@@ -65,10 +66,13 @@ class DynamicMetric:
         self.diff = np.zeros(nChunks)           # dynamic difference between before and after enhancement
         self.afterLocal = np.zeros(nChunks)     # dynamic metric value after _local_ enhancement (only using local sensors )
         self.diffLocal = np.zeros(nChunks)      # dynamic difference between before and after local enhancement
+        self.afterCentr = 0.                    # dynamic metric value after _centralized_ enhancement (only all sensors in network)
+        self.diffCentr = 0.                     # dynamic difference between before and after centralized enhancement
         self.timeStamps = np.zeros(nChunks)     # [s] true time stamps associated to each chunk 
 
 
-def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters=None, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
+def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters=None, gammafwSNRseg=0.2, frameLen=0.03,
+                enhancedSignalLocal=[], enhancedSignalCentralized=[]):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
@@ -90,6 +94,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         Time window duration for fwSNRseg computation [s].
     enhancedSignalLocal : np.ndarray (float)
         Local estimate of desired signal (only using local node info, i.e., no network info).
+    enhancedSignalCentralized : np.ndarray (float)
+        Centralized estimate of desired signal.
 
     Returns
     -------
@@ -105,6 +111,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     
     # Flag to signal presence of a local signal estimate
     flagLocal = enhancedSignalLocal != [] and enhancedSignalLocal.shape == enhancedSignal.shape
+    # Flag to signal presence of a centralized signal estimate
+    flagCentralized = enhancedSignalCentralized != [] and enhancedSignalCentralized.shape == enhancedSignal.shape
 
     # Init output arrays
     snr = Metric()
@@ -119,6 +127,9 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     if flagLocal:
         snr.afterLocal = get_snr(enhancedSignalLocal, VAD)
         snr.diffLocal = snr.afterLocal - snr.before
+    if flagCentralized:
+        snr.afterCentr = get_snr(enhancedSignalCentralized, VAD)
+        snr.diffCentr = snr.afterCentr - snr.before
     # Frequency-weight segmental SNR
     fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, noisySignal, fs, frameLen, gammafwSNRseg)
     fwSNRseg.before = np.mean(fwSNRseg_allFrames)
@@ -129,6 +140,10 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignalLocal, fs, frameLen, gammafwSNRseg)
         fwSNRseg.afterLocal = np.mean(fwSNRseg_allFrames)
         fwSNRseg.diffLocal = fwSNRseg.afterLocal - fwSNRseg.before
+    if flagCentralized:
+        fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignalCentralized, fs, frameLen, gammafwSNRseg)
+        fwSNRseg.afterCentr = np.mean(fwSNRseg_allFrames)
+        fwSNRseg.diffCentr = fwSNRseg.afterCentr - fwSNRseg.before
     # Short-Time Objective Intelligibility (STOI)
     myStoi.before = stoi_fcn(cleanSignal, noisySignal, fs, extended=True)
     myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs, extended=True)
@@ -136,6 +151,9 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     if flagLocal:
         myStoi.afterLocal = stoi_fcn(cleanSignal, enhancedSignalLocal, fs, extended=True)
         myStoi.diffLocal = myStoi.afterLocal - myStoi.before
+    if flagCentralized:
+        myStoi.afterCentr = stoi_fcn(cleanSignal, enhancedSignalCentralized, fs, extended=True)
+        myStoi.diffCentr = myStoi.afterCentr - myStoi.before
     # Perceptual Evaluation of Speech Quality (PESQ)
     if fs in [8e3, 16e3]:
         if fs == 8e3:
@@ -149,6 +167,9 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         if flagLocal:
             myPesq.afterLocal = pesq(fs, cleanSignal, enhancedSignalLocal, mode)
             myPesq.diffLocal = myPesq.afterLocal - myPesq.before
+        if flagCentralized:
+            myPesq.afterCentr = pesq(fs, cleanSignal, enhancedSignalCentralized, mode)
+            myPesq.diffCentr = myPesq.afterCentr - myPesq.before
     else:
         print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
@@ -189,7 +210,8 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     return snr, fwSNRseg, myStoi, myPesq
 
 
-def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03, enhancedSignalLocal=[]):
+def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03,
+        enhancedSignalLocal=[], enhancedSignalCentralized=[]):
     """Computes a given speech enhancement objective metric dynamically over
     a long signal, to observe the evolution of that metric over time.
     
@@ -207,6 +229,8 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
 
     # Flag to signal presence of a local signal estimate
     flagLocal = enhancedSignalLocal != [] and enhancedSignalLocal.shape == enhancedSignal.shape
+    # Flag to signal presence of a centralized signal estimate
+    flagCentralized = enhancedSignalCentralized != [] and enhancedSignalCentralized.shape == enhancedSignal.shape
 
     # Pre-process inputs
     if not isinstance(fcns, list):
@@ -238,6 +262,8 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
                 dynObjects[ref].after[c] = fcn(enhancedSignal[i0:i1], VAD[i0:i1])
                 if flagLocal:
                     dynObjects[ref].afterLocal[c] = fcn(enhancedSignalLocal[i0:i1], VAD[i0:i1])
+                if flagCentralized:
+                    dynObjects[ref].afterCentr[c] = fcn(enhancedSignalCentralized[i0:i1], VAD[i0:i1])
             elif ref == 'get_fwsnrseg':    # fwSNRseg
                 tmp = fcn(cleanSignal[i0:i1], noisySignal[i0:i1], fs, frameLen, gammafwSNRseg)
                 dynObjects[ref].before[c] = np.mean(tmp)
@@ -246,11 +272,16 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
                 if flagLocal:   
                     tmp = fcn(cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], fs, frameLen, gammafwSNRseg)
                     dynObjects[ref].afterLocal[c] = np.mean(tmp)
+                if flagCentralized:   
+                    tmp = fcn(cleanSignal[i0:i1], enhancedSignalCentralized[i0:i1], fs, frameLen, gammafwSNRseg)
+                    dynObjects[ref].afterCentr[c] = np.mean(tmp)
             elif 'stoi' in ref:            # STOI
                 dynObjects[ref].before[c] = fcn(cleanSignal[i0:i1], noisySignal[i0:i1], fs)
                 dynObjects[ref].after[c] = fcn(cleanSignal[i0:i1], enhancedSignal[i0:i1], fs)
                 if flagLocal:
                     dynObjects[ref].afterLocal[c] = fcn(cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], fs)
+                if flagCentralized:
+                    dynObjects[ref].afterCentr[c] = fcn(cleanSignal[i0:i1], enhancedSignalCentralized[i0:i1], fs)
             elif 'pesq' in ref:            # PESQ
                 if fs in [8e3, 16e3]:
                     if fs == 8e3:
@@ -267,6 +298,8 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
                         dynObjects[ref].after[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignal[i0:i1], mode)
                         if flagLocal:
                             dynObjects[ref].afterLocal[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignalLocal[i0:i1], mode)
+                        if flagCentralized:
+                            dynObjects[ref].afterCentr[c] = fcn(fs, cleanSignal[i0:i1], enhancedSignalCentralized[i0:i1], mode)
                 else:
                     print(f'Cannot calculate PESQ for fs != 16kHz or 8kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
@@ -282,6 +315,8 @@ def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, 
         dynObjects[ref].diff = dynObjects[ref].after - dynObjects[ref].before
         if flagLocal:
             dynObjects[ref].diffLocal = dynObjects[ref].afterLocal - dynObjects[ref].before
+        if flagCentralized:
+            dynObjects[ref].diffCentr = dynObjects[ref].afterCentr - dynObjects[ref].before
 
         # Include time stamps
         timeShift = dynamic.chunkDuration * (1 - dynamic.chunkOverlap)

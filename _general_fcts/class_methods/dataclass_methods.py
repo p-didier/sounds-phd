@@ -1,9 +1,7 @@
 import pickle, gzip
 from pathlib import Path
 from dataclasses import fields
-
-from pathlib2 import PurePath
-
+from pathlib import PurePath
 
 def save(self, foldername: str):
     """Saves program settings so they can be loaded again later"""

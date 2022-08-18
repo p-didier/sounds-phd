@@ -1,3 +1,4 @@
+from copy import copy
 import sys, time
 from tracemalloc import start
 import numpy as np
@@ -127,7 +128,10 @@ def resample_for_sro(x, baseFs, SROppm):
         Re-sampled signal's sampling frequency [Hz].
     """
     fsSRO = baseFs * (1 + SROppm / 1e6)
-    xResamp = resampy.core.resample(x, baseFs, fsSRO)
+    if baseFs != fsSRO:
+        xResamp = resampy.core.resample(x, baseFs, fsSRO)
+    else:
+        xResamp = copy(x)
 
     # tOriginal = np.arange(len(x)) / baseFs
     # numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
@@ -275,6 +279,11 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
             localSig = sigs.desiredSigEstLocal[startIdx[idxNode]:, idxNode]
         else:
             localSig = []
+        # Adapt centralized signal estimate input value to `get_metrics()` function
+        if settings.computeCentralizedEstimate:
+            centralizedSig = sigs.desiredSigEstCentralized[startIdx:, idxNode]
+        else:
+            centralizedSig = []
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
         out0, out1, out2, out3 = eval_enhancement.get_metrics(
@@ -287,6 +296,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
                                     settings.gammafwSNRseg,
                                     settings.frameLenfwSNRseg,
                                     localSig,
+                                    centralizedSig
                                     )
 
         snr[f'Node{idxNode + 1}'] = out0
@@ -445,12 +455,14 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     # Discard pre-DANSE added samples (for Fourier transform processing, see first section of this function)
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
+    desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
     return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics
 
 
 def whiten(sig, vad=[]):
-    """Renders a sequence zero-mean and unit-variance.
+    """
+    Renders a sequence zero-mean and unit-variance.
     
     Parameters
     ----------

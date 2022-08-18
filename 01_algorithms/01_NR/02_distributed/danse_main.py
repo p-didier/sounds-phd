@@ -1,5 +1,6 @@
 # `danse_env` virtual environment
 # ---------------- Imports
+from cmath import inf
 import time
 
 t00 = time.perf_counter()
@@ -44,7 +45,7 @@ mySettings = ProgramSettings(
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
-    #
+    #5
     # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
     # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
     # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
@@ -56,7 +57,8 @@ mySettings = ProgramSettings(
     #
     signalDuration=15,
     baseSNR=5,
-    # baseSNR=90,
+    # baseSNR=inf,
+    # baseSNR=50,
     # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
@@ -66,14 +68,14 @@ mySettings = ProgramSettings(
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
     # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
-    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    broadcastLength=1,
-    # broadcastLength=2**8,
+    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    # broadcastLength=32,
+    # broadcastLength=1,
+    updateTDfilterEvery=512/8000,
     # selfnoiseSNR=-np.Inf,
     updateTDfilterEvery=1,
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
-    
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
@@ -84,8 +86,8 @@ mySettings = ProgramSettings(
         SROsppm=[0, 100],
         # SROsppm=[50, 0],
         # SROsppm=[0, 3000],
-        compensateSROs=True,
-        # compensateSROs=False,
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
@@ -108,8 +110,8 @@ mySettings = ProgramSettings(
             # alphaEps=0.10,
             # alphaEps=0.25,
             # alphaEps=0.5,
-            loop='open',
-            # loop='closed',
+            # loop='open',
+            loop='closed',
         )
     ),
     # bypassFilterUpdates=True,
@@ -121,13 +123,14 @@ mySettings = ProgramSettings(
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
     # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
-    # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    # timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
+    timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
-                                    externalFilterUpdates=True,),
+                                    externalFilterUpdates=False,),
     #
+    # vvv Dynamic speech enhancement metrics parameters vvv
     dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
                                     chunkOverlap=0.5,   # [/100%]
                                     dynamicfwSNRseg=True,

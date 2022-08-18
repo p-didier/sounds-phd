@@ -264,6 +264,7 @@ class ProgramSettings(object):
     performGEVD: bool = True                # if True, perform GEVD in DANSE
     GEVDrank: int = 1                       # GEVD rank approximation (only used is <performGEVD> is True)
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
+    computeCentralizedEstimate: bool = False      # if True, compute also an estimate of the desired signal using all sensor observations, as in centralized processing
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
     # Inter-node broadcasting parameters
     broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
@@ -436,8 +437,10 @@ class Signals(object):
     sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
     desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)
+    desiredSigEstCentralized: np.ndarray = np.array([]) # Desired signal(s) estimates for each node, in time-domain -- using all observations (centralized processing)
     desiredSigEst_STFT: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in STFT domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using only local observations (not data coming from neighbors)
+    desiredSigEstCentralized_STFT: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in STFT domain -- using all observations (centralized processing)
     stftComputed: bool = False                          # Set to true when the STFTs are computed
     fs: np.ndarray = np.array([])                       # Sensor-specific sampling frequencies [samples/s]
     referenceSensor: int = 0                            # Index of the reference sensor at each node
@@ -484,6 +487,10 @@ class Signals(object):
             self.desiredSigEstLocal_STFT, _, _ = get_stft(self.desiredSigEstLocal, fs, settings)
         else:
             print("!! Desired signal (`desiredSigEstLocal`) unavailable -- Cannot compute its STFT.")
+        if len(self.desiredSigEstCentralized) > 0:
+            self.desiredSigEstCentralized_STFT, _, _ = get_stft(self.desiredSigEstCentralized, fs, settings)
+        else:
+            print("!! Desired signal (`desiredSigEstCentralized`) unavailable -- Cannot compute its STFT.")
 
         self.stftComputed = True
 
@@ -527,11 +534,13 @@ class Signals(object):
         # -------- Desired signal estimate waveform -------- 
         if desiredSignalsAvailable:        
             # -------- Desired signal _local_ estimate waveform -------- 
+            deltaNextWaveform = 4 * delta   
             if settings.computeLocalEstimate:
-                ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstLocal[:, nodeIdx] - 4*delta, label='Enhanced (local)')
-                deltaNextWaveform = 6 * delta
-            else:
-                deltaNextWaveform = 4 * delta
+                ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstLocal[:, nodeIdx] - 4 * delta, label='Enhanced (local)')
+                deltaNextWaveform += 2 * delta   
+            if settings.computeCentralizedEstimate:
+                ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEstCentralized[:, nodeIdx] - 6 * delta, label='Enhanced (centralized)')
+                deltaNextWaveform += 2 * delta
             ax.plot(self.timeStampsSROs[:, nodeIdx], self.desiredSigEst[:, nodeIdx] - deltaNextWaveform, label='Enhanced (global)')
         ax.set_yticklabels([])
         ax.set(xlabel='$t$ [s]')
@@ -553,10 +562,12 @@ class Signals(object):
                                     np.amax(np.abs(self.wetNoise_STFT[:, :, effectiveSensorIdx])), 
                                     np.amax(np.abs(self.sensorSignals_STFT[:, :, effectiveSensorIdx]))]))
             # Number of subplot rows
-            nRows = 3
+            nRows = 4
             if desiredSignalsAvailable:
                 nRows += 1
             if not settings.computeLocalEstimate:
+                nRows -= 1
+            if not settings.computeCentralizedEstimate:
                 nRows -= 1
             # Plot
             ax = fig.add_subplot(nRows,2,2)     # Wet desired signal
@@ -580,6 +591,16 @@ class Signals(object):
                     ax = fig.add_subplot(nRows,2,6)     # Enhanced signals (local)
                     data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, nodeIdx])))
                     lab = 'Enhanced (local)'
+                    if settings.performGEVD:
+                        lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
+                    stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], lab)
+                    ax.set(xlabel='$t$ [s]')
+                    plt.xticks([])
+                # -------- Desired signal centralized_ estimate STFT -------- 
+                if settings.computeCentralizedEstimate:
+                    ax = fig.add_subplot(nRows,2,8)     # Enhanced signals (centralized)
+                    data = 20 * np.log10(np.abs(np.squeeze(self.desiredSigEstCentralized_STFT[:, :, nodeIdx])))
+                    lab = 'Enhanced (centralized)'
                     if settings.performGEVD:
                         lab += f' ($\mathbf{{GEVD}}$ $R$={settings.GEVDrank})'
                     stft_subplot(ax, self.timeFrames, self.freqBins[:, effectiveSensorIdx], data, [limLow, limHigh], lab)
@@ -616,9 +637,12 @@ class Signals(object):
         """
 
         plotLocalEstimate = len(self.desiredSigEstLocal) > 0
+        plotCentralizedEstimate = len(self.desiredSigEstCentralized) > 0
         nSubplotsRows = 1
         if plotLocalEstimate:
-            nSubplotsRows = 2
+            nSubplotsRows += 1
+        if plotCentralizedEstimate:
+            nSubplotsRows += 1
 
         # Get corresponding sensor indices (for selecting the correct frequency vector)
         bestNodeSensorIdx = np.argwhere(self.sensorToNodeTags == bestNodeIdx + 1)[0]
@@ -630,6 +654,9 @@ class Signals(object):
         if plotLocalEstimate:
             dataBestLocal = np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, bestNodeIdx]))
             dataWorstLocal = np.abs(np.squeeze(self.desiredSigEstLocal_STFT[:, :, worstNodeIdx]))
+        if plotCentralizedEstimate:
+            dataBestCentr = np.abs(np.squeeze(self.desiredSigEstCentralized_STFT[:, :, bestNodeIdx]))
+            dataWorstCentr = np.abs(np.squeeze(self.desiredSigEstCentralized_STFT[:, :, worstNodeIdx]))
 
         # Define color axis limits
         fullData = np.concatenate((20*np.log10(dataBest[np.abs(dataBest) > 0]),\
@@ -639,6 +666,10 @@ class Signals(object):
             fullData = np.concatenate((fullData,\
                 20*np.log10(dataBestLocal[np.abs(dataBestLocal) > 0]),\
                 20*np.log10(dataWorstLocal[np.abs(dataWorstLocal) > 0])), axis=-1)
+        if plotCentralizedEstimate:
+            fullData = np.concatenate((fullData,\
+                20*np.log10(dataBestCentr[np.abs(dataBestCentr) > 0]),\
+                20*np.log10(dataWorstCentr[np.abs(dataWorstCentr) > 0])), axis=-1)
 
         climLow  = np.amin(fullData)
         climHigh = np.amax(fullData)
@@ -652,6 +683,9 @@ class Signals(object):
         if plotLocalEstimate:
             dataBestLocal[np.abs(dataBestLocal) == 0] = np.finfo(float).eps
             dataWorstLocal[np.abs(dataWorstLocal) == 0] = np.finfo(float).eps
+        if plotCentralizedEstimate:
+            dataBestCentr[np.abs(dataBestCentr) == 0] = np.finfo(float).eps
+            dataWorstCentr[np.abs(dataWorstCentr) == 0] = np.finfo(float).eps
 
         fig = plt.figure(figsize=(11,5))
         # Best node
@@ -682,6 +716,19 @@ class Signals(object):
             vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
+            plt.xlabel('$t$ [s]')
+            colorb.set_label('[dB]')
+        if plotCentralizedEstimate:
+            ax = fig.add_subplot(int(nSubplotsRows * 100 + 25))
+            stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestCentr)), [climLow, climHigh])
+            ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
+            plt.title(f'Centralized estimate: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterCentr, 2)})')
+            plt.xlabel('$t$ [s]')
+            # Worst node
+            ax = fig.add_subplot(int(nSubplotsRows * 100 + 26))
+            colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstCentr)), [climLow, climHigh])
+            ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
+            plt.title(f'Centralized estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterCentr, 2)})')
             plt.xlabel('$t$ [s]')
             colorb.set_label('[dB]')
         plt.tight_layout()
