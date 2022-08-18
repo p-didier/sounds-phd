@@ -395,7 +395,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Extra variables TODO: -- to be treated and integrated more neatly
     SROresidualThroughTime = []
     SROestimateThroughTime = []
-    numPSFupdates = []
     phaseShiftFactorThroughTime = np.zeros((numIterations))
     for k in range(asc.numNodes):
         SROresidualThroughTime.append(np.zeros(numIterations))
@@ -431,7 +430,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # Node index
             k = int(nodesConcerned[idxBroadcastEvent])# Extract current local data chunk
 
-            yLocalForBC, _, _ = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
+            yLocalForBC = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
                                                         t,
                                                         fs[k],
                                                         settings.broadcastDomain,
@@ -657,8 +656,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
                     # Increment phase shift factor recursively
                     phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
-                    # Keep track of number of phase shift factor updates
-                    numPSFupdates[k][q] += 1
 
             # ----- Compute desired signal chunk estimate [DANSE, GLOBAL] -----
             dhat[:, i[k], k], d[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(

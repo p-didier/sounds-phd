@@ -65,9 +65,8 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
 
     # Adapt window array format
     win = settings.danseWindow
-    normFact = np.sqrt(2 * int(settings.chunkSize * (1 - settings.chunkOverlap)) / settings.chunkSize)  # window normalization factor
-    winWOLAanalysis = normFact * np.sqrt(win)      # WOLA analysis window
-    winWOLAsynthesis = normFact * np.sqrt(win)     # WOLA synthesis window
+    winWOLAanalysis = np.sqrt(win)      # WOLA analysis window
+    winWOLAsynthesis = np.sqrt(win)     # WOLA synthesis window
 
     # Define useful quantities
     frameSize = settings.chunkSize
@@ -551,16 +550,15 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
     
     # Perform convolution
     yfiltLastSamples = np.zeros((L, yq.shape[-1]))
-    for m in range(yq.shape[-1]):
-        # yfiltLastSamples[:, m] = sum(yq[:, m] * np.flip(wIR[:, m]))   # manual convolution to only get the last sample
-        # fullConv = sig.convolve(yq[:, m], wIR[:, m], mode='full')
-        # yfiltLastSamples[:, m] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
+    for idxSensor in range(yq.shape[-1]):
+        # yfiltLastSamples[:, idxSensor] = sum(yq[:, idxSensor] * np.flip(wIR[:, idxSensor]))   # manual convolution to only get the last sample
+        # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
+        # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
 
-        # idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
-        idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
-        # idDesired = np.arange(start=len(wIR) - L - 1, stop=len(wIR) - 1)   # indices required from convolution output
-        tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR[:, m], yq[:, m])
-        yfiltLastSamples[:, m] = tmp
+        idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+        # idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
+        tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
+        yfiltLastSamples[:, idxSensor] = tmp
 
     zq = np.sum(yfiltLastSamples, axis=1)
 
@@ -662,13 +660,13 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                 elif (N - Bq) % L == 0 and Bq < N:
                     # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                     # Interpretation: Node `q` samples slower than node `k`. 
-                    # bufferFlags[idxq] = -1 * int((N - Bq) / L)      # raise negative flag
-                    zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]), axis=0)  # appstart zeros
+                    # Response: ...
+                    raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
                 elif (N - Bq) % L == 0 and Bq > N:
                     # Node `q` has already transmitted too much data to node `k`.
                     # Interpretation: Node `q` samples faster than node `k`.
                     # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
-                    bufferFlags[idxq] = +1 * int((N - Bq) / L)      # raise positive flag
+                    bufferFlags[idxq] = +1 * int((N - Bq) / L)      # raise negative flag
                     zCurrBuffer = zBufferk[idxq][-N:]
 
             else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
@@ -1186,7 +1184,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
     else:
         if broadcastDomain == 'wholeChunk_fd':
-
             # Frequency-domain chunk-wise broadcasting
             zLocalHat, _ = danse_compression_whole_chunk(yk, w,
                                         winWOLAanalysis, winWOLAsynthesis)  # local compressed signals (freq.-domain)
@@ -1202,7 +1199,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
                                         winWOLAanalysis, winWOLAsynthesis,
                                         zqPrevious=zTDpreviousFrame)  # local compressed signals (time-domain)
 
-            #                                                                  vvv ONLY KEEP 1ST HALF
             zBuffer = fill_buffers_td_whole_chunk(k, neighbourNodes, zBuffer, zLocal[:(n // 2)])
             
             wIR = None  # chunk-wise broadcasting: no IR filter 
@@ -1299,7 +1295,7 @@ def local_chunk_for_broadcast(y, t, fs, bd, N, k, lk):
     # elif bd == 'fewSamples_td':
     #     raise ValueError('[NOT YET IMPLEMENTED]')   # TODO: do that
 
-    return chunk, idxBeg, idxEnd
+    return chunk
 
 
 def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
@@ -1348,6 +1344,7 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
         chunk = np.concatenate((np.zeros((N - chunk.shape[0], chunk.shape[1])), chunk))
 
     return chunk, idxBeg, idxEnd
+
 
 
 def get_desired_signal(w, y, win, dChunk, normFactWOLA):
