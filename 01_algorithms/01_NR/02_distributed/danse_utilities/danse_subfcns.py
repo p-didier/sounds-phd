@@ -1220,11 +1220,6 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
 
             zBuffer = fill_buffers_td_few_samples(k, neighbourNodes, lk, zBuffer, zLocal, L)
 
-        # if lk[k] > 1000 and k == 1:
-        #     print(yk[-1])
-        #     print(t)
-        #     stop = 1
-
         lk[k] += 1  # increment local broadcast index
 
     return zBuffer, wIR, previousTDfilterUpdate, zLocal

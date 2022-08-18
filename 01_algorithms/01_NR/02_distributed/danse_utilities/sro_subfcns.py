@@ -1,7 +1,8 @@
 
 import numpy as np
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
-from .classes import DWACDParameters
+from .classes import DWACDParameters, ProgramSettings
+import matplotlib.pyplot as plt
 
 
 def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
@@ -31,7 +32,7 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
     sro_est : float
         Estimated residual SRO
         -- `nLocalSensors` first elements of output should be zero (no intra-node SROs)
-    avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
+    avg_res_prod_out : [2*(N-1) x 1] np.ndarray (complex)
         Exponentially averaged residuals (complex conjugate) product - post-processing.
     """
 
@@ -46,14 +47,14 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
     )
     # Update the average coherence product
     if flagFirstSROEstimate:
-        avg_res_prod = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
+        avg_res_prod_out = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
     else:
-        avg_res_prod = alpha * avg_res_prod + (1 - alpha) * res_prod  
+        avg_res_prod_out = alpha * avg_res_prod + (1 - alpha) * res_prod  
 
     # Estimate SRO
     if method == 'gs':
         # --------- DWACD-inspired "golden section search"
-        sro_est = - max_time_lag_search(avg_res_prod) / (ld * Ns)
+        sro_est = - max_time_lag_search(avg_res_prod_out) / (ld * Ns)
         
     elif method == 'mean':
         # --------- Online-WACD-inspired "average phase"
@@ -62,9 +63,9 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
         epsmax = 400 * 1e-6
         kmin, kmax = 1, len(wPri)
         kappa = np.arange(kmin, kmax)    # freq. bins indices
-        norm_phase = np.angle(avg_res_prod[(len(avg_res_prod) // 2 - 1 + kmin):(len(avg_res_prod) // 2 - 1 + kmax)])\
+        norm_phase = np.angle(avg_res_prod_out[(len(avg_res_prod_out) // 2 - 1 + kmin):(len(avg_res_prod_out) // 2 - 1 + kmax)])\
                                                 * len(wPri) / (2 * (ld * Ns) * kappa * epsmax)
-        mean_phase = np.mean(np.abs(avg_res_prod[(len(avg_res_prod) // 2 - 1 + kmin):(len(avg_res_prod) // 2 - 1 + kmax)])\
+        mean_phase = np.mean(np.abs(avg_res_prod_out[(len(avg_res_prod_out) // 2 - 1 + kmin):(len(avg_res_prod_out) // 2 - 1 + kmax)])\
                                                 * np.exp(1j * norm_phase))
         sro_est = - epsmax / np.pi * np.angle(mean_phase)
 
@@ -73,9 +74,12 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avg_res_prod, Ns
         kappa = np.arange(0, len(wPri))    # freq. bins indices
         # b = 2 * np.pi * kappa * (ld * Ns) / len(kappa)
         b = np.pi * kappa * (ld * Ns) / (len(kappa) * 2)
-        sro_est = - b.T @ np.angle(avg_res_prod[-len(kappa):]) / (b.T @ b)
+        sro_est = - b.T @ np.angle(avg_res_prod_out[-len(kappa):]) / (b.T @ b)
 
-    return sro_est, avg_res_prod
+    if sro_est > 600e-6:
+        stop = 1
+
+    return sro_est, avg_res_prod_out
 
 
 def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
@@ -245,3 +249,68 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         sro_est = - max_time_lag_search(avg_coh_prod) / temp_dist
 
     return sro_est, avg_coh_prod
+
+
+def update_sro_estimates(settings: ProgramSettings, iter,
+                        nLocalSensors,
+                        cohDriftSROupdateIndices,
+                        neighbourNodes,
+                        yyH, yyHuncomp, 
+                        avgProdRes,
+                        oracleSRO):
+    """
+    Update SRO estimates.
+
+    Parameters
+    ----------
+
+    """
+
+    sroOut = np.zeros(len(neighbourNodes))
+    avgProdResOut = np.zeros((avgProdRes.shape[0], len(neighbourNodes)))
+
+    if settings.asynchronicity.estimateSROs == 'CohDrift':
+        
+        ld = settings.asynchronicity.cohDriftMethod.segLength
+
+        if iter in cohDriftSROupdateIndices:
+
+            flagFirstSROEstimate = False
+            if iter == np.amin(cohDriftSROupdateIndices):
+                flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
+
+            # Residuals method
+            for q in range(len(neighbourNodes)):
+
+                idxq = nLocalSensors + q     # index of the compressed signal from node `q` inside `yyH`
+                if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                    # Use SRO-compensated correlation matrix entries (closed-loop SRO est. + comp.)
+                    cohPosteriori = (yyH[iter, :, 0, idxq]
+                                            / np.sqrt(yyH[iter, :, 0, 0] * yyH[iter, :, idxq, idxq]))     # a posteriori coherence
+                    cohPriori = (yyH[iter - ld, :, 0, idxq]
+                                            / np.sqrt(yyH[iter - ld, :, 0, 0] * yyH[iter - ld, :, idxq, idxq]))     # a priori coherence
+                elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                    # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
+                    cohPosteriori = (yyHuncomp[iter, :, 0, idxq]
+                                            / np.sqrt(yyHuncomp[iter, :, 0, 0] * yyHuncomp[iter, :, idxq, idxq]))     # a posteriori coherence
+                    cohPriori = (yyHuncomp[iter - ld, :, 0, idxq]
+                                            / np.sqrt(yyHuncomp[iter - ld, :, 0, 0] * yyHuncomp[iter - ld, :, idxq, idxq]))     # a priori coherence
+
+                sroRes, apr = cohdrift_sro_estimation(
+                                    wPos=cohPosteriori,
+                                    wPri=cohPriori,
+                                    avg_res_prod=avgProdRes[:, q],
+                                    Ns=int(settings.chunkSize * (1 - settings.chunkOverlap)),
+                                    ld=ld,
+                                    method=settings.asynchronicity.cohDriftMethod.estimationMethod,
+                                    alpha=settings.asynchronicity.cohDriftMethod.alpha,
+                                    flagFirstSROEstimate=flagFirstSROEstimate,
+                                    )
+            
+                sroOut[q] = sroRes
+                avgProdResOut[:, q] = apr
+
+    elif settings.asynchronicity.estimateSROs == 'Oracle':        # no data-based dynamic SRO estimation: use oracle knowledge
+        sroOut = (settings.asynchronicity.SROsppm[neighbourNodes] - oracleSRO) * 1e-6
+
+    return sroOut, avgProdResOut

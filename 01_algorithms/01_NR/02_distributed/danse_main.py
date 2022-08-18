@@ -39,8 +39,8 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     # samplingFrequency=16000,
     # samplingFrequency=44100,
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_3]_Ns1_Nn1/AS1_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_3]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
     # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
@@ -64,12 +64,13 @@ mySettings = ProgramSettings(
     chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
     chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
-    broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
-    # broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
-    broadcastLength=2**9,       # broadcast chunk size `L` [samples]
-    # broadcastLength=1,
+    # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
+    broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
+    # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
+    broadcastLength=1,
     # broadcastLength=2**8,
     # selfnoiseSNR=-np.Inf,
+    updateTDfilterEvery=1,
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     
@@ -95,12 +96,13 @@ mySettings = ProgramSettings(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
+            segLength=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             # segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
-            segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
             estEvery=1,
-            startAfterNupdates=11,
-            alpha=0.95,
-            # alpha=0,
+            # startAfterNupdates=11,
+            startAfterNupdates=2,
+            # alpha=0.95,
+            alpha=0,
             # alphaEps=0.01,  # only if `loop=='closed'`
             # alphaEps=0.05,
             alphaEps=0.10,

@@ -266,8 +266,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
-        wtmp = np.zeros((frameSize, sum(asc.sensorToNodeTags == k + 1)))
-        wtmp[0, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
+        wtmp = np.zeros((2 * frameSize - 1, sum(asc.sensorToNodeTags == k + 1)))
+        wtmp[frameSize, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
         wIR.append(wtmp)
         #
         ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
@@ -329,18 +329,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # --- SRO estimation ---
     # Expected number of SRO estimate updates via DWACD during total signal length
     nDWACDSROupdates = numIterations // settings.asynchronicity.dwacd.nFiltUpdatePerSeg
-    # DANSE filter update indices corresponding to DWACD SRO estimate updates
-    dwacdSROupdateIndices = (settings.asynchronicity.dwacd.temp_dist +\
-                            settings.asynchronicity.dwacd.seg_len +\
-                            np.arange(nDWACDSROupdates) * settings.asynchronicity.dwacd.seg_shift)\
-                            // settings.stftEffectiveFrameLen
     # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
     cohDriftSROupdateIndices = np.arange(start=settings.asynchronicity.cohDriftMethod.startAfterNupdates +\
                             settings.asynchronicity.cohDriftMethod.estEvery,
                             stop=numIterations,
                             step=settings.asynchronicity.cohDriftMethod.estEvery)
-    # DWACD segments (i.e., SRO estimate update) counters (for each node)
-    dwacdSegIdx = np.zeros(asc.numNodes, dtype=int)
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
@@ -366,6 +359,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     previousTDfilterUpdate = np.zeros(asc.numNodes)
 
     tprint = -printingInterval      # printouts timing
+
+
+    # DEBUGGING VARIABLES
+    avgProdResidualsThroughTime = np.empty((0,))
 
     t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
@@ -500,11 +497,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
             
             # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
-            if not startUpdates[k] and numUpdatesRyy[k] >= minNumAutocorrUpdates and numUpdatesRnn[k] >= minNumAutocorrUpdates:
+            if not startUpdates[k] and numUpdatesRyy[k] > minNumAutocorrUpdates and numUpdatesRnn[k] > minNumAutocorrUpdates:
                 startUpdates[k] = True
-            # else:
-            #     # As long as we have not started DANSE updates,
-            #     # prevent updating of the time-domain filters used for broadcasting.
+            # if t < 1.3:
             #     previousTDfilterUpdate[k] = t
 
             if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
@@ -545,79 +540,28 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
             
             # TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:TODO:
-            wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
+            # wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
+            sroOut, avgProdResiduals[k] = subs.update_sro_estimates(settings,
+                        iter=i[k],
+                        nLocalSensors=yLocalCurr.shape[-1],
+                        cohDriftSROupdateIndices=cohDriftSROupdateIndices,
+                        neighbourNodes=neighbourNodes[k],
+                        yyH=yyH[k],
+                        yyHuncomp=yyHuncomp[k],
+                        avgProdRes=avgProdResiduals[k],
+                        oracleSRO=settings.asynchronicity.SROsppm[k])
+
             if settings.asynchronicity.estimateSROs == 'CohDrift':
-                
-                ld = settings.asynchronicity.cohDriftMethod.segLength
-
-                if i[k] in cohDriftSROupdateIndices:
-
-                    flagFirstSROEstimate = False
-                    if i[k] == np.amin(cohDriftSROupdateIndices):
-                        flagFirstSROEstimate = True     # let `cohdrift_sro_estimation()` know that this is the 1st SRO estimation round
-
-                    # Residuals method
-                    for q in range(len(neighbourNodes[k])):
-
-                        idxq = yLocalCurr.shape[-1] + q     # index of the compressed signal from node `q` inside `yyH`
-                        if settings.asynchronicity.cohDriftMethod.loop == 'closed':
-                            # Use SRO-compensated correlation matrix entries (closed-loop SRO est. + comp.)
-                            cohPosteriori = (yyH[k][i[k], :, 0, idxq]
-                                                    / np.sqrt(yyH[k][i[k], :, 0, 0] * yyH[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                            cohPriori = (yyH[k][i[k] - ld, :, 0, idxq]
-                                                    / np.sqrt(yyH[k][i[k] - ld, :, 0, 0] * yyH[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
-                        elif settings.asynchronicity.cohDriftMethod.loop == 'open':
-                            # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
-                            cohPosteriori = (yyHuncomp[k][i[k], :, 0, idxq]
-                                                    / np.sqrt(yyHuncomp[k][i[k], :, 0, 0] * yyHuncomp[k][i[k], :, idxq, idxq]))     # a posteriori coherence
-                            cohPriori = (yyHuncomp[k][i[k] - ld, :, 0, idxq]
-                                                    / np.sqrt(yyHuncomp[k][i[k] - ld, :, 0, 0] * yyHuncomp[k][i[k] - ld, :, idxq, idxq]))     # a priori coherence
-
-                        sroRes, apr = subs.cohdrift_sro_estimation(
-                                            wPos=cohPosteriori,
-                                            wPri=cohPriori,
-                                            avg_res_prod=avgProdResiduals[k][:, q],
-                                            Ns=Ns,
-                                            ld=ld,
-                                            method=settings.asynchronicity.cohDriftMethod.estimationMethod,
-                                            alpha=settings.asynchronicity.cohDriftMethod.alpha,
-                                            flagFirstSROEstimate=flagFirstSROEstimate,
-                                            )
-                    
-                        SROsResiduals[k][q] = sroRes
-                        avgProdResiduals[k][:, q] = apr
-
-                SROresidualThroughTime[k][i[k]:] = SROsResiduals[k][0]  # save for plotting / debugging
-                    
-            elif settings.asynchronicity.estimateSROs == 'DWACD':
-                # Dynamic Weighted-Average Coherence Drift [T. Gburrek, 2021]
-
-                if i[k] in dwacdSROupdateIndices:
-
-                    for q in range(len(neighbourNodes[k])):
-                        sroEst, acp = subs.dwacd_sro_estimation(
-                                sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, yLocalCurr.shape[-1] + q],    # compressed signal from `q`-th neighbour
-                                ref_sigSTFT=ytildeHatUncomp[k][:, :i[k]+1, 0],   # local sensor signal
-                                activity_sig=oVADframes[:i[k]+1],    
-                                activity_ref_sig=oVADframes[:i[k]+1],
-                                paramsDWACD=settings.asynchronicity.dwacd,
-                                seg_idx=dwacdSegIdx[k],
-                                sro_est=SROsEstimates[k][q],     # previous SRO estimate
-                                # sro_est=0,     # previous SRO estimate
-                                avg_coh_prod=avgCohProdDWACD[k][q, :]
-                        )
-                        SROsEstimates[k][q] = sroEst
-                        avgCohProdDWACD[k][q, :] = acp
-
-                    dwacdSegIdx[k] += 1
-
+                SROsResiduals[k] = sroOut
+                # Save through time (for plotting)
+                SROresidualThroughTime[k][i[k]:] = sroOut[0]
+                if sroOut[0]*1e6 > 1000:
+                    stop = 1
             elif settings.asynchronicity.estimateSROs == 'Oracle':
-                # no data-based dynamic SRO estimation: use oracle knowledge
-                SROsEstimates[k] = (settings.asynchronicity.SROsppm[neighbourNodes[k]] -\
-                                    settings.asynchronicity.SROsppm[k]) * 1e-6
+                SROsEstimates[k] = sroOut
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # Update phase shifts for SRO compensation
@@ -662,9 +606,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             # Increment DANSE iteration index
             i[k] += 1
 
-    
-        if i[k] > 30:
-            stop = 1
 
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
@@ -686,29 +627,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     profiler.stop()
     profiler.print()
 
-
-    # import matplotlib.pyplot as plt
-    # fig = plt.figure(figsize=(6,1.5))
-    # ax = fig.add_subplot(111)
-    # ax.imshow(20 * np.log10(np.abs(dhat[:,:,0])))
-    # ax.invert_yaxis()
-    # ax.set_aspect('auto')
-    # ax.set_ylabel('Freq. bin $\kappa$')
-    # plt.show()
-    # stop = 1
-
     # Debugging
     fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
-    # plt.show()
-
-    # import matplotlib.pyplot as plt
-    # fig, axes = plt.subplots(1,1)
-    # fig.set_size_inches(8.5, 3.5)
-    # axes.plot(bufferFlags[0][:, 0])
-    # axes.grid()
-    # plt.tight_layout()	
-    # plt.show()
+    plt.show(block=False)
 
     # if 0:
     #     fig.savefig(f'U:/py/sounds-phd/01_algorithms/01_NR/02_distributed/res/forPresentations/202206_SROestimation/out_alphaeps{int(settings.asynchronicity.cohDriftMethod.alphaEps * 100)}.png')
