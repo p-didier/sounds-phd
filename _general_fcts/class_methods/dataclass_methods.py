@@ -1,26 +1,10 @@
 from copy import copy
 import pickle, gzip
-from pathlib import Path, WindowsPath
+from pathlib import Path
 from dataclasses import fields
 from pathlib import PurePath
-import dataclasses, json, os
-import numpy as np
+import json, os
 import dataclass_wizard as dcw
-
-class EnhancedJSONEncoder(json.JSONEncoder):  # https://stackoverflow.com/a/51286749
-        def default(self, o):
-            if dataclasses.is_dataclass(o):
-                return dataclasses.asdict(o)
-            if isinstance(o, np.ndarray):   # np.ndarrays are not JSON-serializable objects
-                return o.tolist()
-            if isinstance(o, WindowsPath):   # WindowsPath are not JSON-serializable objects
-                return str(o)
-            return super().default(o)
-class EnhancedJSONDecoder(json.JSONDecoder):  # https://stackoverflow.com/a/51286749
-        def default(self, o):
-            if dataclasses.is_dataclass(o):
-                return dataclasses.asdict(o)
-            return super().default(o)
 
 
 def save(self, foldername: str, exportType='json'):
@@ -83,14 +67,11 @@ def load(self, foldername: str, silent=False, dataType='json'):
     if not Path(pathToFile).is_file():
         pathToAlternativeFile = f'{foldername}/{type(self).__name__}{altExtension}'
         if Path(pathToAlternativeFile).is_file():
-            inp = input(f'The file\n"{pathToFile}"\ndoes not exist. Try and load\n"{pathToAlternativeFile}"\ninstead? [[y]/n]  ')
-            if inp in ['y', 'Y']:
-                pathToFile = copy(pathToAlternativeFile)
-                baseExtension = copy(altExtension)
-            else:
-                raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found.')
+            print(f'The file\n"{pathToFile}"\ndoes not exist. Loading\n"{pathToAlternativeFile}"\ninstead.')
+            pathToFile = copy(pathToAlternativeFile)
+            baseExtension = copy(altExtension)
         else:
-            raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found.')
+            raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found (with either possible extensions).')
 
     if baseExtension == '.json':
         p = load_from_json(pathToFile, self)
@@ -101,10 +82,13 @@ def load(self, foldername: str, silent=False, dataType='json'):
     
     if not silent:
         print(f'<{type(self).__name__}> object data loaded from directory\n".../{shortPath}".')
+
     return p
 
 
 def save_as_txt(self, filename):
+    """Saves dataclass to TXT file"""
+
     if filename[-4:] != '.txt':
         if filename[-1] != '/':
             filename += '/'
@@ -115,6 +99,7 @@ def save_as_txt(self, filename):
     for ii in range(len(flds)):
         string = f'Field "{flds[ii][0]}" = {flds[ii][1]}\n'
         f.write(string)
+    f.close()
 
 
 def save_to_json(mycls, filename):
