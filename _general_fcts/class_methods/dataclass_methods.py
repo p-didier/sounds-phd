@@ -1,13 +1,20 @@
+from copy import copy
 import pickle, gzip
-from pathlib import Path
+from pathlib import Path, WindowsPath
 from dataclasses import fields
 from pathlib import PurePath
 import dataclasses, json, os
+import numpy as np
+import dataclass_wizard as dcw
 
 class EnhancedJSONEncoder(json.JSONEncoder):  # https://stackoverflow.com/a/51286749
         def default(self, o):
             if dataclasses.is_dataclass(o):
                 return dataclasses.asdict(o)
+            if isinstance(o, np.ndarray):   # np.ndarrays are not JSON-serializable objects
+                return o.tolist()
+            if isinstance(o, WindowsPath):   # WindowsPath are not JSON-serializable objects
+                return str(o)
             return super().default(o)
 class EnhancedJSONDecoder(json.JSONDecoder):  # https://stackoverflow.com/a/51286749
         def default(self, o):
@@ -16,22 +23,82 @@ class EnhancedJSONDecoder(json.JSONDecoder):  # https://stackoverflow.com/a/5128
             return super().default(o)
 
 
-def save(self, foldername: str):
-    """Saves program settings so they can be loaded again later"""
+def save(self, foldername: str, exportType='json'):
+    """
+    Saves program settings so they can be loaded again later
+    
+    Parameters
+    ----------
+    self : dataclass
+        Dataclass to be exported.
+    foldername : str
+        Folder where to export the dataclass.
+    exportType : str
+        Type of export. "json": exporting to JSON file. "pkl": exporting to PKL.GZ archive.
+    """
+
     shortPath = shorten_path(foldername, 3)
     if not Path(foldername).is_dir():
         Path(foldername).mkdir(parents=True)
         print(f'Created output directory ".../{shortPath}".')
-    pickle.dump(self, gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'wb'))
+
+    fullPath = f'{foldername}/{type(self).__name__}'
+    if exportType == 'pkl':
+        fullPath += '.pkl.gz'
+        pickle.dump(self, gzip.open(fullPath, 'wb'))
+    elif exportType == 'json':
+        fullPath += '.json'
+        save_to_json(self, fullPath)
+
     print(f'<{type(self).__name__}> object data exported to directory\n".../{shortPath}".')
 
 
-def load(self, foldername: str, silent=False):
-    """Loads program settings object from file"""
+def load(self, foldername: str, silent=False, dataType='json'):
+    """
+    Loads program settings object from file
+
+    Parameters
+    ----------
+    self : dataclass
+        Dataclass to be exported.
+    foldername : str
+        Folder where to export the dataclass.
+    silent : bool
+        If True, no printouts.
+    dataType : str
+        Type of file to import. "json": JSON file. "pkl": PKL.GZ archive.
+    """
     shortPath = shorten_path(foldername, 3)
     if not Path(foldername).is_dir():
         raise ValueError(f'The folder "{foldername}" cannot be found.')
-    p = pickle.load(gzip.open(f'{foldername}/{type(self).__name__}.pkl.gz', 'r'))
+
+    if dataType == 'pkl':
+        baseExtension = '.pkl.gz'
+        altExtension = '.json'
+    elif dataType == 'json':
+        baseExtension = '.json'
+        altExtension = '.pkl.gz'
+    
+    pathToFile = f'{foldername}/{type(self).__name__}{baseExtension}'
+    if not Path(pathToFile).is_file():
+        pathToAlternativeFile = f'{foldername}/{type(self).__name__}{altExtension}'
+        if Path(pathToAlternativeFile).is_file():
+            inp = input(f'The file\n"{pathToFile}"\ndoes not exist. Try and load\n"{pathToAlternativeFile}"\ninstead? [[y]/n]  ')
+            if inp in ['y', 'Y']:
+                pathToFile = copy(pathToAlternativeFile)
+                baseExtension = copy(altExtension)
+            else:
+                raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found.')
+        else:
+            raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found.')
+
+    if baseExtension == '.json':
+        p = load_from_json(pathToFile, self)
+    elif baseExtension == '.pkl.gz':
+        p = pickle.load(gzip.open(pathToFile, 'r'))
+    else:
+        raise ValueError(f'Incorrect base extension: "{baseExtension}".')
+    
     if not silent:
         print(f'<{type(self).__name__}> object data loaded from directory\n".../{shortPath}".')
     return p
@@ -60,9 +127,10 @@ def save_to_json(mycls, filename):
         filename = filename_alone + '.json'
         print(f'Filename modified to "{filename}".')
 
-    jsonstr = json.dumps(mycls, cls=EnhancedJSONEncoder)  # https://stackoverflow.com/a/51286749
+    jsondict = dcw.asdict(mycls)  # https://stackoverflow.com/a/69059343
+
     with open(filename, 'w') as file_json:
-        file_json.write(jsonstr)
+        json.dump(jsondict, file_json, indent=4)
     file_json.close()
 
 
@@ -76,10 +144,9 @@ def load_from_json(path_to_json_file, mycls):
         path_to_json_file = filename_alone + '.json'
         print(f'Filename modified to "{path_to_json_file}".')
 
-    fp = open(path_to_json_file)
-    json_file_as_dict = json.load(fp, cls=EnhancedJSONDecoder)
-    mycls_out = mycls(**json_file_as_dict)
-
+    with open(path_to_json_file) as fp:
+        d = json.load(fp)
+    mycls_out = dcw.fromdict(type(mycls), d)
     return mycls_out
 
 
