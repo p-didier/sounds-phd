@@ -26,6 +26,7 @@ from utilsASC.classes import AcousticScenario
 @dataclass
 class MiscellaneousData:
     metricsStartIdx: np.ndarray = np.array([])  # start indices for the computation of speech enhancement metrics
+    firstDANSEupRefSensor: int = 0
 
 @dataclass
 class SROdata:
@@ -36,18 +37,22 @@ class SROdata:
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
     flagIterations: np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
 
-    def plotSROdata(self, xaxistype='iterations', fs=16000, Ns=512):
+    def plotSROdata(self, xaxistype='both', fs=16000, Ns=512, firstUp=0):
         """Show evolution of SRO estimates / residuals through time.
         
         Parameters
         ----------
         xaxistype : str
-            Type of x-axis ticks/label: "iterations" = DANSE iteration indices
+            Type of x-axis ticks/label:
+            "iterations" = DANSE iteration indices
             "time" = time instants [s]
+            "both" = both of the above
         fs : float or int
             Sampling frequency of the reference node [Hz].
         Ns : int
             Number of new samples per DANSE iteration. 
+        firstUp : float
+            Instant at which the first iteration of the reference node occurred [s].
 
         Returns
         -------
@@ -66,23 +71,29 @@ class SROdata:
             else:
                 ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
             ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
-                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dashed', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
         ylims = ax.get_ylim()
         for k in range(nNodes):
             ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
                         colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
         ax.grid()
         ax.set_ylabel('[ppm]')
-        ax.set_xlabel('DANSE iteration $i$ [-]')
+        ax.set_xlabel('DANSE iteration $i$', loc='left')
         ax.set_xlim([0, len(self.residuals[k])])
-        if xaxistype == 'time':
+        plt.legend(bbox_to_anchor=(1.05, 1.05))
+        if xaxistype == 'both':
+            ax2 = ax.twiny()
+            ax2.set_xlabel('DANSE iteration $i$', loc='left')
+            ax2.set_xticks(ax.get_xticks())
+        if xaxistype in ['time', 'both']:
             xticks = np.linspace(start=0, stop=len(self.residuals[0]), num=9)
             ax.set_xticks(xticks)
-            ax.set_xticklabels(np.round(xticks * Ns / fs, 1))
-            ax.set_xlabel('Time $t$ [s]')
-        plt.legend(bbox_to_anchor=(1.05, 1.05))
+            ax.set_xticklabels(np.round(xticks * Ns / fs + firstUp, 2))
+            ax.set_xlabel('Time at reference node [s]', loc='left')
         plt.title('SRO estimation through time')
         plt.tight_layout()
+
+        stop = 1
 
         return fig
 
@@ -689,14 +700,14 @@ class Signals(object):
         # Best node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
-        vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
+        vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs[bestNodeIdx], self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Best: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
-        vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
+        vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs[worstNodeIdx], self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Worst: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
@@ -704,14 +715,14 @@ class Signals(object):
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
-            vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
+            vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs[bestNodeIdx], self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
-            vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
+            vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs[worstNodeIdx], self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
@@ -1019,8 +1030,8 @@ def vert_bar_start_idx(ax, startIdx, fs, tFrames, yRange):
     """Helper function for <Signals.plot_signals()>."""
 
     startT = startIdx / fs
-    possibleFrameIndices = [t > startT for t in tFrames]
-    ax.vlines(x=possibleFrameIndices[-1],
+    possibleFrameIndices = [t for t in tFrames if t > startT]
+    ax.vlines(x=possibleFrameIndices[1],
                 ymin=np.amin(yRange),
                 ymax=np.amax(yRange),
                 linestyles='dashed')
