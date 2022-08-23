@@ -502,7 +502,7 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
 
 def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
                             winWOLAanalysis, winWOLAsynthesis, R, 
-                            updateBroadcastFilter=False):
+                            updateBroadcastFilter=False): # TODO: to clean up
     """Performs local signals compression according to DANSE theory [1],
     in the time-domain (to be able to broadcast the compressed signal sample
     per sample between nodes).
@@ -535,16 +535,17 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
     # Profiling
     if updateBroadcastFilter:
-        # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
-        wqq = back_to_time_domain(wqqHat.conj(), n, axis=0)
-        wqq = np.real_if_close(wqq)         
-        wIR = np.zeros((2 * n - 1, wqq.shape[1]))
-        for m in range(wqq.shape[1]):
-            Hmat = sla.circulant(np.flip(wqq[:, m]))
-            Amat = np.diag(winWOLAsynthesis) @ Hmat @ np.diag(winWOLAanalysis)
-            for ii in np.arange(start=-n+1, stop=n):
-                wIR[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
-        wIR /= R
+        wIR = dist_fct_approx(wqqHat, winWOLAanalysis, winWOLAsynthesis, R)
+        # # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
+        # wqq = back_to_time_domain(wqqHat.conj(), n, axis=0)
+        # wqq = np.real_if_close(wqq)         
+        # wIR = np.zeros((2 * n - 1, wqq.shape[1]))
+        # for m in range(wqq.shape[1]):
+        #     Hmat = sla.circulant(np.flip(wqq[:, m]))
+        #     Amat = np.diag(winWOLAsynthesis) @ Hmat @ np.diag(winWOLAanalysis)
+        #     for ii in np.arange(start=-n+1, stop=n):
+        #         wIR[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+        # wIR /= R
     else:
         wIR = wIRprevious
     
@@ -1347,22 +1348,99 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
 
 
 
-def get_desired_signal(w, y, win, dChunk, normFactWOLA):
+def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
+            L, processingType='wola'):
     """
     Compute chunk of desired signal from DANSE freq.-domain filters
     and freq.-domain observation vector y_tilde.
 
     Parameters
     ----------
+    w : [Nf x M] np.ndarray (complex)
+        Frequency-domain filter coefficients for each of the `M` channels (>0 freqs. only).
+    y : [Nf x M] np.ndarray (complex)
+        Frequency-domain signals (full observations vector $\\tilde{\\mathbf{y}}_k$) (>0 freqs. only).
+    win : [N x 1] np.ndarray (float)
+        Synthesis window (time-domain).
+    dChunk : [N x 1] np.ndarray (float)
+        For WOLA processing: previous data chunk to use for overlap-add.
+    normFactWOLA : float
+        For WOLA processing: normalization factor (sum of window samples).
+    winShift : int
+        Window shift [samples].
+    L : int
+        Output length (only used if `processingType == 'conv'`) [samples].
+    processingType : str
+        Processing type -- "wola": WOLA processing; "conv": linear convolution via T(z)-approximation.
+
+    Returns
+    -------
+    dhatCurr : [Nf x 1] np.ndarray (complex)
+        Current chunk frequency-domain estimate (>0 freqs. only).
+    dChunk : [N x 1] np.ndarray (float)
+        Current chunk time-domain estimate, incl. overlap-add.
+    """
+        
+    dhatCurr = None  # init
+
+    if processingType == 'wola':
+        # ----- Compute desired signal chunk estimate using WOLA -----
+        dhatCurr = np.einsum('ij,ij->i', w.conj(), y)   # vectorized way to do inner product on slices
+        # Transform back to time domain (WOLA processing)
+        dChunCurr = normFactWOLA * win * back_to_time_domain(dhatCurr, len(win))
+        if len(dChunk) < len(win):   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+            dChunk += np.real_if_close(dChunCurr[-len(dChunk):])   # overlap and add construction of output time-domain signal
+        else:
+            dChunk += np.real_if_close(dChunCurr)   # overlap and add construction of output time-domain signal
+
+    elif processingType == 'conv':
+        # ----- Compute desired signal chunk estimate using T(z) approx. for linear convolution -----
+        wIR = dist_fct_approx(w, win, win, winShift)
+        # Perform convolution
+        yfiltLastSamples = np.zeros((L, y.shape[-1]))
+        for idxSensor in range(y.shape[-1]):
+            idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+            tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, y[:, idxSensor])
+            yfiltLastSamples[:, idxSensor] = tmp
+
+        dChunk = np.sum(yfiltLastSamples, axis=1)
+
+    return dhatCurr, dChunk
+
+
+def dist_fct_approx(wHat, h, f, R):
+    """
+    Distortion function approximation of the WOLA filtering process.
+    -- See Word journal 2022, weeks 30-33.
+
+    Parameters
+    ----------
+    wHat : [Nf x M] np.ndarry (complex)
+        Frequency-domain filter coefficients for each of the `M` channels (>0 freqs. only)
+        used in the WOLA process to modify the short-term spectrum.
+    h : [N x 1] np.ndarray (float)
+        WOLA analysis window (time-domain).
+    f : [N x 1] np.ndarray (float)
+        WOLA synthesis window (time-domain).
+    R : int
+        Window shift [samples].
+
+    Returns
+    -------
+    wIR_out : [(2 * N + 1) x 1] np.ndarray (float)
+        Time-domain distortion function approximation of the WOLA filtering process.
     """
 
-    # ----- Compute desired signal chunk estimate -----
-    dhatCurr = np.einsum('ij,ij->i', w.conj(), y)   # vectorized way to do inner product on slices
-    # Transform back to time domain (WOLA processing)
-    dChunCurr = normFactWOLA * win * back_to_time_domain(dhatCurr, len(win))
-    if len(dChunk) < len(win):   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-        dChunk += np.real_if_close(dChunCurr[-len(dChunk):])   # overlap and add construction of output time-domain signal
-    else:
-        dChunk += np.real_if_close(dChunCurr)   # overlap and add construction of output time-domain signal
-            
-    return dhatCurr, dChunk
+    n = len(h)
+
+    wTD = back_to_time_domain(wHat.conj(), n, axis=0)
+    wTD = np.real_if_close(wTD)         
+    wIR_out = np.zeros((2 * n - 1, wTD.shape[1]))
+    for m in range(wTD.shape[1]):
+        Hmat = sla.circulant(np.flip(wTD[:, m]))
+        Amat = np.diag(f) @ Hmat @ np.diag(h)
+        for ii in np.arange(start=-n+1, stop=n):
+            wIR_out[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+    wIR_out /= R
+
+    return wIR_out

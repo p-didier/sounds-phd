@@ -33,13 +33,14 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     sigDur=15,
     baseSNR=5,
     #
-    possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
-    # possibleSROs=[0],
+    possibleSROs=[int(ii) for ii in np.linspace(10, 100, num=10)],
+    # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
+    # possibleSROs=[100],
     #
     timeBtwExternalFiltUpdates=3.,
     #
-    broadcastScheme='samplePerSample',
-    # broadcastScheme='wholeChunk',
+    # broadcastScheme='samplePerSample',
+    broadcastScheme='wholeChunk',
     performGEVD=1,
     #
     computeLocalEstimate=True,
@@ -55,7 +56,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
         )
     ),
     printouts=PrintoutsParameters(
-        progressPrintingInterval=0
+        progressPrintingInterval=0.5
     )
 )
 

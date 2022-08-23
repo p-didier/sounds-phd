@@ -1,8 +1,8 @@
 
 from dataclasses import dataclass, field
-from re import L
 import sys, time
 from pathlib import Path, PurePath
+import numpy as np
 import danse_main
 from itertools import combinations
 from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, PrintoutsParameters
@@ -167,9 +167,9 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                 BCdomain = 'wholeChunk_td'
                 ps = ProgramSettings()
                 BClength = ps.chunkSize // 2
-            elif danseParams.broadcastScheme == 'wholeChunk':
+            elif danseParams.broadcastScheme == 'samplePerSample':
                 BCdomain = 'fewSamples_td'
-                BClength = danseParams.broadcastLength
+                BClength = 1
 
             settings = ProgramSettings(
                     samplingFrequency=danseParams.fs,
@@ -197,7 +197,13 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     ),
                     printouts=danseParams.printouts,
                     )
+            # Build export file path
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
+            if (np.array(settings.asynchronicity.SROsppm) != 0).any():
+                if settings.asynchronicity.compensateSROs:
+                    exportPath += f'_comp{settings.asynchronicity.estimateSROs}'
+                else:
+                    exportPath += '_nocomp'
             experiments.append(dict([('settings', settings), ('path', exportPath)]))
 
     return experiments

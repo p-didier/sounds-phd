@@ -213,9 +213,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     """
 
     # Hard-coded parameters
-    printingInterval = 2            # [s] minimum time between two "% done" printouts
     alphaExternalFilters = 0.5      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
-    # alphaExternalFilters = 0      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
 
     # Profiling
     profiler = Profiler()
@@ -226,7 +224,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         frameSize, Ns, numIterations, _,\
             neighbourNodes = subs.danse_init(yin, settings, asc)
     normFactWOLA = winWOLAanalysis.sum()
-    normFactWOLA = 1
+    # normFactWOLA = 1
 
     # Pre-process certain input parameters
     if referenceSpeechOnly is not None:
@@ -373,8 +371,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Booleans
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
     # --- SRO estimation ---
-    # Expected number of SRO estimate updates via DWACD during total signal length
-    nDWACDSROupdates = numIterations // settings.asynchronicity.dwacd.nFiltUpdatePerSeg
     # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
     cohDriftSROupdateIndices = np.arange(start=settings.asynchronicity.cohDriftMethod.startAfterNupdates +\
                             settings.asynchronicity.cohDriftMethod.estEvery,
@@ -405,11 +401,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
     previousTDfilterUpdate = np.zeros(asc.numNodes)
 
-    tprint = -printingInterval      # printouts timing
-
-
-    # DEBUGGING VARIABLES
-    avgProdResidualsThroughTime = np.empty((0,))
+    tprint = -settings.printouts.progressPrintingInterval      # printouts timing
 
     t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
@@ -418,8 +410,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         # Parse event matrix (+ inform user)
         t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=settings.printouts.events_parser)
 
-        if t > tprint + printingInterval and settings.printouts.danseProgress:
-            print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100)}% done -----')
+        if t > tprint + settings.printouts.progressPrintingInterval and settings.printouts.danseProgress:
+            print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100, 2)}% done -----')
             tprint = t
 
         eventIndices = np.arange(len(eventTypes))
@@ -618,8 +610,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 lastExternalFiltUpdateInstant[k] = t
                 if settings.printouts.externalFilterUpdates:    # inform user
                     print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
-            
-            # wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
@@ -663,7 +653,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 ytildeHat[k][:, i[k], :],
                 winWOLAsynthesis,
                 d[idxBegChunk:idxEndChunk, k],
-                normFactWOLA
+                normFactWOLA,
+                winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                L=settings.broadcastLength,
+                processingType='wola'
                 )
             if settings.computeLocalEstimate:
                 # ----- Compute desired signal chunk estimate [LOCAL] -----
@@ -672,7 +665,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHat[k][:, i[k], :dimYLocal[k]],
                     winWOLAsynthesis,
                     dLocal[idxBegChunk:idxEndChunk, k],
-                    normFactWOLA
+                    normFactWOLA,
+                    winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                    L=settings.broadcastLength,
+                    processingType='wola'
                     )
             if settings.computeCentralizedEstimate:
                 # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
@@ -681,7 +677,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     ytildeHatCentr[k][:, i[k], :],
                     winWOLAsynthesis,
                     dCentr[idxBegChunk:idxEndChunk, k],
-                    normFactWOLA
+                    normFactWOLA,
+                    winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                    L=settings.broadcastLength,
+                    processingType='wola'
                     )
             
             # Increment DANSE iteration index
@@ -702,13 +701,14 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
 
     # Profiling
     profiler.stop()
-    profiler.print()
+    if settings.printouts.profiler:
+        profiler.print()
 
     # Debugging
     fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
-    plt.show(block=False)
+    # plt.show(block=False)
 
-    stop = 1
+    # stop = 1
 
     return d, dLocal, sroData, tStartForMetrics

@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.style.use('default')  # <-- for Jupyter: white figures background
 print(f'Global packages loaded ({round(time.perf_counter() - t00, 2)}s)')
 t0 = time.perf_counter()
-from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, DWACDParameters, CohDriftSROEstimationParameters
+from danse_utilities.classes import ProgramSettings, Results, PrintoutsParameters, SamplingRateOffsets, CohDriftSROEstimationParameters
 from danse_utilities.setup import run_experiment
 print(f'DANSE packages loaded ({round(time.perf_counter() - t0, 2)}s)')
 t0 = time.perf_counter()
@@ -37,27 +37,14 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     samplingFrequency=8000,
-    # samplingFrequency=16000,
-    # samplingFrequency=44100,
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[3_3]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[2_2]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_4]_Ns1_Nn1/AS1_anechoic',
-    # acousticScenarioPath=f'{ascBasePath}/tests/testforTIDANSE/AS1_anechoic',
-    #
-    # desiredSignalFile='01_algorithms/03_signal_gen/02_noise_maker/02_sine_combinations/sounds/mySineCombination2.wav',
-    # desiredSignalFile=[f'{signalsPath}/03_test_signals/tone100Hz.wav'],
-    # desiredSignalFile=[f'U:\\py\\sounds-phd\\01_algorithms\\03_signal_gen\\02_noise_maker\\02_sine_combinations\\sounds\\mySineCombination1.wav'],
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
-    # wasnTopology='adhoc',
     wasnTopology='fully_connected',
     #
-    signalDuration=5,
+    signalDuration=15,
     baseSNR=5,
-    # baseSNR=90,
-    # selfnoiseSNR=-10,
     #
     stftFrameOvlp=0.5,
     stftWinLength=2**10,
@@ -68,30 +55,19 @@ mySettings = ProgramSettings(
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     broadcastLength=1,
-    # broadcastLength=2**8,
-    # selfnoiseSNR=-np.Inf,
     updateTDfilterEvery=1,
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
-    
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         # SROsppm=0,
-        # SROsppm=[0, 50],
-        # SROsppm=[0, 75],
         SROsppm=[0, 100],
-        # SROsppm=[50, 0],
-        # SROsppm=[0, 3000],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
-        # estimateSROs='DWACD',     # <-- Dynamic WACD by Gburrek et al.
-        dwacd=DWACDParameters(
-            seg_shift=2**11,
-        ),
         cohDriftMethod=CohDriftSROEstimationParameters(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
@@ -104,23 +80,15 @@ mySettings = ProgramSettings(
             alpha=0.95,
             # alpha=0,
             alphaEps=0.01,  # only if `loop=='closed'`
-            # alphaEps=0.05,
-            # alphaEps=0.10,
-            # alphaEps=0.25,
-            # alphaEps=0.5,
             loop='open',
             # loop='closed',
         )
     ),
-    # bypassFilterUpdates=True,
     #
     expAvg50PercentTime=2.,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
-    # expAvg50PercentTime=1,             # [s] time in the past at which the value is weighted by 50% via exponential averaging
     danseUpdating='simultaneous',       # node-updating scheme
-    # danseUpdating='sequential',       # node-updating scheme
     referenceSensor=0,                  # index of reference sensor at each node (same for every node)
     computeLocalEstimate=True,          # if True (== 1), also compute and store the local estimate (as if there was no cooperation between nodes)
-    # timeBtwExternalFiltUpdates=np.Inf,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     timeBtwExternalFiltUpdates=3,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # timeBtwExternalFiltUpdates=0,       # [s] time between 2 consecutive external filter update (for broadcasting) at a node
     # 
@@ -235,6 +203,7 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
     fig.suptitle(f'{myPath.parent.name}_{myPath.name}')
     fig.tight_layout()
     plt.savefig(f'{pathToResults}/acousScenario.png')
+    plt.savefig(f'{pathToResults}/acousScenario.pdf')
     if showPlots:
         plt.draw()
 
@@ -245,6 +214,7 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
 \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
     fig1.tight_layout()
     fig1.savefig(f'{pathToResults}/enhMetrics.png')
+    fig1.savefig(f'{pathToResults}/enhMetrics.pdf')
     if showPlots:
         plt.draw()
     if fig2 is not None:
@@ -254,6 +224,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
 \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
         fig2.tight_layout()
         fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
+        fig2.savefig(f'{pathToResults}/enhDynamicMetrics.pdf')
         if showPlots:
             plt.draw()
 
@@ -261,6 +232,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
     if settings.asynchronicity.plotResult:
         fig = results.sroData.plotSROdata()
         plt.savefig(f'{pathToResults}/SROestcomp.png')
+        plt.savefig(f'{pathToResults}/SROestcomp.pdf')
         if showPlots:
             plt.draw()
 

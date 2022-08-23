@@ -8,3 +8,5 @@
 *.cpython-39.pyc
 *.txt
 *.pkf
+Results.json
+ProgramSettings.json

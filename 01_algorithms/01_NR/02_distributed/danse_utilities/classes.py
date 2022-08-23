@@ -29,12 +29,12 @@ class MiscellaneousData:
 
 @dataclass
 class SROdata:
-    estMethod : str         # SRO estimation method
-    compensation : bool     # if True, compensation was applied, else, not
-    residuals : np.ndarray  # SRO residuals through time
-    estimate : np.ndarray   # SRO estimates through time
+    estMethod : str = ''                        # SRO estimation method
+    compensation : bool = False                 # if True, compensation was applied, else, not
+    residuals : np.ndarray = np.array([])       # SRO residuals through time
+    estimate : np.ndarray = np.array([])        # SRO estimates through time
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
-    flagIterations: np.ndarray = np.array([])  # DANSE iteration indices where a SRO flag was raised
+    flagIterations: np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
 
     def plotSROdata(self, xaxistype='iterations', fs=16000, Ns=512):
         """Show evolution of SRO estimates / residuals through time.
@@ -91,7 +91,9 @@ class SROdata:
 class PrintoutsParameters:
     events_parser: bool = False             # controls printouts in `events_parser()` function
     danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
+    progressPrintingInterval: float = 2.    # time interval between DANSE progress printouts [s]
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
+    profiler: bool = False                  # controls profiler printout after DANSE run
 
 
 @dataclass
@@ -235,7 +237,7 @@ class SamplingRateOffsets():
 @dataclass
 class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
-    # Signal generation parameters
+    # Signal generation
     samplingFrequency: float = 16000.       # [samples/s] base sampling frequency
     acousticScenarioPath: str = ''          # path to acoustic scenario to be used
     signalDuration: float = 1               # [s] total signal duration
@@ -248,10 +250,10 @@ class ProgramSettings(object):
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
     stftWin: np.ndarray = np.array([])      # STFT window
     wasnTopology: str = 'fully_connected'   # WASN topology (fully connected or ad hoc)
-    # VAD parameters
+    # VAD
     VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
-    # DANSE parameters
+    # DANSE
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
@@ -266,22 +268,23 @@ class ProgramSettings(object):
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
     computeCentralizedEstimate: bool = False      # if True, compute also an estimate of the desired signal using all sensor observations, as in centralized processing
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
-    # Inter-node broadcasting parameters
+    # Inter-node broadcasting
     broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
                                             # -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
                                             # -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
                                             # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     updateTDfilterEvery : float = 1.        # [s] duration of pause between two consecutive time-domain filter updates.
-    # Speech enhancement metrics parameters
+    # Desired signal estimation
+    # Speech enhancement metrics
     minFiltUpdatesForMetricsComputation: int = 15   # minimum number of DANSE filter updates that must have been performed
                                                     # at the starting sample of the signal chunk used for computating the metrics
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     dynamicMetricsParams: evenh.DynamicMetricsParameters = evenh.DynamicMetricsParameters()   # dynamic objective speech enhancement metrics computation parameters
-    # Asynchronicity (SRO/STO) parameters
+    # Asynchronicity (SRO/STO)
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()   # all-things SROs/STOs
-    # Other parameters
+    # Other
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
     randSeed: int = 12345                   # random generator(s) seed
@@ -308,11 +311,8 @@ class ProgramSettings(object):
         # Check for frequency-domain broadcasting option
         if 'wholeChunk' in self.broadcastDomain:
             if self.broadcastLength != self.stftWinLength / 2:
-                val = input(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
-                if val in ['y', 'Y']:
-                    self.broadcastLength = int(self.stftWinLength / 2)
-                else:
-                    raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
+                print(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Changing to Ns (error otherwise).')
+                self.broadcastLength = int(self.stftWinLength / 2)
         if self.broadcastDomain not in ['wholeChunk_td', 'wholeChunk_fd', 'fewSamples_td']:
             raise ValueError(f'The broadcasting domain must be "wholeChunk_fd", "wholeChunk_td", or "fewSamples_td" (current value: "{self.broadcastDomain}").')
         # Adapt formats
@@ -379,8 +379,6 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
         return met.load(self, filename, silent)
 
     def save(self, filename: str):
-        # Save most important parameters as quickly-readable .txt file
-        met.save_as_txt(self, filename)
         # Save data as archive
         met.save(self, filename)
 
@@ -418,23 +416,23 @@ def sto_sro_formatting(arg):
 @dataclass
 class EnhancementMeasures:
     """Class for storing speech enhancement metrics values"""
-    snr: dict         # Unweighted SNR
-    fwSNRseg: dict    # Frequency-weighted segmental SNR
-    stoi: dict        # Short-Time Objective Intelligibility
-    pesq: dict        # Perceptual Evaluation of Speech Quality
+    snr: dict = field(default_factory=dict)         # Unweighted SNR
+    fwSNRseg: dict = field(default_factory=dict)    # Frequency-weighted segmental SNR
+    stoi: dict = field(default_factory=dict)        # Short-Time Objective Intelligibility
+    pesq: dict = field(default_factory=dict)        # Perceptual Evaluation of Speech Quality
 
 @dataclass
 class Signals(object):
     """Class to store data output by the signal generation routine"""
-    dryNoiseSources: np.ndarray                         # Dry noise source signals
-    drySpeechSources: np.ndarray                        # Dry desired (speech) source signals
-    wetIndivNoiseSources: np.ndarray                    # Wet (convolved with RIRs) noise source signals, per indiv. noise source
-    wetIndivSpeechSources: np.ndarray                   # Wet (convolved with RIRs) desired source signals, per indiv. desired source
-    wetNoise: np.ndarray                                # Wet (convolved with RIRs) noise source signals, all sources mixed
-    wetSpeech: np.ndarray                               # Wet (convolved with RIRs) desired source signals, all sources mixed
-    sensorSignals: np.ndarray                           # Sensor signals (all sources + RIRs)
-    VAD: np.ndarray                                     # Voice Activity Detector (1 = voice presence; 0 = noise only)
-    sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
+    dryNoiseSources: np.ndarray = np.array([])          # Dry noise source signals
+    drySpeechSources: np.ndarray = np.array([])         # Dry desired (speech) source signals
+    wetIndivNoiseSources: np.ndarray = np.array([])     # Wet (convolved with RIRs) noise source signals, per indiv. noise source
+    wetIndivSpeechSources: np.ndarray = np.array([])    # Wet (convolved with RIRs) desired source signals, per indiv. desired source
+    wetNoise: np.ndarray = np.array([])                 # Wet (convolved with RIRs) noise source signals, all sources mixed
+    wetSpeech: np.ndarray = np.array([])                # Wet (convolved with RIRs) desired source signals, all sources mixed
+    sensorSignals: np.ndarray = np.array([])            # Sensor signals (all sources + RIRs)
+    VAD: np.ndarray = np.array([])                      # Voice Activity Detector (1 = voice presence; 0 = noise only)
+    sensorToNodeTags: np.ndarray = np.array([0])        # Tags relating each sensor to its node
     desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)
     desiredSigEstCentralized: np.ndarray = np.array([]) # Desired signal(s) estimates for each node, in time-domain -- using all observations (centralized processing)
@@ -803,11 +801,11 @@ def normalize_toint16(nparray):
 @dataclass
 class Results(object):
     """Class for storing simulation results"""
-    signals: Signals = field(init=False)                       # all signals involved in run
-    enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
-    acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
-    sroData: SROdata = field(init=False)                       # SRO estimation data
-    other: MiscellaneousData = field(init=False)               # other data
+    signals: Signals = Signals()                                    # all signals involved in run
+    enhancementEval: EnhancementMeasures = EnhancementMeasures()    # speech enhancement evaluation metrics
+    acousticScenario: AcousticScenario = AcousticScenario()         # acoustic scenario considered
+    sroData: SROdata = SROdata()                                    # SRO estimation data
+    other: MiscellaneousData = MiscellaneousData()                  # other data
 
     def load(self, foldername: str, silent=False):
         return met.load(self, foldername, silent)
