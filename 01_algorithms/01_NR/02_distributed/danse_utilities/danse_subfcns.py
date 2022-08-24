@@ -641,17 +641,29 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
         
         # Time-domain chunks broadcasting (naïve DANSE, simplest to visualize/implement, but inefficient)
         elif broadcastDomain == 'wholeChunk_td':
-            if Bq == Ns:
-                # All good, no under-/over-flows
-                if not np.any(zPreviousk):
+            if ik == 0:
+                if Bq == Ns:
                     # Not yet any previous buffer -- need to appstart zeros
                     zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]))
-                else:
-                    # Concatenate last `Ns` samples of previous buffer with current buffer
-                    zCurrBuffer = np.concatenate((zPreviousk[-Ns:, idxq], zBufferk[idxq]))
+                elif Bq == 0:
+                    # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
+                    # Interpretation: Node `q` samples slower than node `k`. 
+                    # Response: ...
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -1 broadcast')
+                    bufferFlags[idxq] = -1      # raise negative flag
+                    zCurrBuffer = np.zeros(N)
             else:
-                # Under- or over-flow...
-                raise ValueError('[NOT YET IMPLEMENTED]')
+                if Bq == Ns:
+                    # All good, no under-/over-flows
+                    if not np.any(zPreviousk):
+                        # Not yet any previous buffer -- need to appstart zeros
+                        zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]))
+                    else:
+                        # Concatenate last `Ns` samples of previous buffer with current buffer
+                        zCurrBuffer = np.concatenate((zPreviousk[-Ns:, idxq], zBufferk[idxq]))
+                else:
+                    # Under- or over-flow...
+                    raise ValueError('[NOT YET IMPLEMENTED]')
                 
         elif broadcastDomain == 'fewSamples_td':
 
@@ -664,16 +676,18 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                     # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                     # Interpretation: Node `q` samples slower than node `k`. 
                     # Response: ...
-                    # nMissingBroadcasts = int(np.abs((N - Bq) / L))
-                    # print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
-                    # bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
-                    # zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]), axis=0)
-                    raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
+                    nMissingBroadcasts = int(np.abs((N - Bq) / L))
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
+                    zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]), axis=0)
+                    # raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
                 elif (N - Bq) % L == 0 and Bq > N:
                     # Node `q` has already transmitted too much data to node `k`.
                     # Interpretation: Node `q` samples faster than node `k`.
                     # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
-                    bufferFlags[idxq] = +1 * int((N - Bq) / L)      # raise negative flag
+                    nExtraBroadcasts = int(np.abs((N - Bq) / L))
+                    print(f'[b+ @ t={np.round(t, 3)}s] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                    bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
                     zCurrBuffer = zBufferk[idxq][-N:]
 
             else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
@@ -1009,12 +1023,12 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
 
-    # Ensure that all nodes have broadcasted enough times before performing any update
-    minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
-    for k in range(nNodes):
-        validUpdateInstants = updateInstants[k] >= minWaitBeforeUpdate
-        # print(len(updateInstants[k]) - sum(validUpdateInstants))
-        updateInstants[k] = updateInstants[k][validUpdateInstants]
+    # # Ensure that all nodes have broadcasted enough times before performing any update
+    # minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
+    # for k in range(nNodes):
+    #     validUpdateInstants = updateInstants[k] >= minWaitBeforeUpdate
+    #     print(len(updateInstants[k]) - sum(validUpdateInstants))
+    #     updateInstants[k] = updateInstants[k][validUpdateInstants]
     
     # Build event matrix
     outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)

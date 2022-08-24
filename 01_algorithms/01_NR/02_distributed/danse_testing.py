@@ -41,7 +41,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     timeBtwExternalFiltUpdates=3.,
     #
     # broadcastScheme='samplePerSample',
-    broadcastScheme='wholeChunk',
+    # broadcastScheme='wholeChunk',
     performGEVD=1,
     #
     computeLocalEstimate=True,

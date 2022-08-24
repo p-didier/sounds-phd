@@ -43,7 +43,7 @@ mySettings = ProgramSettings(
     #
     wasnTopology='fully_connected',
     #
-    signalDuration=5,
+    signalDuration=15,
     baseSNR=5,
     #
     stftFrameOvlp=0.5,
@@ -55,17 +55,18 @@ mySettings = ProgramSettings(
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     broadcastLength=1,
-    updateTDfilterEvery=1,
+    updateTDfilterEvery=1.,     # [s]
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
     #
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
-        # SROsppm=0,
-        SROsppm=[0, 10],
-        compensateSROs=True,
-        # compensateSROs=False,
+        SROsppm=0,
+        # SROsppm=[0, 10],
+        # SROsppm=[0, 100],
+        # compensateSROs=True,
+        compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         cohDriftMethod=CohDriftSROEstimationParameters(
