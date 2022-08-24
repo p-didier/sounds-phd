@@ -43,7 +43,7 @@ mySettings = ProgramSettings(
     #
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=5,
     baseSNR=5,
     #
     stftFrameOvlp=0.5,
@@ -63,7 +63,7 @@ mySettings = ProgramSettings(
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         # SROsppm=0,
-        SROsppm=[0, 100],
+        SROsppm=[0, 10],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
@@ -72,8 +72,8 @@ mySettings = ProgramSettings(
             estimationMethod='gs',      # golden section search
             # estimationMethod='mean',    # mean method
             # estimationMethod='ls',      # least-squares
-            # segLength=1,        # number of DANSE updates between two consecutive filter values used for SRO estimation
-            segLength=10,        # number of DANSE updates between two consecutive filter values used for SRO estimation
+            # segLength=1,          # number of DANSE updates between two consecutive SRO estimations
+            segLength=10,           # number of DANSE updates between two consecutive SRO estimations
             estEvery=1,
             startAfterNupdates=11,
             # startAfterNupdates=2,
@@ -230,7 +230,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
 
     # Plot SRO data
     if settings.asynchronicity.plotResult:
-        fig = results.sroData.plotSROdata()
+        fig = results.sroData.plotSROdata(xaxistype='time', firstUp=results.other.firstDANSEupRefSensor)
         plt.savefig(f'{pathToResults}/SROestcomp.png')
         plt.savefig(f'{pathToResults}/SROestcomp.pdf')
         if showPlots:

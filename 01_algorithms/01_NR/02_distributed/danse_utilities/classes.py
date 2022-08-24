@@ -74,8 +74,9 @@ class SROdata:
                         xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
         ylims = ax.get_ylim()
         for k in range(nNodes):
-            ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
-                        colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
+            if len(self.flagIterations[k]) > 0:
+                ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
+                            colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
         ax.grid()
         ax.set_ylabel('[ppm]')
         ax.set_xlabel('DANSE iteration $i$', loc='left')

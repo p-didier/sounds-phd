@@ -567,7 +567,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
 
 
-def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L, lastExpectedIter, broadcastDomain):
+def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L, lastExpectedIter, broadcastDomain, t):
     """When called, processes the incoming data from other nodes, as stored in local node's buffers.
     Called whenever a DANSE update can be performed (`N` new local samples were captured since last update).
     
@@ -594,6 +594,8 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
         -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
         -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
+    t : float
+        Current time instant [s] (for printouts).
     
     Returns
     -------
@@ -662,6 +664,10 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                     # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                     # Interpretation: Node `q` samples slower than node `k`. 
                     # Response: ...
+                    # nMissingBroadcasts = int(np.abs((N - Bq) / L))
+                    # print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    # bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
+                    # zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]), axis=0)
                     raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
                 elif (N - Bq) % L == 0 and Bq > N:
                     # Node `q` has already transmitted too much data to node `k`.
@@ -675,15 +681,15 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                     pass
                 elif (Ns - Bq) % L == 0 and Bq < Ns:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
                     nMissingBroadcasts = int(np.abs((Ns - Bq) / L))
-                    print(f'[b-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
                     bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
                 elif (Ns - Bq) % L == 0 and Bq > Ns:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
                     nExtraBroadcasts = int(np.abs((Ns - Bq) / L))
-                    print(f'[b+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                    print(f'[b+ @ t={np.round(t, 3)}s] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
                     bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
                 else:
                     if (Ns - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
-                        print('[b!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
+                        print('[b! @ t={np.round(t, 3)}s] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
                         bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
                     else:
                         raise ValueError(f'Unexpected buffer size ({Bq} samples, with L={L} and N={Ns}) for neighbor node q={neighs[idxq]+1}.')
@@ -1003,10 +1009,12 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
 
-    # Ensure that all nodes have broadcasted enough times to perform any update
+    # Ensure that all nodes have broadcasted enough times before performing any update
     minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
     for k in range(nNodes):
-        updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
+        validUpdateInstants = updateInstants[k] >= minWaitBeforeUpdate
+        # print(len(updateInstants[k]) - sum(validUpdateInstants))
+        updateInstants[k] = updateInstants[k][validUpdateInstants]
     
     # Build event matrix
     outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)

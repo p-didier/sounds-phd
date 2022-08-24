@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 import json
 import sys, os
-from textwrap import fill
 import numpy as np
 import matplotlib.pyplot as plt
 # import dataclass_wizard as dcw
@@ -10,27 +9,23 @@ PATHTORESULTS = '01_algorithms/01_NR/02_distributed/res/testing_SROs/automated/2
 RESULTSFILENAME = 'Results.json'
 SETTINGSFILENAME = 'ProgramSettings.json'
 
-# @dataclass
-# class PlottingOptions:
-#     titles: dict = dict(stoi='STOI', pesq='PESQ')
-
 @dataclass
 class Options:
     metricsToPlot: list[str]    # speech enhancement metrics to be plotted
     valuesToPlot: list[str]     # type of values to be plotted (e.g., "before" for before enhancement, "after", "diff", "diffLocal", etc.)
     compOptions: list[str] = field(default_factory=list)
-    singleNode: bool = True
+    singleNode: list = field(default_factory=list)
+    nodeIndices: np.ndarray = np.array([])
 
 def main():
 
     opts = Options(
-        metricsToPlot=['stoi', 'pesq'],
+        # metricsToPlot=['stoi', 'pesq', 'fwSNRseg'],
+        metricsToPlot=['stoi', 'fwSNRseg'],
         # valuesToPlot=['diff'],
         valuesToPlot=['after'],
         compOptions=['Comp.', 'No comp.'],
-        singleNode=True
-        # Plotting options vvv
-        
+        singleNode=[True, 1]    # [yes/no, node index]
         )
 
     sros, data = process_data(opts)
@@ -47,9 +42,9 @@ def process_data(opts: Options):
 
     # Find number of nodes
     idx = PATHTORESULTS.rfind('/')
-    nNodes = int(PATHTORESULTS[idx+2])
-    if opts.singleNode:
-        nNodes = 1
+    opts.nodeIndices = np.arange(int(PATHTORESULTS[idx+2]))
+    if opts.singleNode[0]:
+        opts.nodeIndices = [opts.singleNode[1]]
 
     # Init dictionary
     res = dict.fromkeys(dirs, None)
@@ -70,14 +65,14 @@ def process_data(opts: Options):
         # Build full nested dictionary
         res[dir] = dict.fromkeys(opts.compOptions, None)
         for aa in range(len(opts.compOptions)):
-            res[dir][opts.compOptions[aa]] = dict.fromkeys([f'N{ii + 1}' for ii in range(nNodes)], None)
-            for ii in range(nNodes):
+            res[dir][opts.compOptions[aa]] = dict.fromkeys([f'N{ii + 1}' for ii in opts.nodeIndices], None)
+            for ii in opts.nodeIndices:
                 res[dir][opts.compOptions[aa]][f'N{ii + 1}'] = dict.fromkeys(opts.metricsToPlot, None)
                 for jj in range(len(opts.metricsToPlot)):
                     res[dir][opts.compOptions[aa]][f'N{ii + 1}'][opts.metricsToPlot[jj]] = \
                         dict.fromkeys(opts.valuesToPlot, np.full(len(sros), fill_value=None))
 
-        for idxSubdir, subdir in enumerate(subdirs):
+        for _, subdir in enumerate(subdirs):
             # Load results file
             pathToFile = f'{PATHTORESULTS}/{dir}/{subdir}/{RESULTSFILENAME}'
             with open(pathToFile) as f:
@@ -96,7 +91,7 @@ def process_data(opts: Options):
             currSro = np.amax([int(ii) for ii in srosCurr])
             idxSrosList = sros.index(currSro)
 
-            for ii in range(nNodes):
+            for ii in opts.nodeIndices:
                 for jj in range(len(opts.metricsToPlot)):
                     for kk in range(len(opts.valuesToPlot)):
                         res[dir][currCompOption][f'N{ii + 1}'][opts.metricsToPlot[jj]][opts.valuesToPlot[kk]][idxSrosList] = \
@@ -106,7 +101,6 @@ def process_data(opts: Options):
                         if currCompOption == 'No comp.' and currSro == 0:
                             res[dir]['Comp.'][f'N{ii + 1}'][opts.metricsToPlot[jj]][opts.valuesToPlot[kk]][idxSrosList] = \
                                 d['enhancementEval'][opts.metricsToPlot[jj]][f'Node{ii + 1}'][opts.valuesToPlot[kk]]
-
 
     return sros, res
 
@@ -122,7 +116,7 @@ def plot_data(sros, data: dict, opts: Options):
     for ii in range(nSubplots):
         for jj in range(len(dirs)): 
             for aa in range(len(opts.compOptions)):
-                for k in range(len(data[dirs[jj]][opts.compOptions[aa]])):
+                for k in opts.nodeIndices:
                     for kk in range(len(opts.valuesToPlot)):
                         toPlot = data[dirs[jj]][opts.compOptions[aa]][f'N{k + 1}'][opts.metricsToPlot[ii]][opts.valuesToPlot[kk]]
                         lab = f'{dirs[jj]} - N{k + 1} - {opts.compOptions[aa]}'
@@ -132,13 +126,15 @@ def plot_data(sros, data: dict, opts: Options):
                             style = f'C{jj}.-'
                         axes[ii].plot(sros, toPlot, style, label=lab)
         axes[ii].grid()
-        axes[ii].legend(loc='lower left')
         axes[ii].set_xlabel('SRO $\\varepsilon_{{kq}}$ [ppm]')
         if opts.metricsToPlot[ii] == 'stoi':
             axes[ii].set_ylim([0, 1])
             axes[ii].set_title(f'eSTOI -- {opts.valuesToPlot[kk]}')
         if opts.metricsToPlot[ii] == 'pesq':
             axes[ii].set_title(f'PESQ -- {opts.valuesToPlot[kk]}')
+        if opts.metricsToPlot[ii] == 'fwSNRseg':
+            axes[ii].set_title(f'fwSNRseg -- {opts.valuesToPlot[kk]}')
+    axes[0].legend(loc='lower left')
     # plt.tight_layout()
     plt.show()
 

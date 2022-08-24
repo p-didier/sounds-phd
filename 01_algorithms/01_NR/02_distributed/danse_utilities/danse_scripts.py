@@ -256,7 +256,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
-    phaseShiftFactorsFlags = []                     # phase-shift factors for SRO FLAG compensation
+    phaseShiftFactors_forFlags = []                     # phase-shift factors for SRO FLAG compensation
     a = []
     tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
     SROsResiduals = []                              # SRO residuals per node (for each neighbor)
@@ -321,7 +321,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         zLocal.append(np.array([])) 
         # SRO stuff vvv
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
-        phaseShiftFactorsFlags.append(np.zeros(dimYTilde[k]))   # initiate FLAG phase shift factors as 0's (no phase shift)
+        phaseShiftFactors_forFlags.append(np.zeros(dimYTilde[k]))   # initiate FLAG phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsResiduals.append(np.zeros(len(neighbourNodes[k])))
@@ -499,7 +499,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                 Ns=Ns,
                                 L=settings.broadcastLength,
                                 lastExpectedIter=numIterations - 1,
-                                broadcastDomain=settings.broadcastDomain)
+                                broadcastDomain=settings.broadcastDomain,
+                                t=t)
 
             # Wipe local buffers
             zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
@@ -535,17 +536,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 else:
                     # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
                     skipUpdate = True
-            phaseShiftFactorsFlags[k] += extraPhaseShiftFactor
+            phaseShiftFactors_forFlags[k] += extraPhaseShiftFactor
             # Save uncompensated \tilde{y} (including FLAG compensation!) for coherence-drift-based SRO estimation
             ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :] *\
-                np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactorsFlags[k])))
+                np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors_forFlags[k])))
             yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
             # Compensate SROs
             if settings.asynchronicity.compensateSROs:
                 # Complete phase shift factors
                 phaseShiftFactors[k] += extraPhaseShiftFactor
-                # Save for plotting
-                if k == 0:
+                if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
                 # Apply phase shift factors
                 ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
@@ -569,6 +569,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 startUpdates[k] = True
 
             if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
+                if k == settings.referenceSensor and nInternalFilterUpdates[k] == 0:
+                    # Save first update instant (for, e.g., SRO plot)
+                    firstDANSEupdateRefSensor = t
                 # No `for`-loop versions 
                 if settings.performGEVD:    # GEVD update
                     wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
@@ -586,9 +589,14 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 # Count the number of internal filter updates
                 nInternalFilterUpdates[k] += 1  
 
-                if nInternalFilterUpdates[k] == settings.minFiltUpdatesForMetricsComputation:
-                    # Useful export for enhancement metrics computations
-                    tStartForMetrics[k] = t
+                # Useful export for enhancement metrics computations
+                if nInternalFilterUpdates[k] >= settings.minFiltUpdatesForMetricsComputation and tStartForMetrics[k] is None:
+                    if settings.asynchronicity.compensateSROs and settings.asynchronicity.estimateSROs == 'CohDrift':
+                        # Make sure SRO compensation has started
+                        if nInternalFilterUpdates[k] > settings.asynchronicity.cohDriftMethod.startAfterNupdates:
+                            tStartForMetrics[k] = t
+                    else:
+                        tStartForMetrics[k] = t
             else:
                 # Do not update the filter coefficients
                 wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
@@ -705,10 +713,10 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
         profiler.print()
 
     # Debugging
-    fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
+    fig = sroData.plotSROdata(xaxistype='both', fs=fs[0], Ns=Ns, firstUp=firstDANSEupdateRefSensor)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
     # plt.show(block=False)
 
-    # stop = 1
+    stop = 1
 
-    return d, dLocal, sroData, tStartForMetrics
+    return d, dLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor

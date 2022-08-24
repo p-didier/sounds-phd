@@ -50,7 +50,8 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, sroData, tStartForMetrics = launch_danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal,\
+        sroData, tStartForMetrics, firstDANSEupdateRefSensor = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -67,6 +68,7 @@ def run_experiment(settings: classes.ProgramSettings):
     results.sroData = sroData
     results.other = classes.MiscellaneousData()
     results.other.metricsStartIdx = startIdx
+    results.other.firstDANSEupRefSensor = firstDANSEupdateRefSensor
 
     return results
 
@@ -261,13 +263,12 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
     stoi     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Short-Time Objective Intelligibility
     pesq     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
-    startIdx     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
         trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
 
         # Derive starting sample for metrics computations
-        startIdx[idxNode] = int(tStartForMetrics[idxNode] * sigs.fs[trueIdxSensor])
+        startIdx[idxNode] = int(np.floor(tStartForMetrics[idxNode] * sigs.fs[trueIdxSensor]))
         print(f"""
         Node {idxNode+1}: computing speech enhancement metrics from the {startIdx[idxNode] + 1}'th sample on
         (t_start = {tStartForMetrics[idxNode]} s; avoid bias due to not-yet-converged filters in first DANSE iterations)...
@@ -446,7 +447,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics = danse_scripts.danse_simultaneous(
+        desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor = danse_scripts.danse_simultaneous(
             y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
@@ -456,7 +457,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     # desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics
+    return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor
 
 
 def whiten(sig, vad=[]):

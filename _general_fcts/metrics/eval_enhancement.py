@@ -171,7 +171,7 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
             myPesq.afterCentr = pesq(fs, cleanSignal, enhancedSignalCentralized, mode)
             myPesq.diffCentr = myPesq.afterCentr - myPesq.before
     else:
-        print(f'Cannot calculate PESQ for fs != 16kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
+        print(f'Cannot calculate PESQ for fs different from 16 or 8 kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
 
     # Compute dynamic metrics
     if dynamic is not None:
