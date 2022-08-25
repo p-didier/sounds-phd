@@ -2,7 +2,6 @@
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
-import scipy.signal as sig
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
@@ -1365,7 +1364,7 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
 
 
 def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
-            desSigEstChunkLength, processingType='wola'):
+            desSigEstChunkLength, processingType='wola', yTD=None):
     """
     Compute chunk of desired signal from DANSE freq.-domain filters
     and freq.-domain observation vector y_tilde.
@@ -1413,15 +1412,20 @@ def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
         # ----- Compute desired signal chunk estimate using T(z) approx. for linear convolution -----
         wIR = dist_fct_approx(w, win, win, winShift)
         # Perform convolution
-        yfiltLastSamples = np.zeros((desSigEstChunkLength, y.shape[-1]))
-        for idxSensor in range(y.shape[-1]):
+        yfiltLastSamples = np.zeros((desSigEstChunkLength, yTD.shape[-1]))
+        for m in range(yTD.shape[-1]):
             idDesired = np.arange(start=len(wIR) - desSigEstChunkLength, stop=len(wIR))   # indices required from convolution output
-            tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, y[:, idxSensor])
-            yfiltLastSamples[:, idxSensor] = tmp
+            tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR[:, m], yTD[:, m])
+            yfiltLastSamples[:, m] = tmp
 
         dChunk = np.sum(yfiltLastSamples, axis=1)
 
     return dhatCurr, dChunk
+
+
+@njit
+def get_trace_jitted(A, ofst):
+    return np.trace(A, ofst)
 
 
 def dist_fct_approx(wHat, h, f, R):
@@ -1456,7 +1460,7 @@ def dist_fct_approx(wHat, h, f, R):
         Hmat = sla.circulant(np.flip(wTD[:, m]))
         Amat = np.diag(f) @ Hmat @ np.diag(h)
         for ii in np.arange(start=-n+1, stop=n):
-            wIR_out[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+            wIR_out[ii + n - 1, m] = get_trace_jitted(Amat, ii)
     wIR_out /= R
 
     return wIR_out
