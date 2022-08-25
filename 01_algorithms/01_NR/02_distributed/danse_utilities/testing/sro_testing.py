@@ -166,7 +166,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
             if danseParams.broadcastScheme == 'wholeChunk':
                 BCdomain = 'wholeChunk_td'
                 ps = ProgramSettings()
-                BClength = ps.chunkSize // 2
+                BClength = ps.DFTsize // 2
             elif danseParams.broadcastScheme == 'samplePerSample':
                 BCdomain = 'fewSamples_td'
                 BClength = 1

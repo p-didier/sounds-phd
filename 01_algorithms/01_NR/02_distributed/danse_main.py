@@ -46,10 +46,8 @@ mySettings = ProgramSettings(
     signalDuration=15,
     baseSNR=5,
     #
-    stftFrameOvlp=0.5,
-    stftWinLength=2**10,
-    chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]=
-    chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
+    DFTsize=2**10,     # DFT size
+    Ns=2**9,           # number of new samples per chunk [samples]
     # broadcastDomain='wholeChunk_fd',    # BC whole chunks in the FD
     # broadcastDomain='wholeChunk_td',    # BC whole chunks in the TD
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD

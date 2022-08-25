@@ -266,9 +266,11 @@ class ProgramSettings(object):
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
-    chunkSize: int = 1024                   # [samples] processing chunk size
-    chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
-    danseWindow: np.ndarray = np.hanning(chunkSize)     # DANSE window for FFT/IFFT operations
+    DFTsize: int = 1024                     # DFT/FFT size
+    Ns: int = DFTsize // 2                  # number of new samples per chunk [samples] 
+    winOvlp: float = 1 - Ns / DFTsize       # window overlap [/100%]
+    winShift: int = int(DFTsize - Ns)       # window shift [samples]
+    danseWindow: np.ndarray = np.hanning(DFTsize)     # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
     expAvg50PercentTime: float = 2.         # [s] Time in the past at which the value is weighted by 50% via exponential averaging
                                             # -- Used to compute beta in, e.g.: Ryy[l] = beta * Ryy[l - 1] + (1 - beta) * y[l] * y[l]^H
@@ -349,17 +351,17 @@ class ProgramSettings(object):
         if len(self.stftWin) != self.stftWinLength:
             print(f'!! The specified STFT window length does not match the actual window. Setting `stftWin` as a Hann window of length {self.stftWinLength}.')
             self.stftWin = np.hanning(self.stftWinLength)
-        if len(self.danseWindow) != self.chunkSize:
-            print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.chunkSize}.')
-            self.danseWindow = np.hanning(self.chunkSize)
+        if len(self.danseWindow) != self.DFTsize:
+            print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.DFTsize}.')
+            self.danseWindow = np.hanning(self.DFTsize)
         # Check lengths consistency
         if self.broadcastLength > self.stftEffectiveFrameLen:
             raise ValueError(f'Broadcast length ({self.broadcastLength}) is too large for STFT frame size {self.stftWinLength} and {int(self.stftFrameOvlp * 100)}% overlap.')
         if self.stftEffectiveFrameLen % self.broadcastLength != 0:
             raise ValueError(f'The broadcast length L should be a divisor of the effective STFT length Ns\n(currently: Ns/L={self.stftEffectiveFrameLen}/{self.broadcastLength}={self.stftEffectiveFrameLen / self.broadcastLength}!=1)') 
         # Check that chunk overlap makes sense
-        if self.chunkOverlap >= 1:
-            raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.chunkOverlap}).')
+        if self.winOvlp >= 1:
+            raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.Ns}).')
 
         return self
 

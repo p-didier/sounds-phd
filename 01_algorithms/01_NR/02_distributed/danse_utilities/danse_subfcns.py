@@ -48,10 +48,6 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
         WOLA analysis window (time domain to freq. domain).
     winWOLAsynthesis : N x 1 np.ndarray
         WOLA synthesis window (freq. domain to time domain).
-    frameSize : int
-        Number of samples used within one DANSE iteration.
-    nNewSamplesPerFrame : int
-        Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap).
     numIterations : int
         Expected number of DANSE iterations, given the length of the input signals `yin`.
     numBroadcasts : int
@@ -69,9 +65,7 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
     winWOLAsynthesis = np.sqrt(win)     # WOLA synthesis window
 
     # Define useful quantities
-    frameSize = settings.chunkSize
-    nNewSamplesPerFrame = int(settings.chunkSize * (1 - settings.chunkOverlap))
-    numIterations = int((yin.shape[0] - frameSize) / nNewSamplesPerFrame) + 1
+    numIterations = int((yin.shape[0] - settings.DFTsize) / settings.Ns) + 1
     numBroadcasts = int(np.ceil(yin.shape[0] / settings.broadcastLength))
 
     # Identify neighbours of each node
@@ -150,7 +144,7 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
         if showWasnConnections:
             plot_wasn_connections(asc.sensorCoords, connectionMatrix)
 
-    return rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
+    return rng, winWOLAanalysis, winWOLAsynthesis, numIterations, numBroadcasts, neighbourNodes
 
 
 def plot_wasn_connections(coords: np.ndarray, connectionMatrix: np.ndarray):
