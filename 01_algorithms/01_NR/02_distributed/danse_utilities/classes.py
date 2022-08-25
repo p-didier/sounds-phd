@@ -258,9 +258,6 @@ class ProgramSettings(object):
     baseSNR: int = 0                        # [dB] SNR between dry desired signals and dry noise
     selfnoiseSNR: int = -50                 # [dB] microphone self-noise SNR
     referenceSensor: int = 0                # Index of the reference sensor at each node
-    stftWinLength: int = 1024               # [samples] STFT frame length
-    stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
-    stftWin: np.ndarray = np.array([])      # STFT window
     wasnTopology: str = 'fully_connected'   # WASN topology (fully connected or ad hoc)
     # VAD
     VADwinLength: float = 40e-3             # [s] VAD window length
@@ -288,6 +285,9 @@ class ProgramSettings(object):
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     updateTDfilterEvery : float = 1.        # [s] duration of pause between two consecutive time-domain filter updates.
     # Desired signal estimation
+    desSigProcessingType: str = 'wola'      # processing scheme used to compute the desired signal estimates:
+                                            # "wola": WOLA synthesis,
+                                            # "conv": linear convolution via T(z)-approximation.
     # Speech enhancement metrics
     minFiltUpdatesForMetricsComputation: int = 15   # minimum number of DANSE filter updates that must have been performed
                                                     # at the starting sample of the signal chunk used for computating the metrics
@@ -301,6 +301,9 @@ class ProgramSettings(object):
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
     randSeed: int = 12345                   # random generator(s) seed
     printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
+    stftWinLength: int = 1024               # [samples] STFT frame length
+    stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
+    stftWin: np.ndarray = np.array([])      # STFT window
 
     def __post_init__(self) -> None:
         # Base attribute checks

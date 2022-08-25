@@ -779,7 +779,7 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
     """
 
     broadcastFlag = False
-    if not compressStarted:   # first broadcast -- need `settings.stftWinLength` sample to perform compression in freq.-domain
+    if not compressStarted:   # first broadcast -- need `settings.chunkSize` sample to perform compression in freq.-domain
         if nSampBC >= N:
             broadcastFlag = True
             compressStarted = True
@@ -1371,7 +1371,7 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
 
 
 def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
-            L, processingType='wola'):
+            desSigEstChunkLength, processingType='wola'):
     """
     Compute chunk of desired signal from DANSE freq.-domain filters
     and freq.-domain observation vector y_tilde.
@@ -1390,10 +1390,10 @@ def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
         For WOLA processing: normalization factor (sum of window samples).
     winShift : int
         Window shift [samples].
-    L : int
+    desSigEstChunkLength : int
         Output length (only used if `processingType == 'conv'`) [samples].
     processingType : str
-        Processing type -- "wola": WOLA processing; "conv": linear convolution via T(z)-approximation.
+        Processing type -- "wola": WOLA synthesis; "conv": linear convolution via T(z)-approximation.
 
     Returns
     -------
@@ -1419,9 +1419,9 @@ def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
         # ----- Compute desired signal chunk estimate using T(z) approx. for linear convolution -----
         wIR = dist_fct_approx(w, win, win, winShift)
         # Perform convolution
-        yfiltLastSamples = np.zeros((L, y.shape[-1]))
+        yfiltLastSamples = np.zeros((desSigEstChunkLength, y.shape[-1]))
         for idxSensor in range(y.shape[-1]):
-            idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+            idDesired = np.arange(start=len(wIR) - desSigEstChunkLength, stop=len(wIR))   # indices required from convolution output
             tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, y[:, idxSensor])
             yfiltLastSamples[:, idxSensor] = tmp
 

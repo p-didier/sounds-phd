@@ -443,7 +443,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         settings.broadcastDomain,
                         winWOLAanalysis,
                         winWOLAsynthesis,
-                        winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                        winShift=int(frameSize * (1 - settings.chunkOverlap)),
                         previousTDfilterUpdate=previousTDfilterUpdate[k],
                         updateTDfilterEvery=settings.updateTDfilterEvery,
                         wIRprevious=wIR[k],
@@ -662,9 +662,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 winWOLAsynthesis,
                 d[idxBegChunk:idxEndChunk, k],
                 normFactWOLA,
-                winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
-                L=settings.broadcastLength,
-                processingType='wola'
+                winShift=int(frameSize * (1 - settings.chunkOverlap)),
+                desSigEstChunkLength=settings.broadcastLength,
+                processingType=settings.desSigProcessingType
                 )
             if settings.computeLocalEstimate:
                 # ----- Compute desired signal chunk estimate [LOCAL] -----
@@ -674,9 +674,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     winWOLAsynthesis,
                     dLocal[idxBegChunk:idxEndChunk, k],
                     normFactWOLA,
-                    winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
-                    L=settings.broadcastLength,
-                    processingType='wola'
+                    winShift=int(frameSize * (1 - settings.chunkOverlap)),
+                    desSigEstChunkLength=settings.broadcastLength,
+                    processingType=settings.desSigProcessingType
                     )
             if settings.computeCentralizedEstimate:
                 # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
@@ -686,9 +686,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                     winWOLAsynthesis,
                     dCentr[idxBegChunk:idxEndChunk, k],
                     normFactWOLA,
-                    winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
-                    L=settings.broadcastLength,
-                    processingType='wola'
+                    winShift=int(frameSize * (1 - settings.chunkOverlap)),
+                    desSigEstChunkLength=settings.broadcastLength,
+                    processingType=settings.desSigProcessingType
                     )
             
             # Increment DANSE iteration index
