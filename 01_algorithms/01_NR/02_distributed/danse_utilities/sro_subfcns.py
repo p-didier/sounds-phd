@@ -1,5 +1,4 @@
 
-from this import d
 import numpy as np
 from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
 from .classes import DWACDParameters, ProgramSettings
@@ -261,7 +260,7 @@ def update_sro_estimates(settings: ProgramSettings, iter,
 
     Parameters
     ----------
-
+    TODO:
     """
 
     sroOut = np.zeros(len(neighbourNodes))
@@ -298,7 +297,7 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                                     wPos=cohPosteriori,
                                     wPri=cohPriori,
                                     avgResProd=avgProdRes[:, q],
-                                    Ns=int(settings.DFTsize * (1 - settings.Ns)),
+                                    Ns=settings.winShift,
                                     ld=ld,
                                     method=settings.asynchronicity.cohDriftMethod.estimationMethod,
                                     alpha=settings.asynchronicity.cohDriftMethod.alpha,
