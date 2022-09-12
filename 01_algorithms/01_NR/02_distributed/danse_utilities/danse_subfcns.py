@@ -9,6 +9,7 @@ from collections import deque
 import matplotlib.pyplot as plt
 from pathlib import Path, PurePath
 import sys
+from .jit_modules import dist_fct_module
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -16,7 +17,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
-import dsp.linalg
+from dsp.linalg import extract_few_samples_from_convolution
 
 """
 References:
@@ -421,6 +422,10 @@ def back_to_time_domain(x, n, axis=0):
     if axis == 1:
         xout = xout.T
 
+    # Check before output
+    if not np.allclose(np.fft.fft(xout, n, axis=0), x):
+        raise ValueError('Issue in return to time-domain')
+
     return xout
 
 
@@ -549,9 +554,10 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
 
-        idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+        # idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+        idDesired = np.arange(start=len(wIR) - L + 1, stop=len(wIR) + 1)   # indices required from convolution output
         # idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
-        tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
+        tmp = extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 
     zq = np.sum(yfiltLastSamples, axis=1)
@@ -1415,7 +1421,7 @@ def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
         yfiltLastSamples = np.zeros((desSigEstChunkLength, yTD.shape[-1]))
         for m in range(yTD.shape[-1]):
             idDesired = np.arange(start=len(wIR) - desSigEstChunkLength, stop=len(wIR))   # indices required from convolution output
-            tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR[:, m], yTD[:, m])
+            tmp = extract_few_samples_from_convolution(idDesired, wIR[:, m], yTD[:, m])
             yfiltLastSamples[:, m] = tmp
 
         dChunk = np.sum(yfiltLastSamples, axis=1)
@@ -1427,8 +1433,12 @@ def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
 def get_trace_jitted(A, ofst):
     return np.trace(A, ofst)
 
+@njit
+def get_Amat_jitted(f, H, h):
+    return np.diag(f) @ H @ np.diag(h)
 
-def dist_fct_approx(wHat, h, f, R):
+
+def dist_fct_approx(wHat, h, f, R, jitted=True):
     """
     Distortion function approximation of the WOLA filtering process.
     -- See Word journal 2022, weeks 30-33.
@@ -1444,6 +1454,8 @@ def dist_fct_approx(wHat, h, f, R):
         WOLA synthesis window (time-domain).
     R : int
         Window shift [samples].
+    jitted : bool
+        If True, use numba to speed some computations up. 
 
     Returns
     -------
@@ -1458,9 +1470,16 @@ def dist_fct_approx(wHat, h, f, R):
     wIR_out = np.zeros((2 * n - 1, wTD.shape[1]))
     for m in range(wTD.shape[1]):
         Hmat = sla.circulant(np.flip(wTD[:, m]))
+        # Amat = dist_fct_module.get_Amat_jitted(f, Hmat, h)
         Amat = np.diag(f) @ Hmat @ np.diag(h)
+
         for ii in np.arange(start=-n+1, stop=n):
-            wIR_out[ii + n - 1, m] = get_trace_jitted(Amat, ii)
+            if jitted:
+                wIR_out[ii + n - 1, m] = get_trace_jitted(Amat, ii)
+                # wIR_out[ii + n - 1, m] = dist_fct_module.get_trace_jitted(Amat, ii)
+            else:
+                wIR_out[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+
     wIR_out /= R
 
     return wIR_out
