@@ -9,7 +9,6 @@ from collections import deque
 import matplotlib.pyplot as plt
 from pathlib import Path, PurePath
 import sys
-from .jit_modules import dist_fct_module
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -556,7 +555,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
         # idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
         idDesired = np.arange(start=len(wIR) - L + 1, stop=len(wIR) + 1)   # indices required from convolution output
-        # idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
+        
         tmp = extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 
@@ -1338,6 +1337,8 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     N : int
         Frame size (= FFT size in DANSE).
+    Ns : int
+        Number of new samples per frame (due to window overlap).
     L : int
         Broadcast length.
 
@@ -1357,7 +1358,7 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
         idxEnd = int(np.floor(np.round(t * fs, 5)))
     # Broadcast scheme: block-wise, in time-domain
     elif bd == 'wholeChunk_td':
-        idxEnd = int(np.floor(np.round(t * fs, 5))) - Ns     # `Ns` samples delay due to time-domain WOLA
+        idxEnd = int(np.floor(np.round(t * fs, 5))) - (N - Ns)     # `N - Ns` samples delay due to time-domain WOLA
 
     idxBeg = np.amax([idxEnd - N, 0])       # don't go into negative sample indices!
     chunk = y[idxBeg:idxEnd, :]
