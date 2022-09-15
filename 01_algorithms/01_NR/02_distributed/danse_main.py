@@ -44,7 +44,7 @@ mySettings = ProgramSettings(
     #
     wasnTopology='fully_connected',
     #
-    signalDuration=10,
+    signalDuration=5,
     baseSNR=5,
     #
     DFTsize=2**10,     # DFT size
@@ -63,11 +63,11 @@ mySettings = ProgramSettings(
     # vvv SROs parameters vvv
     asynchronicity=SamplingRateOffsets(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
-        SROsppm=0,
+        # SROsppm=0,
         # SROsppm=[0, 10],
-        # SROsppm=[0, 50],
-        # compensateSROs=True,
-        compensateSROs=False,
+        SROsppm=[0, 50],
+        compensateSROs=True,
+        # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
         estimateSROs='CohDrift',    # <-- Coherence drift method
         cohDriftMethod=CohDriftSROEstimationParameters(
@@ -82,8 +82,8 @@ mySettings = ProgramSettings(
             alpha=0.95,
             # alpha=0,
             alphaEps=0.05,  # only if `loop=='closed'`
-            # loop='open',
-            loop='closed',
+            loop='open',
+            # loop='closed',
         )
     ),
     #
