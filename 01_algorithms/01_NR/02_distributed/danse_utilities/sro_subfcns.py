@@ -203,7 +203,10 @@ def cohdrift_sro_estimation(wPos: np.ndarray,
         Method to use to retrieve SRO once the exponentially averaged product has been computed.
     flagFirstSROEstimate : bool
         If True, this is the first SRO estimation round --> do not apply exponential averaging.
-    bufferFlag : TODO
+    bufferFlagPos : int
+        Cumulate buffer flags from initialization to current iteration, for current node pair.
+    bufferFlagPri : int
+        Cumulate buffer flags from initialization to "current iteration - `ld`", for current node pair.
 
     Returns
     -------
@@ -215,7 +218,6 @@ def cohdrift_sro_estimation(wPos: np.ndarray,
     """
 
     # "Residuals" product
-    # res_prod = wPri * wPos.conj()
     res_prod = wPos * wPri.conj()
     # Prep for ISTFT (negative frequency bins too)
     res_prod = np.concatenate(
@@ -469,12 +471,18 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                                             / np.sqrt(yyH[iter, :, 0, 0] * yyH[iter, :, idxq, idxq]))     # a posteriori coherence
                     cohPriori = (yyH[iter - ld, :, 0, idxq]
                                             / np.sqrt(yyH[iter - ld, :, 0, 0] * yyH[iter - ld, :, idxq, idxq]))     # a priori coherence
+                    
+                    # Set buffer flags to 0
+                    bufferFlagPri = np.zeros_like(bufferFlagPri)
+                    bufferFlagPos = np.zeros_like(bufferFlagPos)
+
                 elif settings.asynchronicity.cohDriftMethod.loop == 'open':
                     # Use SRO-_un_compensated correlation matrix entries (open-loop SRO est. + comp.)
                     cohPosteriori = (yyHuncomp[iter, :, 0, idxq]
                                             / np.sqrt(yyHuncomp[iter, :, 0, 0] * yyHuncomp[iter, :, idxq, idxq]))     # a posteriori coherence
                     cohPriori = (yyHuncomp[iter - ld, :, 0, idxq]
                                             / np.sqrt(yyHuncomp[iter - ld, :, 0, 0] * yyHuncomp[iter - ld, :, idxq, idxq]))     # a priori coherence
+
 
                 sroRes, apr = cohdrift_sro_estimation(
                                     wPos=cohPosteriori,
