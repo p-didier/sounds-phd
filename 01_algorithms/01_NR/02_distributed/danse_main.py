@@ -39,11 +39,12 @@ mySettings = ProgramSettings(
     samplingFrequency=8000,
     acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
+    # desiredSignalFile=['C:/Users/pdidier/Dropbox/BELGIUM/KU Leuven/SOUNDS_PhD/02_research/99_useful/sound_files/fur_elise_wPauses.wav'],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
     #
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=10,
     baseSNR=5,
     #
     DFTsize=2**10,     # DFT size
@@ -53,6 +54,8 @@ mySettings = ProgramSettings(
     broadcastDomain='fewSamples_td',    # BC `L`-per-`L` samples in the TD
     # broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     broadcastLength=1,
+    # desSigProcessingType='conv',
+    desSigProcessingType='wola',
     updateTDfilterEvery=1.,     # [s]
     performGEVD=1,                      # if True (== 1), perform GEVD-DANSE
     # performGEVD=0,                      # if True (== 1), perform GEVD-DANSE
@@ -62,7 +65,7 @@ mySettings = ProgramSettings(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         SROsppm=0,
         # SROsppm=[0, 10],
-        # SROsppm=[0, 100],
+        # SROsppm=[0, 50],
         # compensateSROs=True,
         compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
@@ -78,9 +81,9 @@ mySettings = ProgramSettings(
             # startAfterNupdates=2,
             alpha=0.95,
             # alpha=0,
-            alphaEps=0.01,  # only if `loop=='closed'`
-            loop='open',
-            # loop='closed',
+            alphaEps=0.05,  # only if `loop=='closed'`
+            # loop='open',
+            loop='closed',
         )
     ),
     #
@@ -94,9 +97,9 @@ mySettings = ProgramSettings(
     # vvv Printouts parameters vvv
     printouts=PrintoutsParameters(events_parser=True,
                                     externalFilterUpdates=True,),
-    #
-    dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         # dynamic speech enhancement metrics computation parameters
-                                    chunkOverlap=0.5,   # [/100%]
+    # Dynamic speech enhancement metrics computation parameters
+    dynamicMetricsParams=DynamicMetricsParameters(chunkDuration=0.5,   # [s]         
+                                    chunkOverlap=0.5,       # [/100%]
                                     dynamicfwSNRseg=True,
                                     dynamicSNR=True)
     )
@@ -158,23 +161,22 @@ def main(mySettings: ProgramSettings, exportPath, showPlots=1, lightExport=True)
             results.save(exportPath, lightExport)        # save results
             mySettings.save(exportPath)     # save settings
             # Post-process - Speech enhancement metrics, figures, sounds
-            flagFigsAndSound = True
+            flagMetrics = True
             if not np.array(['speech' in str(s) for s in mySettings.desiredSignalFile]).any():   # check that we are dealing with speech
                 inp = input(f"""No "speech" sub-string detected in `desiredSignalFile` paths.
                         --> Possibly not using an actual speech target signal.
                         --> Compute intelligibility metrics (+ figs/wavs export) anyway? [y]/n  """)
                 if inp not in ['y', 'Y']:
                     print('Not computing intelligibility metrics (+ figs/wavs export).')
-                    flagFigsAndSound = False
-            if flagFigsAndSound:
-                get_figures_and_sound(results, exportPath, mySettings, showPlots, listen=False)
+                    flagMetrics = False
+            get_figures_and_sound(results, exportPath, mySettings, showPlots, flagMetrics, listen=False)
         else:
             print('FILTER UPDATES WERE BYPASSED. NO EXPORT, NO RESULTS VISUALIZATION.')
 
     return None
 
 
-def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSettings, showPlots=False, listen=False, listeningMaxDuration=5.):
+def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSettings, showPlots=False, flagMetrics=False, listen=False, listeningMaxDuration=5.):
     """From exported pkl.gz file names, import simulation results,
     plots them nicely, exports plots, exports relevent sounds,
     and, if asked, plays back the sounds. 
@@ -187,6 +189,8 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
         Experiment settings. 
     showPlots : bool
         If True, shows plots in Python interpreter window.
+    flagMetrics : bool
+        If True, plot figures that include speech enhancement metrics, else, do not.
     listen : bool
         If True, plays back some signals in interpreter system.
     listeningMaxDuration : float
@@ -207,25 +211,26 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
         plt.draw()
 
     # Plot performance
-    fig1, fig2 = results.plot_enhancement_metrics(plotLocal=False)
-    expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * results.signals.fs[0])
-    fig1.suptitle(f"""Speech enhancement metrics ($\\beta={np.round(settings.expAvgBeta, 4)}
+    if flagMetrics:
+        fig1, fig2 = results.plot_enhancement_metrics(plotLocal=False)
+        expAvgTau = np.log(0.5) * settings.stftEffectiveFrameLen / (np.log(settings.expAvgBeta) * results.signals.fs[0])
+        fig1.suptitle(f"""Speech enhancement metrics ($\\beta={np.round(settings.expAvgBeta, 4)}
 \Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
-    fig1.tight_layout()
-    fig1.savefig(f'{pathToResults}/enhMetrics.png')
-    fig1.savefig(f'{pathToResults}/enhMetrics.pdf')
-    if showPlots:
-        plt.draw()
-    if fig2 is not None:
-        # Dynamic metrics
-        fig2.suptitle(f"""Dynamic metrics [{settings.dynamicMetricsParams.chunkDuration}s
-chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\beta={np.round(settings.expAvgBeta, 4)}
-\Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
-        fig2.tight_layout()
-        fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
-        fig2.savefig(f'{pathToResults}/enhDynamicMetrics.pdf')
+        fig1.tight_layout()
+        fig1.savefig(f'{pathToResults}/enhMetrics.png')
+        fig1.savefig(f'{pathToResults}/enhMetrics.pdf')
         if showPlots:
             plt.draw()
+        if fig2 is not None:
+            # Dynamic metrics
+            fig2.suptitle(f"""Dynamic metrics [{settings.dynamicMetricsParams.chunkDuration}s
+chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\beta={np.round(settings.expAvgBeta, 4)}
+\Leftrightarrow \\tau_{{50\%, 0\\mathrm{{ppm}}}} = {np.round(expAvgTau, 2)}$ s)""".replace('\n',' '))   # long-string trick https://stackoverflow.com/a/24331604
+            fig2.tight_layout()
+            fig2.savefig(f'{pathToResults}/enhDynamicMetrics.png')
+            fig2.savefig(f'{pathToResults}/enhDynamicMetrics.pdf')
+            if showPlots:
+                plt.draw()
 
     # Plot SRO data
     if settings.asynchronicity.plotResult:
@@ -236,35 +241,38 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
             plt.draw()
 
     # Plot best performance node (in terms of STOI)
-    maxSTOI = -9999999
-    minSTOI = 9999999
-    for idxNode in range(results.acousticScenario.numNodes):
-        currSTOI = results.enhancementEval.stoi[f'Node{idxNode + 1}'].after
-        if currSTOI >= maxSTOI:
-            bestNode, maxSTOI = idxNode, currSTOI
-        if currSTOI <= minSTOI:
-            worstNode, minSTOI = idxNode, currSTOI
+    if flagMetrics:
+        maxSTOI = -9999999
+        minSTOI = 9999999
+        for idxNode in range(results.acousticScenario.numNodes):
+            currSTOI = results.enhancementEval.stoi[f'Node{idxNode + 1}'].after
+            if currSTOI >= maxSTOI:
+                bestNode, maxSTOI = idxNode, currSTOI
+            if currSTOI <= minSTOI:
+                worstNode, minSTOI = idxNode, currSTOI
 
-
-    print(f'Best node (STOI = {round(maxSTOI, 2)})')
-    stoiImpLocalVsGlobal = None
-    if settings.computeLocalEstimate:
-        stoiBest = results.enhancementEval.stoi[f'Node{bestNode + 1}']
-        stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
-    results.signals.plot_signals(bestNode, settings, stoiImpLocalVsGlobal)
-    plt.savefig(f'{pathToResults}/bestPerfNode.png')
-    if showPlots:
-        plt.draw()
+        print(f'Best node (STOI = {round(maxSTOI, 2)})')
+        stoiImpLocalVsGlobal = None
+        if settings.computeLocalEstimate:
+            stoiBest = results.enhancementEval.stoi[f'Node{bestNode + 1}']
+            stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
+        results.signals.plot_signals(bestNode, settings, stoiImpLocalVsGlobal)
+        plt.savefig(f'{pathToResults}/bestPerfNode.png')
+        if showPlots:
+            plt.draw()
     
-    print(f'Worst node (STOI = {round(minSTOI, 2)})')
-    stoiImpLocalVsGlobal = None
-    if settings.computeLocalEstimate:
-        stoiBest = results.enhancementEval.stoi[f'Node{worstNode + 1}']
-        stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
-    results.signals.plot_signals(worstNode, settings, stoiImpLocalVsGlobal)
-    plt.savefig(f'{pathToResults}/worstPerfNode.png')
-    if showPlots:
-        plt.draw()
+        print(f'Worst node (STOI = {round(minSTOI, 2)})')
+        stoiImpLocalVsGlobal = None
+        if settings.computeLocalEstimate:
+            stoiBest = results.enhancementEval.stoi[f'Node{worstNode + 1}']
+            stoiImpLocalVsGlobal = stoiBest.after - stoiBest.afterLocal
+        results.signals.plot_signals(worstNode, settings, stoiImpLocalVsGlobal)
+        plt.savefig(f'{pathToResults}/worstPerfNode.png')
+        if showPlots:
+            plt.draw()
+    else:
+        bestNode = 0   # use any node
+        worstNode = 1  # use any node
 
     results.signals.plot_enhanced_stft(bestNode, worstNode, results.enhancementEval, results.other.metricsStartIdx)
     plt.savefig(f'{pathToResults}/bestAndWorstSTFTs.png')

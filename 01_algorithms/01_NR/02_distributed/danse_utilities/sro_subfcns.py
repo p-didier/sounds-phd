@@ -1,8 +1,19 @@
-import copy, resampy
+
+import sys
+import resampy
 import numpy as np
-from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
-from classes import DWACDParameters, ProgramSettings
+from copy import copy
 import matplotlib.pyplot as plt
+from pathlib import Path, PurePath
+from paderwasn.synchronization.time_shift_estimation import max_time_lag_search
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+if not any("danse_utilities" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed/danse_utilities')
+from classes import DWACDParameters, ProgramSettings
 
 
 def apply_sto(x, stoDelay, fs):
@@ -454,7 +465,7 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                                     wPos=cohPosteriori,
                                     wPri=cohPriori,
                                     avgResProd=avgProdRes[:, q],
-                                    Ns=settings.winShift,
+                                    Ns=settings.Ns,
                                     ld=ld,
                                     method=settings.asynchronicity.cohDriftMethod.estimationMethod,
                                     alpha=settings.asynchronicity.cohDriftMethod.alpha,

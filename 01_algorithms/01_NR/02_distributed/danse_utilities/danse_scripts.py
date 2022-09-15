@@ -1,5 +1,4 @@
 
-from textwrap import fill
 import numpy as np
 import time, datetime
 from . import classes
@@ -7,16 +6,6 @@ from . import danse_subfcns as subs
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 import copy
-from pathlib import Path, PurePath
-import sys
-# Find path to root folder
-rootFolder = 'sounds-phd'
-pathToRoot = Path(__file__)
-while PurePath(pathToRoot).name != rootFolder:
-    pathToRoot = pathToRoot.parent
-if not any("_general_fcts" in s for s in sys.path):
-    sys.path.append(f'{pathToRoot}/_general_fcts')
-import dsp.linalg
 
 """
 References:
@@ -244,8 +233,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
     yyH = []                                        # instantaneous autocorrelation product
     yyHuncomp = []                                  # instantaneous autocorrelation product with no SRO compensation (`CohDrift`, `loop='open'` SRO estimation setting)
     ryd = []                                        # cross-correlation between observations and estimations
-    ytilde = []                                     # local full observation vectors, time-domain
+    yTilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
+    yTildeCentr = []                                # local full observation vectors, time-domain, as if centralized processing
     ytildeHatCentr = []                             # local full observation vectors, frequency-domain, as if centralized processing
     ytildeHatUncomp = []                            # local full observation vectors, frequency-domain, SRO-uncompensated
     z = []                                          # current-iteration compressed signals used in DANSE update
@@ -291,8 +281,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
         wtmp[s.DFTsize, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
         wIR.append(wtmp)
         #
-        ytilde.append(np.zeros((s.DFTsize, numIter, dimYTilde[k]), dtype=complex))
+        yTilde.append(np.zeros((s.DFTsize, numIter, dimYTilde[k])))
         ytildeHat.append(np.zeros((numFreqLines, numIter, dimYTilde[k]), dtype=complex))
+        yTildeCentr.append(np.zeros((s.DFTsize, numIter, asc.numSensors)))
         ytildeHatCentr.append(np.zeros((numFreqLines, numIter, asc.numSensors), dtype=complex))
         ytildeHatUncomp.append(np.zeros((numFreqLines, numIter, dimYTilde[k]), dtype=complex))
         #
@@ -414,7 +405,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
         eventIndices = np.arange(len(eventTypes))
 
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with broadcasts first ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        for idxBroadcastEvent in eventIndices[[True if ii == 'broadcast' else False for ii in eventTypes]]:
+        for idxBroadcastEvent in eventIndices[[True if e == 'broadcast' else False for e in eventTypes]]:
 
             # Node index
             k = int(nodesConcerned[idxBroadcastEvent])  # Extract current local data chunk
@@ -440,7 +431,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         s.broadcastDomain,
                         winWOLAanalysis,
                         winWOLAsynthesis,
-                        winShift=s.winShift,
+                        winShift=s.Ns,
                         previousTDfilterUpdate=previousTDfilterUpdate[k],
                         updateTDfilterEvery=s.updateTDfilterEvery,
                         wIRprevious=wIR[k],
@@ -451,7 +442,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                 stop = 1
 
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with updates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
+        for idxUpdateEvent in eventIndices[[True if e == 'update' else False for e in eventTypes]]:
 
             # Node index
             k = int(nodesConcerned[idxUpdateEvent])
@@ -509,15 +500,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             elif s.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
                 # Build full available observation vector
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
-                ytilde[k][:, i[k], :] = yTildeCurr
+                yTilde[k][:, i[k], :] = yTildeCurr
                 # Go to frequency domain
-                ytildeHatCurr = 1 / normFactWOLA * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
+                ytildeHatCurr = 1 / normFactWOLA * np.fft.fft(yTilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
 
             # Centralized estimate ↓
             if s.computeCentralizedEstimate:
                 if s.broadcastDomain != 'wholeChunk_fd':
                     raise ValueError('NOT YET IMPLEMENTED FOR CENTRALIZED ESTIMATE')
+                yTildeCentr[k][:, i[k], :] = yCentrCurr
                 ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHatCentr[k][:, i[k], :] = ytildeHatCentrCurr[:numFreqLines, :]
 
@@ -618,7 +610,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-            sroOut, avgProdResiduals[k] = subs.update_sro_estimates(s,
+            sroOut, avgProdResiduals[k] = subs.update_sro_estimates(
+                        s,  # settings
                         iter=i[k],
                         nLocalSensors=yLocalCurr.shape[-1],
                         cohDriftSROupdateIndices=cohDriftSROupdateIndices,
@@ -626,7 +619,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         yyH=yyH[k],
                         yyHuncomp=yyHuncomp[k],
                         avgProdRes=avgProdResiduals[k],
-                        oracleSRO=s.asynchronicity.SROsppm[k])
+                        oracleSRO=s.asynchronicity.SROsppm[k]
+                        )
 
             if s.asynchronicity.estimateSROs == 'CohDrift':
                 SROsResiduals[k] = sroOut
@@ -653,47 +647,62 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                     phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * s.Ns  # <-- valid directly for oracle SRO ``estimation''
 
             # ----- Compute desired signal chunk estimate [DANSE, GLOBAL] -----
-            dhat[:, i[k], k], d[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+            dhat[:, i[k], k], tmp = subs.get_desired_signal(
                 wTilde[k][:, i[k] + 1, :],
                 ytildeHat[k][:, i[k], :],
                 winWOLAsynthesis,
                 d[idxBegChunk:idxEndChunk, k],
                 normFactWOLA,
-                winShift=s.winShift,
-                desSigEstChunkLength=s.broadcastLength,
-                processingType=s.desSigProcessingType
+                winShift=s.Ns,
+                desSigEstChunkLength=s.Ns,
+                processingType=s.desSigProcessingType,
+                yTD=yTilde[k][:, i[k], :]
                 )
+            if s.desSigProcessingType == 'wola':
+                d[idxBegChunk:idxEndChunk, k] = tmp
+            elif s.desSigProcessingType == 'conv':
+                d[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
             if s.computeLocalEstimate:
                 # ----- Compute desired signal chunk estimate [LOCAL] -----
-                dhatLocal[:, i[k], k], dLocal[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+                dhatLocal[:, i[k], k], tmp = subs.get_desired_signal(
                     wLocal[k][:, i[k] + 1, :],
                     ytildeHat[k][:, i[k], :dimYLocal[k]],
                     winWOLAsynthesis,
                     dLocal[idxBegChunk:idxEndChunk, k],
                     normFactWOLA,
-                    winShift=s.winShift,
-                    desSigEstChunkLength=s.broadcastLength,
-                    processingType=s.desSigProcessingType
+                    winShift=s.Ns,
+                    desSigEstChunkLength=s.Ns,
+                    processingType=s.desSigProcessingType,
+                    yTD=yTilde[k][:, i[k], :dimYLocal[k]]
                     )
+                if s.desSigProcessingType == 'wola':
+                    dLocal[idxBegChunk:idxEndChunk, k] = tmp
+                elif s.desSigProcessingType == 'conv':
+                    dLocal[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
             if s.computeCentralizedEstimate:
                 # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
-                dhatCentr[:, i[k], k], dCentr[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+                dhatCentr[:, i[k], k], tmp = subs.get_desired_signal(
                     wCentr[k][:, i[k] + 1, :],
                     ytildeHatCentr[k][:, i[k], :],
                     winWOLAsynthesis,
                     dCentr[idxBegChunk:idxEndChunk, k],
                     normFactWOLA,
-                    winShift=s.winShift,
-                    desSigEstChunkLength=s.broadcastLength,
-                    processingType=s.desSigProcessingType
+                    winShift=s.Ns,
+                    desSigEstChunkLength=s.Ns,
+                    processingType=s.desSigProcessingType,
+                    yTD=yTildeCentr[k][:, i[k], :]
                     )
+                if s.desSigProcessingType == 'wola':
+                    dCentr[idxBegChunk:idxEndChunk, k] = tmp
+                elif s.desSigProcessingType == 'conv':
+                    dCentr[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
             
             # Increment DANSE iteration index
             i[k] += 1
 
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
-    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
+    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}.')
     print(f'(Real-time processing factor: {np.round(masterClock[-1] / dur, 4)})')
 
     # Prep SRO data for export
@@ -713,7 +722,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
     fig = sroData.plotSROdata(xaxistype='both', fs=fs[0], Ns=s.Ns, firstUp=firstDANSEupdateRefSensor)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=s.Ns)
     # plt.show(block=False)
-
     stop = 1
 
     return d, dLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor

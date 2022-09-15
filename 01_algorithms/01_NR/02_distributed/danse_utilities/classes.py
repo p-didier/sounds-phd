@@ -267,9 +267,8 @@ class ProgramSettings(object):
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
     DFTsize: int = 1024                     # DFT/FFT size
-    Ns: int = DFTsize // 2                  # number of new samples per chunk [samples] 
+    Ns: int = DFTsize // 2                  # window shift = number of new samples per chunk [samples] 
     winOvlp: float = 1 - Ns / DFTsize       # window overlap [/100%]
-    winShift: int = int(DFTsize - Ns)       # window shift [samples]
     danseWindow: np.ndarray = np.hanning(DFTsize)     # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
     expAvg50PercentTime: float = 2.         # [s] Time in the past at which the value is weighted by 50% via exponential averaging
