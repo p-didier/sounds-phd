@@ -173,7 +173,16 @@ def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plo
 
     return sigsOut, timeVectorOut, fs
 
-def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avgResProd, Ns, ld, alpha=0.95, method='gs', flagFirstSROEstimate=False):
+def cohdrift_sro_estimation(wPos: np.ndarray,
+                            wPri: np.ndarray,
+                            avgResProd,
+                            Ns,
+                            ld,
+                            alpha=0.95,
+                            method='gs',
+                            flagFirstSROEstimate=False,
+                            bufferFlagPos=0,
+                            bufferFlagPri=0):
     """Estimates residual SRO using a coherence drift technique.
     
     Parameters
@@ -194,6 +203,7 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avgResProd, Ns, 
         Method to use to retrieve SRO once the exponentially averaged product has been computed.
     flagFirstSROEstimate : bool
         If True, this is the first SRO estimation round --> do not apply exponential averaging.
+    bufferFlag : TODO
 
     Returns
     -------
@@ -213,11 +223,14 @@ def cohdrift_sro_estimation(wPos: np.ndarray, wPri: np.ndarray, avgResProd, Ns, 
             np.conj(res_prod)[::-1][:-1]],
         -1
     )
+    # Account for potential buffer flags (extra / missing sample)
+    res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) * np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
+
     # Update the average coherence product
     if flagFirstSROEstimate:
         avgResProd_out = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
     else:
-        avgResProd_out = alpha * avgResProd + (1 - alpha) * res_prod  
+        avgResProd_out = alpha * avgResProd + (1 - alpha) * res_prod 
 
     # Estimate SRO
     if method == 'gs':
@@ -422,7 +435,9 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                         neighbourNodes,
                         yyH, yyHuncomp, 
                         avgProdRes,
-                        oracleSRO):
+                        oracleSRO,
+                        bufferFlagPos,
+                        bufferFlagPri):
     """
     Update SRO estimates.
 
@@ -470,6 +485,8 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                                     method=settings.asynchronicity.cohDriftMethod.estimationMethod,
                                     alpha=settings.asynchronicity.cohDriftMethod.alpha,
                                     flagFirstSROEstimate=flagFirstSROEstimate,
+                                    bufferFlagPri=bufferFlagPri[q],
+                                    bufferFlagPos=bufferFlagPos[q]
                                     )
             
                 sroOut[q] = sroRes

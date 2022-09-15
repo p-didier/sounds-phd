@@ -525,7 +525,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                 else:
                     # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
                     skipUpdate = True
-            phaseShiftFactors_forFlags[k] += extraPhaseShiftFactor
+            # phaseShiftFactors_forFlags[k] += extraPhaseShiftFactor
             # Save uncompensated \tilde{y} (including FLAG compensation!) for coherence-drift-based SRO estimation
             ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :] *\
                 np.exp(-1 * 1j * 2 * np.pi / s.DFTsize * np.outer(np.arange(numFreqLines), phaseShiftFactors_forFlags[k])))
@@ -619,7 +619,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         yyH=yyH[k],
                         yyHuncomp=yyHuncomp[k],
                         avgProdRes=avgProdResiduals[k],
-                        oracleSRO=s.asynchronicity.SROsppm[k]
+                        oracleSRO=s.asynchronicity.SROsppm[k],
+                        bufferFlagPos=np.sum(bufferFlags[k][:(i[k] + 1), :], axis=0)\
+                            * s.broadcastLength,
+                        bufferFlagPri=np.sum(bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :], axis=0)\
+                            * s.broadcastLength,
                         )
 
             if s.asynchronicity.estimateSROs == 'CohDrift':
