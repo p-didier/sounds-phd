@@ -4,9 +4,8 @@
 # Acoustic Scenario (AS) generation script.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-from tokenize import Expfloat
 import numpy as np
-import os, sys
+import os, sys, copy
 from pathlib import Path, PurePath
 from scipy.spatial.transform import Rotation as rot
 from rimPypack.rimPy import rimPy
@@ -25,25 +24,26 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios=5,                   # Number of AS to generate
+    numScenarios=1,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
-    roomDimBounds=[5,7],              # [Smallest, largest] room dimension possible [m]
+    roomDimBounds=[5,5],              # [Smallest, largest] room dimension possible [m]
     # roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
-    minDistFromWalls = 0.2,
+    minDistFromWalls = 0.25,
     maxDistFromNoise = 1.5,           # maximum distance between nodes and noise source (only if `numNoiseSources==1`)
     numSpeechSources=1,               # nr. of speech sources
-    numNoiseSources=1,                # nr. of noise sources
-    numNodes=2,                       # nr. of nodes
-    # numSensorPerNode=[4,5,6,5,4],               # nr. of sensor per node,
-    numSensorPerNode=[3,3],               # nr. of sensor per node,
+    numNoiseSources=2,                # nr. of noise sources
+    numNodes=4,                       # nr. of nodes
+    numSensorPerNode=[6,3,8,3],               # nr. of sensor per node,
+    # numSensorPerNode=[3,3],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
     # numSensorPerNode=[1,2,3],               # nr. of sensor per node,
     # numSensorPerNode=1,               # nr. of sensor per node,
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
-    arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation=0.05,            # separation between sensor in array (only used if numSensorPerNode > 1) [m]
-    revTime=0.0,                      # reverberation time [s]
+    # arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
+    arrayGeometry='grid3d',           # microphone array geometry (only used if numSensorPerNode > 1)
+    sensorSeparation=0.2,            # separation between sensor in array (only used if numSensorPerNode > 1) [m]
+    revTime=0.15,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases
 )
 
@@ -53,7 +53,6 @@ customASCname = None
 plotit = 1  
 exportit = 1    # If True, export the ASC, settings, and figures.
 globalSeed = 12345
-
 
 def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     """Main wrapper for acoustic scenarios generation.
@@ -118,7 +117,28 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
             sets.save(foldername)
         # Plot
         if plotit:
-            fig = asc.plot()
+            # Determine appropriate node radius
+            for k in range(asc.numNodes):
+                allIndices = np.arange(asc.numSensors)
+                sensorIndices = allIndices[asc.sensorToNodeTags == k + 1]
+                nodeRadius = np.amax(asc.sensorCoords[sensorIndices, :] - np.mean(asc.sensorCoords[sensorIndices, :], axis=0))
+            fig = asc.plot(options=PlottingOptions(
+                nodeCircleRadius=nodeRadius,
+                nodesColors='multi'
+            ))
+            
+
+            # fig = plt.figure(figsize=(8,6), constrained_layout=True)
+            # ax = fig.add_subplot(111, projection='3d')
+            # plot_room(ax, asc.roomDimensions)
+            # for k in range(asc.numNodes):
+            #     allIndices = np.arange(asc.numSensors)
+            #     sensorIndices = allIndices[asc.sensorToNodeTags == k + 1]
+            #     ax.scatter(asc.sensorCoords[sensorIndices, 0], asc.sensorCoords[sensorIndices, 1], asc.sensorCoords[sensorIndices, 2],
+            #         s=20,c=f'C{k}')
+            
+
+            # plt.show()
             if exportit:
                 fig.savefig(f'{foldername}/schematic.pdf')
                 fig.savefig(f'{foldername}/schematic.png')
@@ -291,7 +311,30 @@ def generate_array_pos(nodeCoords, arrayAttrib: micArrayAttributes, randGenerato
                 if np.sqrt(r[0]**2 + r[1]**2 + r[2]**2) <= radius:
                     sensorCoords[ii, :] = r + nodeCoords - radius/2
                     flag = True
-
+    elif arrayAttrib.array == 'grid3d':
+        sensorCoords = np.zeros((arrayAttrib.Mk, 3))
+        # Create grid
+        d = arrayAttrib.mic_sep
+        x_ = np.linspace(nodeCoords[0] - d, nodeCoords[0] + d, 3)
+        y_ = np.linspace(nodeCoords[1] - d, nodeCoords[1] + d, 3)
+        z_ = np.linspace(nodeCoords[2] - d, nodeCoords[2] + d, 3)
+        x, y, z = np.meshgrid(x_, y_, z_)
+        # Flatten coordinates
+        coordFlat = np.zeros((np.prod(x.shape), 3))
+        counter = 0
+        for ii in range(3):
+            for jj in range(3):
+                for kk in range(3):
+                    coordFlat[counter, :] = [x[ii,jj,kk], y[ii,jj,kk], z[ii,jj,kk]]
+                    counter += 1
+        # Base configuration ("atomic" -- see Word journal week 39, MON)
+        idx = [13,4,22,10,16,14,12]
+        sensorCoords[:np.amin([len(idx), arrayAttrib.Mk]), :] = coordFlat[idx[:np.amin([len(idx), arrayAttrib.Mk])], :]
+        if len(idx) < arrayAttrib.Mk:
+            allIdx = np.arange(coordFlat.shape[0])
+            idxValid = [ii for ii in allIdx if ii not in idx]
+            for ii in range(arrayAttrib.Mk - len(idx)):
+                sensorCoords[np.amin([len(idx), arrayAttrib.Mk]) + ii, :] = coordFlat[idxValid[ii], :]
     else:
         raise ValueError('No sensor array geometry defined for array type "%s"' % arrayAttrib.array)
 

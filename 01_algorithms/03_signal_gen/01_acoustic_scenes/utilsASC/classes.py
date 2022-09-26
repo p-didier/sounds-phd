@@ -12,7 +12,13 @@ if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
 import class_methods.dataclass_methods as met
 from plotting.twodim import plot_side_room
+from plotting.threedim import plot_room
 
+@dataclass
+class PlottingOptions:
+    nodeCircleRadius: float = None      # radius of circle to be plotted around each node (if None, compute radius dependent on nodes coordinates)
+    nodesColors: str = 'green'          # color used for each node. If "multi", use a different color for each node
+    plot3D: bool = False
 
 @dataclass
 class AcousticScenario:
@@ -72,7 +78,7 @@ class AcousticScenario:
     def save(self, filename: str):
         met.save(self, filename)
 
-    def plot(self):
+    def plot(self, options: PlottingOptions):
 
         # Detect noiseless scenarios
         noiselessFlag = self.rirNoiseToSensors.shape[-1] == 0
@@ -83,7 +89,8 @@ class AcousticScenario:
                     self.noiseSourceCoords[:, [0,1]], 
                     self.sensorCoords[:, [0,1]],
                     self.sensorToNodeTags,
-                    dotted=self.absCoeff==1)
+                    dotted=self.absCoeff==1,
+                    options=options)
         a0[0].set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
         #
         plot_side_room(a0[1], self.roomDimensions[1:], 
@@ -91,9 +98,11 @@ class AcousticScenario:
                     self.noiseSourceCoords[:, [1,2]],
                     self.sensorCoords[:, [1,2]],
                     self.sensorToNodeTags,
-                    dotted=self.absCoeff==1)
+                    dotted=self.absCoeff==1,
+                    options=options)
         a0[1].set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
-        # Add info
+            
+        # Add distance info
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
         boxText = 'Node distances\n\n'
         for ii in range(self.numNodes):
@@ -133,9 +142,9 @@ class AcousticScenario:
             a1[1].set(xlabel='$t$ [s]', title=f'RIR node 1 - N1')
             a1[1].set_ylim([ymin, ymax])
         # Add text boxes
-        a1[1].text(1.1, 0.9, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}', transform=a1[1].transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
         a0[1].text(1.1, 0.9, boxText, transform=a0[1].transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        a1[1].text(1.1, 0.1, f'Abs. coeff.:\n$\\alpha$ = {np.round(self.absCoeff, 2)}', transform=a1[1].transAxes, fontsize=10,
                 verticalalignment='top', bbox=props)
         fig.tight_layout()
         return fig

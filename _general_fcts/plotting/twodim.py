@@ -39,7 +39,8 @@ def plotSTFT(data):
     return None
     
 
-def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20, dotted=False):
+def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
+                    options, scatsize=20, dotted=False):
     """Plots a 2-D room side, showing the positions of
     sources and nodes inside of it.
     Parameters
@@ -75,18 +76,34 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags, scatsize=20, dotted=Fa
         ax.scatter(rn[idxSensor,0], rn[idxSensor,1], s=scatsize,c='red',marker='P')
         ax.text(rn[idxSensor,0], rn[idxSensor,1], "N%i" % (idxSensor+1))
     # Nodes and sensors
+    if options.nodesColors == 'multi':
+        circHandles = []
+        leg = []
     for idxNode in range(numNodes):
         allIndices = np.arange(numSensors)
         sensorIndices = allIndices[sensorToNodeTags == idxNode + 1]
         for idxSensor in sensorIndices:
-            ax.scatter(r[idxSensor,0], r[idxSensor,1], s=scatsize,c='green',marker='o')
+            if options.nodesColors == 'multi':
+                ax.scatter(r[idxSensor,0], r[idxSensor,1], s=scatsize,c=f'C{idxNode}',edgecolors='black',marker='o')
+            else:
+                ax.scatter(r[idxSensor,0], r[idxSensor,1], s=scatsize,c=options.nodesColors,edgecolors='black',marker='o')
         # Draw circle around node
-        radius = np.amax(r[sensorIndices, :] - np.mean(r[sensorIndices, :], axis=0))
-        circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
-                            radius * 2, color='k', fill=False)
+        if options.nodeCircleRadius is not None:
+            radius = options.nodeCircleRadius
+        else:
+            radius = np.amax(r[sensorIndices, :] - np.mean(r[sensorIndices, :], axis=0))
+        if options.nodesColors == 'multi':
+            circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
+                                radius * 2, color=f'C{idxNode}', fill=False)
+            circHandles.append(circ)
+            leg.append(f'Node {idxNode + 1}')
+        else:
+            circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
+                                radius * 2, color=options.nodesColors, fill=False)
+            # Add label
+            ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
         ax.add_patch(circ)
-        # Add label
-        ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
     ax.grid()
     ax.axis('equal')
+    ax.legend(circHandles, leg, loc='lower right')
     return None
