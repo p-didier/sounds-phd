@@ -2,7 +2,6 @@
 import numpy as np
 from numba import njit
 import scipy.linalg as sla
-import scipy.signal as sig
 from . import classes
 from danse_utilities.events_manager import *
 from .sro_subfcns import *
@@ -17,7 +16,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
-import dsp.linalg
+from dsp.linalg import extract_few_samples_from_convolution
 
 """
 References:
@@ -48,10 +47,6 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
         WOLA analysis window (time domain to freq. domain).
     winWOLAsynthesis : N x 1 np.ndarray
         WOLA synthesis window (freq. domain to time domain).
-    frameSize : int
-        Number of samples used within one DANSE iteration.
-    nNewSamplesPerFrame : int
-        Number of new samples per time frame (used in SRO-free sequential DANSE with frame overlap).
     numIterations : int
         Expected number of DANSE iterations, given the length of the input signals `yin`.
     numBroadcasts : int
@@ -69,9 +64,7 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
     winWOLAsynthesis = np.sqrt(win)     # WOLA synthesis window
 
     # Define useful quantities
-    frameSize = settings.chunkSize
-    nNewSamplesPerFrame = int(settings.chunkSize * (1 - settings.chunkOverlap))
-    numIterations = int((yin.shape[0] - frameSize) / nNewSamplesPerFrame) + 1
+    numIterations = int((yin.shape[0] - settings.DFTsize) / settings.Ns) + 1
     numBroadcasts = int(np.ceil(yin.shape[0] / settings.broadcastLength))
 
     # Identify neighbours of each node
@@ -150,7 +143,7 @@ def danse_init(yin, settings: classes.ProgramSettings, asc, showWasnConnections=
         if showWasnConnections:
             plot_wasn_connections(asc.sensorCoords, connectionMatrix)
 
-    return rng, winWOLAanalysis, winWOLAsynthesis, frameSize, nNewSamplesPerFrame, numIterations, numBroadcasts, neighbourNodes
+    return rng, winWOLAanalysis, winWOLAsynthesis, numIterations, numBroadcasts, neighbourNodes
 
 
 def plot_wasn_connections(coords: np.ndarray, connectionMatrix: np.ndarray):
@@ -428,6 +421,10 @@ def back_to_time_domain(x, n, axis=0):
     if axis == 1:
         xout = xout.T
 
+    # Check before output
+    if not np.allclose(np.fft.fft(xout, n, axis=0), x):
+        raise ValueError('Issue in return to time-domain')
+
     return xout
 
 
@@ -502,7 +499,7 @@ def danse_compression_whole_chunk(yq, wHat, h, f, zqPrevious=None):
 
 def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
                             winWOLAanalysis, winWOLAsynthesis, R, 
-                            updateBroadcastFilter=False):
+                            updateBroadcastFilter=False): # TODO: to clean up
     """Performs local signals compression according to DANSE theory [1],
     in the time-domain (to be able to broadcast the compressed signal sample
     per sample between nodes).
@@ -535,16 +532,17 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
     # Profiling
     if updateBroadcastFilter:
-        # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
-        wqq = back_to_time_domain(wqqHat.conj(), n, axis=0)
-        wqq = np.real_if_close(wqq)         
-        wIR = np.zeros((2 * n - 1, wqq.shape[1]))
-        for m in range(wqq.shape[1]):
-            Hmat = sla.circulant(np.flip(wqq[:, m]))
-            Amat = np.diag(winWOLAsynthesis) @ Hmat @ np.diag(winWOLAanalysis)
-            for ii in np.arange(start=-n+1, stop=n):
-                wIR[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
-        wIR /= R
+        wIR = dist_fct_approx(wqqHat, winWOLAanalysis, winWOLAsynthesis, R)
+        # # Distortion function approximation of the WOLA filterbank [see Word journal week 32 and previous, 2022]
+        # wqq = back_to_time_domain(wqqHat.conj(), n, axis=0)
+        # wqq = np.real_if_close(wqq)         
+        # wIR = np.zeros((2 * n - 1, wqq.shape[1]))
+        # for m in range(wqq.shape[1]):
+        #     Hmat = sla.circulant(np.flip(wqq[:, m]))
+        #     Amat = np.diag(winWOLAsynthesis) @ Hmat @ np.diag(winWOLAanalysis)
+        #     for ii in np.arange(start=-n+1, stop=n):
+        #         wIR[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+        # wIR /= R
     else:
         wIR = wIRprevious
     
@@ -555,9 +553,10 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         # tmp = sig.convolve(yq[:, idxSensor], wIR[:, idxSensor], mode='full')
         # yfiltLastSamples[:, idxSensor] = tmp[-(n + L):-n]     # extract the `L` sample preceding the middle of the convolution output
 
-        idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
-        # idDesired = np.arange(start=n + R - 1 - L, stop=n + R - 1)   # indices required from convolution output
-        tmp = dsp.linalg.extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
+        # idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
+        idDesired = np.arange(start=len(wIR) - L + 1, stop=len(wIR) + 1)   # indices required from convolution output
+        
+        tmp = extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 
     zq = np.sum(yfiltLastSamples, axis=1)
@@ -566,7 +565,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
 
 
 
-def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L, lastExpectedIter, broadcastDomain):
+def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L, lastExpectedIter, broadcastDomain, t):
     """When called, processes the incoming data from other nodes, as stored in local node's buffers.
     Called whenever a DANSE update can be performed (`N` new local samples were captured since last update).
     
@@ -593,6 +592,8 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
         -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
         -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
+    t : float
+        Current time instant [s] (for printouts).
     
     Returns
     -------
@@ -638,17 +639,29 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
         
         # Time-domain chunks broadcasting (naïve DANSE, simplest to visualize/implement, but inefficient)
         elif broadcastDomain == 'wholeChunk_td':
-            if Bq == Ns:
-                # All good, no under-/over-flows
-                if not np.any(zPreviousk):
+            if ik == 0:
+                if Bq == Ns:
                     # Not yet any previous buffer -- need to appstart zeros
                     zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]))
-                else:
-                    # Concatenate last `Ns` samples of previous buffer with current buffer
-                    zCurrBuffer = np.concatenate((zPreviousk[-Ns:, idxq], zBufferk[idxq]))
+                elif Bq == 0:
+                    # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
+                    # Interpretation: Node `q` samples slower than node `k`. 
+                    # Response: ...
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -1 broadcast')
+                    bufferFlags[idxq] = -1      # raise negative flag
+                    zCurrBuffer = np.zeros(N)
             else:
-                # Under- or over-flow...
-                raise ValueError('[NOT YET IMPLEMENTED]')
+                if Bq == Ns:
+                    # All good, no under-/over-flows
+                    if not np.any(zPreviousk):
+                        # Not yet any previous buffer -- need to appstart zeros
+                        zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]))
+                    else:
+                        # Concatenate last `Ns` samples of previous buffer with current buffer
+                        zCurrBuffer = np.concatenate((zPreviousk[-Ns:, idxq], zBufferk[idxq]))
+                else:
+                    # Under- or over-flow...
+                    raise ValueError('[NOT YET IMPLEMENTED]')
                 
         elif broadcastDomain == 'fewSamples_td':
 
@@ -661,12 +674,18 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                     # Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.
                     # Interpretation: Node `q` samples slower than node `k`. 
                     # Response: ...
-                    raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
+                    nMissingBroadcasts = int(np.abs((N - Bq) / L))
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
+                    zCurrBuffer = np.concatenate((np.zeros(N - Bq), zBufferk[idxq]), axis=0)
+                    # raise ValueError('Unexpected edge case: Node `q` has not yet transmitted enough data to node `k`, but node `k` has already reached its first update instant.')
                 elif (N - Bq) % L == 0 and Bq > N:
                     # Node `q` has already transmitted too much data to node `k`.
                     # Interpretation: Node `q` samples faster than node `k`.
                     # Response: node `k` raises a positive flag and uses the last `frameSize` samples from the `q`^th buffer.
-                    bufferFlags[idxq] = +1 * int((N - Bq) / L)      # raise negative flag
+                    nExtraBroadcasts = int(np.abs((N - Bq) / L))
+                    print(f'[b+ @ t={np.round(t, 3)}s] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                    bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
                     zCurrBuffer = zBufferk[idxq][-N:]
 
             else:   # not the first DANSE iteration -- we are expecting a normally full buffer, with a DANSE chunk size considering overlap
@@ -674,15 +693,15 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
                     pass
                 elif (Ns - Bq) % L == 0 and Bq < Ns:       # case 2: negative broadcast frame mismatch between node `k` and node `q`
                     nMissingBroadcasts = int(np.abs((Ns - Bq) / L))
-                    print(f'[b-] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
+                    print(f'[b- @ t={np.round(t, 3)}s] Buffer underflow at current node`s B_{neighs[idxq]+1} buffer | -{nMissingBroadcasts} broadcast(s)')
                     bufferFlags[idxq] = -1 * nMissingBroadcasts      # raise negative flag
                 elif (Ns - Bq) % L == 0 and Bq > Ns:       # case 3: positive broadcast frame mismatch between node `k` and node `q`
                     nExtraBroadcasts = int(np.abs((Ns - Bq) / L))
-                    print(f'[b+] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
+                    print(f'[b+ @ t={np.round(t, 3)}s] Buffer overflow at current node`s B_{neighs[idxq]+1} buffer | +{nExtraBroadcasts} broadcasts(s)')
                     bufferFlags[idxq] = +1 * nExtraBroadcasts       # raise positive flag
                 else:
                     if (Ns - Bq) % L != 0 and np.abs(ik - lastExpectedIter) < 10:
-                        print('[b!] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
+                        print('[b! @ t={np.round(t, 3)}s] This is the last iteration -- not enough samples anymore due to cumulated SROs effect, skip update.')
                         bufferFlags[idxq] = np.NaN   # raise "end of signal" flag
                     else:
                         raise ValueError(f'Unexpected buffer size ({Bq} samples, with L={L} and N={Ns}) for neighbor node q={neighs[idxq]+1}.')
@@ -758,7 +777,7 @@ def broadcast_flag_raising(compressStarted, nSampBC, N, L):
     """
 
     broadcastFlag = False
-    if not compressStarted:   # first broadcast -- need `settings.stftWinLength` sample to perform compression in freq.-domain
+    if not compressStarted:   # first broadcast -- need `settings.chunkSize` sample to perform compression in freq.-domain
         if nSampBC >= N:
             broadcastFlag = True
             compressStarted = True
@@ -1002,10 +1021,12 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
 
-    # Ensure that all nodes have broadcasted enough times to perform any update
-    minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
-    for k in range(nNodes):
-        updateInstants[k] = updateInstants[k][updateInstants[k] >= minWaitBeforeUpdate]
+    # # Ensure that all nodes have broadcasted enough times before performing any update
+    # minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
+    # for k in range(nNodes):
+    #     validUpdateInstants = updateInstants[k] >= minWaitBeforeUpdate
+    #     print(len(updateInstants[k]) - sum(validUpdateInstants))
+    #     updateInstants[k] = updateInstants[k][validUpdateInstants]
     
     # Build event matrix
     outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)
@@ -1316,6 +1337,8 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     N : int
         Frame size (= FFT size in DANSE).
+    Ns : int
+        Number of new samples per frame (due to window overlap).
     L : int
         Broadcast length.
 
@@ -1335,7 +1358,7 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
         idxEnd = int(np.floor(np.round(t * fs, 5)))
     # Broadcast scheme: block-wise, in time-domain
     elif bd == 'wholeChunk_td':
-        idxEnd = int(np.floor(np.round(t * fs, 5))) - Ns     # `Ns` samples delay due to time-domain WOLA
+        idxEnd = int(np.floor(np.round(t * fs, 5))) - (N - Ns)     # `N - Ns` samples delay due to time-domain WOLA
 
     idxBeg = np.amax([idxEnd - N, 0])       # don't go into negative sample indices!
     chunk = y[idxBeg:idxEnd, :]
@@ -1347,22 +1370,117 @@ def local_chunk_for_update(y, t, fs, bd, N, Ns, L):
 
 
 
-def get_desired_signal(w, y, win, dChunk, normFactWOLA):
+def get_desired_signal(w, y, win, dChunk, normFactWOLA, winShift,
+            desSigEstChunkLength, processingType='wola', yTD=None):
     """
     Compute chunk of desired signal from DANSE freq.-domain filters
     and freq.-domain observation vector y_tilde.
 
     Parameters
     ----------
+    w : [Nf x M] np.ndarray (complex)
+        Frequency-domain filter coefficients for each of the `M` channels (>0 freqs. only).
+    y : [Nf x M] np.ndarray (complex)
+        Frequency-domain signals (full observations vector $\\tilde{\\mathbf{y}}_k$) (>0 freqs. only).
+    win : [N x 1] np.ndarray (float)
+        Synthesis window (time-domain).
+    dChunk : [N x 1] np.ndarray (float)
+        For WOLA processing: previous data chunk to use for overlap-add.
+    normFactWOLA : float
+        For WOLA processing: normalization factor (sum of window samples).
+    winShift : int
+        Window shift [samples].
+    desSigEstChunkLength : int
+        Output length (only used if `processingType == 'conv'`) [samples].
+    processingType : str
+        Processing type -- "wola": WOLA synthesis; "conv": linear convolution via T(z)-approximation.
+
+    Returns
+    -------
+    dhatCurr : [Nf x 1] np.ndarray (complex)
+        Current chunk frequency-domain estimate (>0 freqs. only).
+    dChunk : [N x 1] np.ndarray (float)
+        Current chunk time-domain estimate, incl. overlap-add.
+    """
+        
+    dhatCurr = None  # init
+
+    if processingType == 'wola':
+        # ----- Compute desired signal chunk estimate using WOLA -----
+        dhatCurr = np.einsum('ij,ij->i', w.conj(), y)   # vectorized way to do inner product on slices
+        # Transform back to time domain (WOLA processing)
+        dChunCurr = normFactWOLA * win * back_to_time_domain(dhatCurr, len(win))
+        if len(dChunk) < len(win):   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
+            dChunk += np.real_if_close(dChunCurr[-len(dChunk):])   # overlap and add construction of output time-domain signal
+        else:
+            dChunk += np.real_if_close(dChunCurr)   # overlap and add construction of output time-domain signal
+
+    elif processingType == 'conv':
+        # ----- Compute desired signal chunk estimate using T(z) approx. for linear convolution -----
+        wIR = dist_fct_approx(w, win, win, winShift)
+        # Perform convolution
+        yfiltLastSamples = np.zeros((desSigEstChunkLength, yTD.shape[-1]))
+        for m in range(yTD.shape[-1]):
+            idDesired = np.arange(start=len(wIR) - desSigEstChunkLength, stop=len(wIR))   # indices required from convolution output
+            tmp = extract_few_samples_from_convolution(idDesired, wIR[:, m], yTD[:, m])
+            yfiltLastSamples[:, m] = tmp
+
+        dChunk = np.sum(yfiltLastSamples, axis=1)
+
+    return dhatCurr, dChunk
+
+
+@njit
+def get_trace_jitted(A, ofst):
+    return np.trace(A, ofst)
+
+@njit
+def get_Amat_jitted(f, H, h):
+    return np.diag(f) @ H @ np.diag(h)
+
+
+def dist_fct_approx(wHat, h, f, R, jitted=True):
+    """
+    Distortion function approximation of the WOLA filtering process.
+    -- See Word journal 2022, weeks 30-33.
+
+    Parameters
+    ----------
+    wHat : [Nf x M] np.ndarry (complex)
+        Frequency-domain filter coefficients for each of the `M` channels (>0 freqs. only)
+        used in the WOLA process to modify the short-term spectrum.
+    h : [N x 1] np.ndarray (float)
+        WOLA analysis window (time-domain).
+    f : [N x 1] np.ndarray (float)
+        WOLA synthesis window (time-domain).
+    R : int
+        Window shift [samples].
+    jitted : bool
+        If True, use numba to speed some computations up. 
+
+    Returns
+    -------
+    wIR_out : [(2 * N + 1) x 1] np.ndarray (float)
+        Time-domain distortion function approximation of the WOLA filtering process.
     """
 
-    # ----- Compute desired signal chunk estimate -----
-    dhatCurr = np.einsum('ij,ij->i', w.conj(), y)   # vectorized way to do inner product on slices
-    # Transform back to time domain (WOLA processing)
-    dChunCurr = normFactWOLA * win * back_to_time_domain(dhatCurr, len(win))
-    if len(dChunk) < len(win):   # fewSamples_td BC scheme: first iteration required zero-padding at the start of the chunk
-        dChunk += np.real_if_close(dChunCurr[-len(dChunk):])   # overlap and add construction of output time-domain signal
-    else:
-        dChunk += np.real_if_close(dChunCurr)   # overlap and add construction of output time-domain signal
-            
-    return dhatCurr, dChunk
+    n = len(h)
+
+    wTD = back_to_time_domain(wHat.conj(), n, axis=0)
+    wTD = np.real_if_close(wTD)         
+    wIR_out = np.zeros((2 * n - 1, wTD.shape[1]))
+    for m in range(wTD.shape[1]):
+        Hmat = sla.circulant(np.flip(wTD[:, m]))
+        # Amat = dist_fct_module.get_Amat_jitted(f, Hmat, h)
+        Amat = np.diag(f) @ Hmat @ np.diag(h)
+
+        for ii in np.arange(start=-n+1, stop=n):
+            if jitted:
+                wIR_out[ii + n - 1, m] = get_trace_jitted(Amat, ii)
+                # wIR_out[ii + n - 1, m] = dist_fct_module.get_trace_jitted(Amat, ii)
+            else:
+                wIR_out[ii + n - 1, m] = np.sum(np.diagonal(Amat, ii))
+
+    wIR_out /= R
+
+    return wIR_out

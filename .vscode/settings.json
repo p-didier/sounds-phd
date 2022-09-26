@@ -5,6 +5,7 @@
         "./01_algorithms/01_NR/01_centralized/01_MWF_based/01_GEVD_MWF/MWFpack",
         "./01_algorithms/03_signal_gen/01_acoustic_scenes",
         "./01_algorithms/03_signal_gen/01_acoustic_scenes/rimPypack",
-        "./_third_parties"
+        "./_third_parties",
+        "./01_algorithms/01_NR/02_distributed/danse_utilities"
     ]
 }

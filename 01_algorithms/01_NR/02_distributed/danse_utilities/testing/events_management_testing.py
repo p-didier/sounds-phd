@@ -25,8 +25,8 @@ mySettings = ProgramSettings(
     #
     signalDuration=20,
     baseSNR=5,
-    chunkSize=2**10,            # DANSE iteration processing chunk size [samples]
-    chunkOverlap=0.5,           # overlap between DANSE iteration processing chunks [/100%]
+    DFTsize=2**10,            # DANSE iteration processing chunk size [samples]
+    Ns=0.5,           # overlap between DANSE iteration processing chunks [/100%]
     broadcastLength=2**9,       # broadcast chunk size `L` [samples]
     #
     SROsppm=[50000, 0]

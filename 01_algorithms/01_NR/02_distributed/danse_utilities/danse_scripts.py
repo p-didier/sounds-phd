@@ -1,5 +1,4 @@
 
-from textwrap import fill
 import numpy as np
 import time, datetime
 from . import classes
@@ -7,16 +6,6 @@ from . import danse_subfcns as subs
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 import copy
-from pathlib import Path, PurePath
-import sys
-# Find path to root folder
-rootFolder = 'sounds-phd'
-pathToRoot = Path(__file__)
-while PurePath(pathToRoot).name != rootFolder:
-    pathToRoot = pathToRoot.parent
-if not any("_general_fcts" in s for s in sys.path):
-    sys.path.append(f'{pathToRoot}/_general_fcts')
-import dsp.linalg
 
 """
 References:
@@ -178,18 +167,18 @@ def danse_sequential(yin, asc, settings: classes.ProgramSettings, oVAD):
     return d
 
 
-def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.ProgramSettings,
+def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSettings,
         oVAD, timeInstants, masterClockNodeIdx,
         referenceSpeechOnly=None):
     """Wrapper for Simultaneous-Node-Updating DANSE (rs-DANSE) [2].
 
     Parameters
     ----------
-    yin : [Nt x Ns] np.ndarray of floats
+    yin : [Nt x settings.Ns] np.ndarray of floats
         The microphone signals in the time domain.
     asc : AcousticScenario object
         Processed data about acoustic scenario (RIRs, dimensions, etc.).
-    settings : ProgramSettings object
+    s : ProgramSettings object
         The settings for the current run.
     oVAD : [Nt x 1] np.ndarray of booleans or binary ints
         Voice Activity Detector.
@@ -213,24 +202,20 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     """
 
     # Hard-coded parameters
-    printingInterval = 2            # [s] minimum time between two "% done" printouts
     alphaExternalFilters = 0.5      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
-    # alphaExternalFilters = 0      # external filters (broadcasting) exp. avg. update constant -- cfr. WOLA-DANSE implementation in https://homes.esat.kuleuven.be/~abertran/software.html
 
     # Profiling
     profiler = Profiler()
     profiler.start()
     
     # Initialization (extracting/defining useful quantities)
-    _, winWOLAanalysis, winWOLAsynthesis,\
-        frameSize, Ns, numIterations, _,\
-            neighbourNodes = subs.danse_init(yin, settings, asc)
+    _, winWOLAanalysis, winWOLAsynthesis, numIter, _, neighbourNodes = subs.danse_init(yin, s, asc)
     normFactWOLA = winWOLAanalysis.sum()
-    normFactWOLA = 1
+    # normFactWOLA = 1
 
     # Pre-process certain input parameters
     if referenceSpeechOnly is not None:
-        referenceSpeechOnly = np.concatenate((np.zeros((Ns, referenceSpeechOnly.shape[-1])), referenceSpeechOnly), axis=0)
+        referenceSpeechOnly = np.concatenate((np.zeros((s.Ns, referenceSpeechOnly.shape[-1])), referenceSpeechOnly), axis=0)
 
     # Loop over time instants -- based on a particular reference node
     masterClock = timeInstants[:, masterClockNodeIdx]     # reference clock
@@ -248,8 +233,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     yyH = []                                        # instantaneous autocorrelation product
     yyHuncomp = []                                  # instantaneous autocorrelation product with no SRO compensation (`CohDrift`, `loop='open'` SRO estimation setting)
     ryd = []                                        # cross-correlation between observations and estimations
-    ytilde = []                                     # local full observation vectors, time-domain
+    yTilde = []                                     # local full observation vectors, time-domain
     ytildeHat = []                                  # local full observation vectors, frequency-domain
+    yTildeCentr = []                                # local full observation vectors, time-domain, as if centralized processing
     ytildeHatCentr = []                             # local full observation vectors, frequency-domain, as if centralized processing
     ytildeHatUncomp = []                            # local full observation vectors, frequency-domain, SRO-uncompensated
     z = []                                          # current-iteration compressed signals used in DANSE update
@@ -258,7 +244,6 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     bufferFlags = []                                # buffer flags (0, -1, or +1) - for when buffers over- or under-flow
     bufferLengths = []                              # node-specific number of samples in each buffer
     phaseShiftFactors = []                          # phase-shift factors for SRO compensation (only used if `settings.compensateSROs == True`)
-    phaseShiftFactorsFlags = []                     # phase-shift factors for SRO FLAG compensation
     a = []
     tauSROsEstimates = []                           # SRO-induced time shift estimates per node (for each neighbor)
     SROsResiduals = []                              # SRO residuals per node (for each neighbor)
@@ -270,98 +255,97 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     avgProdResidualsRyy = []                        # average residuals product coming out of filter-shift processing (SRO estimation) - for Ryy only
     avgProdResidualsRnn = []                        # average residuals product coming out of filter-shift processing (SRO estimation) - for Rnn only
     dimYTilde = np.zeros(asc.numNodes, dtype=int)   # dimension of \tilde{y}_k (== M_k + |\mathcal{Q}_k|)
-    oVADframes = np.zeros(numIterations)            # oracle VAD per time frame
-    numFreqLines = int(frameSize / 2 + 1)           # number of frequency lines (only positive frequencies)
-    if settings.computeLocalEstimate:
+    oVADframes = np.zeros(numIter)            # oracle VAD per time frame
+    numFreqLines = int(s.DFTsize / 2 + 1)           # number of frequency lines (only positive frequencies)
+    if s.computeLocalEstimate:
         wLocal = []                                     # filter coefficients - using only local observations (not data coming from neighbors)
         Rnnlocal = []                                   # autocorrelation matrix when VAD=0 - using only local observations (not data coming from neighbors)
         Ryylocal = []                                   # autocorrelation matrix when VAD=1 - using only local observations (not data coming from neighbors)
         dimYLocal = np.zeros(asc.numNodes, dtype=int)   # dimension of y_k (== M_k)
-    if settings.computeCentralizedEstimate:
+    if s.computeCentralizedEstimate:
         wCentr = []                                     # filter coefficients - using all observations (centralized processing)
         RnnCentr = []                                   # autocorrelation matrix when VAD=0 - using all observations (centralized processing)
         RyyCentr = []                                   # autocorrelation matrix when VAD=1 - using all observations (centralized processing)
         
     for k in range(asc.numNodes):
         dimYTilde[k] = sum(asc.sensorToNodeTags == k + 1) + len(neighbourNodes[k])
-        wtmp = np.zeros((numFreqLines, numIterations + 1, dimYTilde[k]), dtype=complex)
+        wtmp = np.zeros((numFreqLines, numIter + 1, dimYTilde[k]), dtype=complex)
         wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTilde.append(wtmp)
         wtmp = np.zeros((numFreqLines, sum(asc.sensorToNodeTags == k + 1)), dtype=complex)
         wtmp[:, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
         wTildeExternal.append(wtmp)
         wTildeExternalTarget.append(wtmp)
-        wtmp = np.zeros((2 * frameSize - 1, sum(asc.sensorToNodeTags == k + 1)))
-        wtmp[frameSize, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
+        wtmp = np.zeros((2 * s.DFTsize - 1, sum(asc.sensorToNodeTags == k + 1)))
+        wtmp[s.DFTsize, 0] = 1   # initialize time-domain (real-valued) filter as Dirac for first sensor signal
         wIR.append(wtmp)
         #
-        ytilde.append(np.zeros((frameSize, numIterations, dimYTilde[k]), dtype=complex))
-        ytildeHat.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
-        ytildeHatCentr.append(np.zeros((numFreqLines, numIterations, asc.numSensors), dtype=complex))
-        ytildeHatUncomp.append(np.zeros((numFreqLines, numIterations, dimYTilde[k]), dtype=complex))
+        yTilde.append(np.zeros((s.DFTsize, numIter, dimYTilde[k])))
+        ytildeHat.append(np.zeros((numFreqLines, numIter, dimYTilde[k]), dtype=complex))
+        yTildeCentr.append(np.zeros((s.DFTsize, numIter, asc.numSensors)))
+        ytildeHatCentr.append(np.zeros((numFreqLines, numIter, asc.numSensors), dtype=complex))
+        ytildeHatUncomp.append(np.zeros((numFreqLines, numIter, dimYTilde[k]), dtype=complex))
         #
-        rng = np.random.default_rng(settings.randSeed)
+        rng = np.random.default_rng(s.randSeed)
         # sliceTilde = np.finfo(float).eps * np.eye(dimYTilde[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
         sliceTilde = np.finfo(float).eps * (rng.random((dimYTilde[k], dimYTilde[k])) + 1j * rng.random((dimYTilde[k], dimYTilde[k]))) 
         Rnntilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # noise only
         Ryytilde.append(np.tile(sliceTilde, (numFreqLines, 1, 1)))                    # speech + noise
-        yyH.append(np.zeros((numIterations, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
-        yyHuncomp.append(np.zeros((numIterations, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
+        yyH.append(np.zeros((numIter, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
+        yyHuncomp.append(np.zeros((numIter, numFreqLines, dimYTilde[k], dimYTilde[k]), dtype=complex))
         ryd.append(np.zeros((numFreqLines, dimYTilde[k]), dtype=complex))   # noisy-vs-desired signals covariance vectors
         #
-        bufferFlags.append(np.zeros((numIterations, len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
+        bufferFlags.append(np.zeros((numIter, len(neighbourNodes[k]))))    # init all buffer flags at 0 (assuming no over- or under-flow)
         bufferLengths.append(np.zeros((len(masterClock), len(neighbourNodes[k]))))
         #
-        if settings.broadcastDomain == 'wholeChunk_td':
-            z.append(np.empty((frameSize, 0), dtype=float))
-        elif settings.broadcastDomain == 'wholeChunk_fd':
+        if s.broadcastDomain == 'wholeChunk_td':
+            z.append(np.empty((s.DFTsize, 0), dtype=float))
+        elif s.broadcastDomain == 'wholeChunk_fd':
             z.append(np.empty((numFreqLines, 0), dtype=complex))
-        elif settings.broadcastDomain == 'fewSamples_td':
-            z.append(np.empty((frameSize, 0), dtype=float))
+        elif s.broadcastDomain == 'fewSamples_td':
+            z.append(np.empty((s.DFTsize, 0), dtype=float))
         #
         zBuffer.append([np.array([]) for _ in range(len(neighbourNodes[k]))])
         zLocal.append(np.array([])) 
         # SRO stuff vvv
         phaseShiftFactors.append(np.zeros(dimYTilde[k]))   # initiate phase shift factors as 0's (no phase shift)
-        phaseShiftFactorsFlags.append(np.zeros(dimYTilde[k]))   # initiate FLAG phase shift factors as 0's (no phase shift)
         a.append(np.zeros(dimYTilde[k]))   # 
         tauSROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsResiduals.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimates.append(np.zeros(len(neighbourNodes[k])))
         SROsEstimatesAccumulated.append(np.zeros(len(neighbourNodes[k])))
-        residualSROs.append(np.zeros((dimYTilde[k], numIterations)))
-        avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), frameSize), dtype=complex))
-        avgProdResiduals.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
-        avgProdResidualsRyy.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
-        avgProdResidualsRnn.append(np.zeros((frameSize, len(neighbourNodes[k])), dtype=complex))
+        residualSROs.append(np.zeros((dimYTilde[k], numIter)))
+        avgCohProdDWACD.append(np.zeros((len(neighbourNodes[k]), s.DFTsize), dtype=complex))
+        avgProdResiduals.append(np.zeros((s.DFTsize, len(neighbourNodes[k])), dtype=complex))
+        avgProdResidualsRyy.append(np.zeros((s.DFTsize, len(neighbourNodes[k])), dtype=complex))
+        avgProdResidualsRnn.append(np.zeros((s.DFTsize, len(neighbourNodes[k])), dtype=complex))
         # If local estimate is to be computed vvv
-        if settings.computeLocalEstimate:
+        if s.computeLocalEstimate:
             dimYLocal[k] = sum(asc.sensorToNodeTags == k + 1)
-            wtmp = np.zeros((numFreqLines, numIterations + 1, dimYLocal[k]), dtype=complex)
+            wtmp = np.zeros((numFreqLines, numIter + 1, dimYLocal[k]), dtype=complex)
             wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
             wLocal.append(wtmp)
             sliceLocal = np.finfo(float).eps * np.eye(dimYLocal[k], dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
             Rnnlocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # noise only
             Ryylocal.append(np.tile(sliceLocal, (numFreqLines, 1, 1)))                    # speech + noise
         # If centralized estimate is to be computed vvv
-        if settings.computeCentralizedEstimate:
-            wtmp = np.zeros((numFreqLines, numIterations + 1, asc.numSensors), dtype=complex)
+        if s.computeCentralizedEstimate:
+            wtmp = np.zeros((numFreqLines, numIter + 1, asc.numSensors), dtype=complex)
             wtmp[:, :, 0] = 1   # initialize filter as a selector of the unaltered first sensor signal
             wCentr.append(wtmp)
             sliceCentr = np.finfo(float).eps * np.eye(asc.numSensors, dtype=complex)   # single autocorrelation matrix init (identities -- ensures positive-definiteness)
             RnnCentr.append(np.tile(sliceCentr, (numFreqLines, 1, 1)))                    # noise only
             RyyCentr.append(np.tile(sliceCentr, (numFreqLines, 1, 1)))                    # speech + noise
     # Desired signal estimate [frames x frequencies x nodes]
-    dhat = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)        # using full-observations vectors (also data coming from neighbors)
+    dhat = np.zeros((numFreqLines, numIter, asc.numNodes), dtype=complex)        # using full-observations vectors (also data coming from neighbors)
     d = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhat`
-    if settings.computeLocalEstimate:
-        dhatLocal = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
+    if s.computeLocalEstimate:
+        dhatLocal = np.zeros((numFreqLines, numIter, asc.numNodes), dtype=complex)   # using only local observations (not data coming from neighbors)
         dLocal = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
-        dLocal2 = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatLocal`
     else:
         dhatLocal, dLocal = [], []
-    if settings.computeCentralizedEstimate:
-        dhatCentr = np.zeros((numFreqLines, numIterations, asc.numNodes), dtype=complex)   # using all observations (centralized processing)
+    if s.computeCentralizedEstimate:
+        dhatCentr = np.zeros((numFreqLines, numIter, asc.numNodes), dtype=complex)   # using all observations (centralized processing)
         dCentr = np.zeros((len(masterClock), asc.numNodes))  # time-domain version of `dhatCentr`
     else:
         dhatCentr, dCentr = [], []
@@ -373,87 +357,81 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
     # Booleans
     startUpdates = np.full(shape=(asc.numNodes,), fill_value=False)         # when True, perform DANSE updates every `nExpectedNewSamplesPerFrame` samples
     # --- SRO estimation ---
-    # Expected number of SRO estimate updates via DWACD during total signal length
-    nDWACDSROupdates = numIterations // settings.asynchronicity.dwacd.nFiltUpdatePerSeg
     # DANSE filter update indices corresponding to "Filter-shift" SRO estimate updates
-    cohDriftSROupdateIndices = np.arange(start=settings.asynchronicity.cohDriftMethod.startAfterNupdates +\
-                            settings.asynchronicity.cohDriftMethod.estEvery,
-                            stop=numIterations,
-                            step=settings.asynchronicity.cohDriftMethod.estEvery)
+    cohDriftSROupdateIndices = np.arange(start=s.asynchronicity.cohDriftMethod.startAfterNupdates +\
+                            s.asynchronicity.cohDriftMethod.estEvery,
+                            stop=numIter,
+                            step=s.asynchronicity.cohDriftMethod.estEvery)
     flagIterations = [[] for _ in range(asc.numNodes)]
     flagInstants = [[] for _ in range(asc.numNodes)]
     # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Arrays initialization ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
     # Prepare events to be considered in main `for`-loop
     eventsMatrix, fs = subs.get_events_matrix(timeInstants,
-                                            frameSize,
-                                            Ns,
-                                            settings.broadcastLength,
-                                            settings.broadcastDomain
+                                            s.DFTsize,
+                                            s.Ns,
+                                            s.broadcastLength,
+                                            s.broadcastDomain
                                             )
 
     # Extra variables TODO: -- to be treated and integrated more neatly
     SROresidualThroughTime = []
     SROestimateThroughTime = []
-    phaseShiftFactorThroughTime = np.zeros((numIterations))
+    phaseShiftFactorThroughTime = np.zeros((numIter))
     for k in range(asc.numNodes):
-        SROresidualThroughTime.append(np.zeros(numIterations))
-        SROestimateThroughTime.append(np.zeros(numIterations))
+        SROresidualThroughTime.append(np.zeros(numIter))
+        SROestimateThroughTime.append(np.zeros(numIter))
     tStartForMetrics = np.full(asc.numNodes, fill_value=None)  # start instant for the computation of speech enhancement metrics
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
     previousTDfilterUpdate = np.zeros(asc.numNodes)
 
-    tprint = -printingInterval      # printouts timing
-
-
-    # DEBUGGING VARIABLES
-    avgProdResidualsThroughTime = np.empty((0,))
+    tprint = -s.printouts.progressPrintingInterval      # printouts timing
 
     t0 = time.perf_counter()        # loop timing
     # Loop over time instants when one or more event(s) occur(s)
-    for idxInstant, events in enumerate(eventsMatrix):
+    for _, events in enumerate(eventsMatrix):
 
         # Parse event matrix (+ inform user)
-        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=settings.printouts.events_parser)
+        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=s.printouts.events_parser)
 
-        if t > tprint + printingInterval and settings.printouts.danseProgress:
-            print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100)}% done -----')
+        if t > tprint + s.printouts.progressPrintingInterval and s.printouts.danseProgress:
+            print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100, 2)}% done -----')
             tprint = t
 
         eventIndices = np.arange(len(eventTypes))
 
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with broadcasts first ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        for idxBroadcastEvent in eventIndices[[True if ii == 'broadcast' else False for ii in eventTypes]]:
+        for idxBroadcastEvent in eventIndices[[True if e == 'broadcast' else False for e in eventTypes]]:
 
             # Node index
-            k = int(nodesConcerned[idxBroadcastEvent])# Extract current local data chunk
+            k = int(nodesConcerned[idxBroadcastEvent])  # Extract current local data chunk
 
             yLocalForBC = subs.local_chunk_for_broadcast(yin[:, asc.sensorToNodeTags == k+1],
                                                         t,
                                                         fs[k],
-                                                        settings.broadcastDomain,
-                                                        frameSize, k, lk[k])
+                                                        s.broadcastDomain,
+                                                        s.DFTsize, k, lk[k])
 
             # Perform broadcast -- update all relevant buffers in network
             zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
                         t,
                         k,
                         fs[k],
-                        settings.broadcastLength,
+                        s.broadcastLength,
                         yLocalForBC,
                         wTildeExternal[k],
-                        frameSize,
+                        s.DFTsize,
                         neighbourNodes,
                         lk,
                         zBuffer,
-                        settings.broadcastDomain,
+                        s.broadcastDomain,
                         winWOLAanalysis,
                         winWOLAsynthesis,
-                        winShift=int(frameSize * (1 - settings.stftFrameOvlp)),
+                        winShift=s.Ns,
                         previousTDfilterUpdate=previousTDfilterUpdate[k],
-                        updateTDfilterEvery=settings.updateTDfilterEvery,
+                        updateTDfilterEvery=s.updateTDfilterEvery,
                         wIRprevious=wIR[k],
                         zTDpreviousFrame=zLocal[k],
                     )
@@ -462,7 +440,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 stop = 1
 
         # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Deal with updates next ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-        for idxUpdateEvent in eventIndices[[True if ii == 'update' else False for ii in eventTypes]]:
+        for idxUpdateEvent in eventIndices[[True if e == 'update' else False for e in eventTypes]]:
 
             # Node index
             k = int(nodesConcerned[idxUpdateEvent])
@@ -473,20 +451,20 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
             yLocalCurr, idxBegChunk, idxEndChunk = subs.local_chunk_for_update(yin[:, asc.sensorToNodeTags == k+1],
                                                         t,
                                                         fs[k],
-                                                        settings.broadcastDomain,
-                                                        frameSize,
-                                                        Ns,
-                                                        settings.broadcastLength)
+                                                        s.broadcastDomain,
+                                                        s.DFTsize,
+                                                        s.Ns,
+                                                        s.broadcastLength)
             
-            if settings.computeCentralizedEstimate:
+            if s.computeCentralizedEstimate:
                 # Extract current local data chunk
                 yCentrCurr, _, _ = subs.local_chunk_for_update(yin,
                                                             t,
                                                             fs[k],
-                                                            settings.broadcastDomain,
-                                                            frameSize,
-                                                            Ns,
-                                                            settings.broadcastLength)
+                                                            s.broadcastDomain,
+                                                            s.DFTsize,
+                                                            s.Ns,
+                                                            s.broadcastLength)
 
             # Compute VAD
             VADinFrame = oVAD[np.amax([idxBegChunk, 0]):idxEndChunk]
@@ -503,39 +481,41 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                                 z[k],
                                 neighbourNodes[k],
                                 i[k],
-                                frameSize,
-                                Ns=Ns,
-                                L=settings.broadcastLength,
-                                lastExpectedIter=numIterations - 1,
-                                broadcastDomain=settings.broadcastDomain)
+                                s.DFTsize,
+                                Ns=s.Ns,
+                                L=s.broadcastLength,
+                                lastExpectedIter=numIter - 1,
+                                broadcastDomain=s.broadcastDomain,
+                                t=t)
 
             # Wipe local buffers
             zBuffer[k] = [np.array([]) for _ in range(len(neighbourNodes[k]))]
 
-            if settings.broadcastDomain == 'wholeChunk_fd':
+            if s.broadcastDomain == 'wholeChunk_fd':
                 # Broadcasting done in frequency-domain
-                yLocalHatCurr = 1 / normFactWOLA * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                yLocalHatCurr = 1 / normFactWOLA * np.fft.fft(yLocalCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHat[k][:, i[k], :] = np.concatenate((yLocalHatCurr[:numFreqLines, :], 1 / normFactWOLA * z[k]), axis=1)
-            elif settings.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
+            elif s.broadcastDomain in ['wholeChunk_td', 'fewSamples_td']:
                 # Build full available observation vector
                 yTildeCurr = np.concatenate((yLocalCurr, z[k]), axis=1)
-                ytilde[k][:, i[k], :] = yTildeCurr
+                yTilde[k][:, i[k], :] = yTildeCurr
                 # Go to frequency domain
-                ytildeHatCurr = 1 / normFactWOLA * np.fft.fft(ytilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                ytildeHatCurr = 1 / normFactWOLA * np.fft.fft(yTilde[k][:, i[k], :] * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHat[k][:, i[k], :] = ytildeHatCurr[:numFreqLines, :]      # Keep only positive frequencies
 
             # Centralized estimate ↓
-            if settings.computeCentralizedEstimate:
-                if settings.broadcastDomain != 'wholeChunk_fd':
+            if s.computeCentralizedEstimate:
+                if s.broadcastDomain != 'wholeChunk_fd':
                     raise ValueError('NOT YET IMPLEMENTED FOR CENTRALIZED ESTIMATE')
-                ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], frameSize, axis=0)
+                yTildeCentr[k][:, i[k], :] = yCentrCurr
+                ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHatCentr[k][:, i[k], :] = ytildeHatCentrCurr[:numFreqLines, :]
 
             # Account for buffer flags
             extraPhaseShiftFactor = np.zeros(dimYTilde[k])
             for q in range(len(neighbourNodes[k])):
                 if not np.isnan(bufferFlags[k][i[k], q]):
-                    extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[k][i[k], q] * settings.broadcastLength
+                    extraPhaseShiftFactor[yLocalCurr.shape[-1] + q] = bufferFlags[k][i[k], q] * s.broadcastLength
                     # ↑↑↑ if `bufferFlags[k][i[k], q] == 0`, `extraPhaseShiftFactor = 0` and no additional phase shift is applied
                     if bufferFlags[k][i[k], q] != 0:
                         flagIterations[k].append(i[k])  # keep flagging iterations in memory
@@ -543,87 +523,91 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                 else:
                     # From `process_incoming_signals_buffers`: "Not enough samples anymore due to cumulated SROs effect, skip update"
                     skipUpdate = True
-            phaseShiftFactorsFlags[k] += extraPhaseShiftFactor
-            # Save uncompensated \tilde{y} (including FLAG compensation!) for coherence-drift-based SRO estimation
-            ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :] *\
-                np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactorsFlags[k])))
+            # Save uncompensated \tilde{y} for coherence-drift-based SRO estimation
+            ytildeHatUncomp[k][:, i[k], :] = copy.copy(ytildeHat[k][:, i[k], :])
             yyHuncomp[k][i[k], :, :, :] = np.einsum('ij,ik->ijk', ytildeHatUncomp[k][:, i[k], :], ytildeHatUncomp[k][:, i[k], :].conj())
             # Compensate SROs
-            if settings.asynchronicity.compensateSROs:
+            if s.asynchronicity.compensateSROs:
                 # Complete phase shift factors
                 phaseShiftFactors[k] += extraPhaseShiftFactor
-                # Save for plotting
-                if k == 0:
+                if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
                 # Apply phase shift factors
-                ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / frameSize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
+                ytildeHat[k][:, i[k], :] *= np.exp(-1 * 1j * 2 * np.pi / s.DFTsize * np.outer(np.arange(numFreqLines), phaseShiftFactors[k]))
 
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
-                                            Ryytilde[k], Rnntilde[k], settings.expAvgBeta, oVADframes[i[k]])
-            if settings.computeLocalEstimate:
+                                            Ryytilde[k], Rnntilde[k], s.expAvgBeta, oVADframes[i[k]])
+            if s.computeLocalEstimate:
                 # Local observations only
                 Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
-                                                Ryylocal[k], Rnnlocal[k], settings.expAvgBeta, oVADframes[i[k]])
-            if settings.computeCentralizedEstimate:
+                                                Ryylocal[k], Rnnlocal[k], s.expAvgBeta, oVADframes[i[k]])
+            if s.computeCentralizedEstimate:
                 # All observations
                 RyyCentr[k], RnnCentr[k], _ = subs.spatial_covariance_matrix_update(ytildeHatCentr[k][:, i[k], :],
-                                                RyyCentr[k], RnnCentr[k], settings.expAvgBeta, oVADframes[i[k]])
+                                                RyyCentr[k], RnnCentr[k], s.expAvgBeta, oVADframes[i[k]])
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑ Spatial covariance matrices updates ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
             
             # Check quality of autocorrelations estimates -- once we start updating, do not check anymore
             if not startUpdates[k] and numUpdatesRyy[k] > minNumAutocorrUpdates and numUpdatesRnn[k] > minNumAutocorrUpdates:
                 startUpdates[k] = True
 
-            if startUpdates[k] and not settings.bypassFilterUpdates and not skipUpdate:
+            if startUpdates[k] and not s.bypassFilterUpdates and not skipUpdate:
+                if k == s.referenceSensor and nInternalFilterUpdates[k] == 0:
+                    # Save first update instant (for, e.g., SRO plot)
+                    firstDANSEupdateRefSensor = t
                 # No `for`-loop versions 
-                if settings.performGEVD:    # GEVD update
-                    wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], settings.GEVDrank, settings.referenceSensor)
-                    if settings.computeLocalEstimate:
-                        wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], settings.GEVDrank, settings.referenceSensor)
-                    if settings.computeCentralizedEstimate:
-                        wCentr[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(RyyCentr[k], RnnCentr[k], settings.GEVDrank, settings.referenceSensor)
+                if s.performGEVD:    # GEVD update
+                    wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], s.GEVDrank, s.referenceSensor)
+                    if s.computeLocalEstimate:
+                        wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], s.GEVDrank, s.referenceSensor)
+                    if s.computeCentralizedEstimate:
+                        wCentr[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(RyyCentr[k], RnnCentr[k], s.GEVDrank, s.referenceSensor)
 
                 else:                       # regular update (no GEVD)
-                    wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], settings.referenceSensor)
-                    if settings.computeLocalEstimate:
-                        wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], settings.referenceSensor)
-                    if settings.computeCentralizedEstimate:
-                        wCentr[k][:, i[k] + 1, :] = subs.perform_update_noforloop(RyyCentr[k], RnnCentr[k], settings.referenceSensor)
+                    wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], s.referenceSensor)
+                    if s.computeLocalEstimate:
+                        wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], s.referenceSensor)
+                    if s.computeCentralizedEstimate:
+                        wCentr[k][:, i[k] + 1, :] = subs.perform_update_noforloop(RyyCentr[k], RnnCentr[k], s.referenceSensor)
                 # Count the number of internal filter updates
                 nInternalFilterUpdates[k] += 1  
 
-                if nInternalFilterUpdates[k] == settings.minFiltUpdatesForMetricsComputation:
-                    # Useful export for enhancement metrics computations
-                    tStartForMetrics[k] = t
+                # Useful export for enhancement metrics computations
+                if nInternalFilterUpdates[k] >= s.minFiltUpdatesForMetricsComputation and tStartForMetrics[k] is None:
+                    if s.asynchronicity.compensateSROs and s.asynchronicity.estimateSROs == 'CohDrift':
+                        # Make sure SRO compensation has started
+                        if nInternalFilterUpdates[k] > s.asynchronicity.cohDriftMethod.startAfterNupdates:
+                            tStartForMetrics[k] = t
+                    else:
+                        tStartForMetrics[k] = t
             else:
                 # Do not update the filter coefficients
                 wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
-                if settings.computeLocalEstimate:
+                if s.computeLocalEstimate:
                     wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
-                if settings.computeCentralizedEstimate:
+                if s.computeCentralizedEstimate:
                     wCentr[k][:, i[k] + 1, :] = wCentr[k][:, i[k], :]
                 if skipUpdate:
                     print(f'Node {k+1}: {i[k] + 1}^th update skipped.')
-            if settings.bypassFilterUpdates:
+            if s.bypassFilterUpdates:
                 print('!! User-forced bypass of filter coefficients updates !!')
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update external filters (for broadcasting)  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-            wTildeExternal[k] = settings.expAvgBeta * wTildeExternal[k] + (1 - settings.expAvgBeta) * wTildeExternalTarget[k]
+            wTildeExternal[k] = s.expAvgBeta * wTildeExternal[k] + (1 - s.expAvgBeta) * wTildeExternalTarget[k]
             # Update targets
-            if t - lastExternalFiltUpdateInstant[k] >= settings.timeBtwExternalFiltUpdates:
+            if t - lastExternalFiltUpdateInstant[k] >= s.timeBtwExternalFiltUpdates:
                 wTildeExternalTarget[k] = (1 - alphaExternalFilters) * wTildeExternalTarget[k] + alphaExternalFilters * wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
                 # Update last external filter update instant [s]
                 lastExternalFiltUpdateInstant[k] = t
-                if settings.printouts.externalFilterUpdates:    # inform user
-                    print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {settings.timeBtwExternalFiltUpdates}s)')
-            
-            # wTildeExternal[k] = wTilde[k][:, i[k] + 1, :yLocalCurr.shape[-1]]
+                if s.printouts.externalFilterUpdates:    # inform user
+                    print(f't={np.round(t, 3)}s -- UPDATING EXTERNAL FILTERS for node {k+1} (scheduled every [at least] {s.timeBtwExternalFiltUpdates}s)')
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update external filters (for broadcasting)  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓  Update SRO estimates  ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
-            sroOut, avgProdResiduals[k] = subs.update_sro_estimates(settings,
+            sroOut, avgProdResiduals[k] = subs.update_sro_estimates(
+                        s,  # settings
                         iter=i[k],
                         nLocalSensors=yLocalCurr.shape[-1],
                         cohDriftSROupdateIndices=cohDriftSROupdateIndices,
@@ -631,84 +615,113 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, settings: classes.Pro
                         yyH=yyH[k],
                         yyHuncomp=yyHuncomp[k],
                         avgProdRes=avgProdResiduals[k],
-                        oracleSRO=settings.asynchronicity.SROsppm[k])
+                        oracleSRO=s.asynchronicity.SROsppm[k],
+                        bufferFlagPos=np.sum(bufferFlags[k][:(i[k] + 1), :], axis=0)\
+                            * s.broadcastLength,
+                        bufferFlagPri=np.sum(bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :], axis=0)\
+                            * s.broadcastLength,
+                        )
 
-            if settings.asynchronicity.estimateSROs == 'CohDrift':
+            if s.asynchronicity.estimateSROs == 'CohDrift':
                 SROsResiduals[k] = sroOut
                 # Save through time (for plotting)
                 SROresidualThroughTime[k][i[k]:] = sroOut[0]
-            elif settings.asynchronicity.estimateSROs == 'Oracle':
+            elif s.asynchronicity.estimateSROs == 'Oracle':
                 SROsEstimates[k] = sroOut
             # ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  Update SRO estimates  ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
             # Update phase shifts for SRO compensation
-            if settings.asynchronicity.compensateSROs:
+            if s.asynchronicity.compensateSROs:
                 for q in range(len(neighbourNodes[k])):
-                    if settings.asynchronicity.estimateSROs == 'CohDrift':
-                        if settings.asynchronicity.cohDriftMethod.loop == 'closed':
+                    if s.asynchronicity.estimateSROs == 'CohDrift':
+                        if s.asynchronicity.cohDriftMethod.loop == 'closed':
                             # Increment estimate using SRO residual
                             SROsEstimates[k][q] += SROsResiduals[k][q] / (1 + SROsResiduals[k][q]) *\
-                                settings.asynchronicity.cohDriftMethod.alphaEps
-                        elif settings.asynchronicity.cohDriftMethod.loop == 'open':
+                                s.asynchronicity.cohDriftMethod.alphaEps
+                        elif s.asynchronicity.cohDriftMethod.loop == 'open':
                             # Use SRO "residual" as estimates
                             SROsEstimates[k][q] = SROsResiduals[k][q] / (1 + SROsResiduals[k][q])
                     # Save estimate evolution for later plotting
                     SROestimateThroughTime[k][i[k]:] = SROsEstimates[k][0]
                     # Increment phase shift factor recursively
-                    phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * Ns  # <-- valid directly for oracle SRO ``estimation''
+                    phaseShiftFactors[k][yLocalCurr.shape[-1] + q] -= SROsEstimates[k][q] * s.Ns  # <-- valid directly for oracle SRO ``estimation''
 
             # ----- Compute desired signal chunk estimate [DANSE, GLOBAL] -----
-            dhat[:, i[k], k], d[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+            dhat[:, i[k], k], tmp = subs.get_desired_signal(
                 wTilde[k][:, i[k] + 1, :],
                 ytildeHat[k][:, i[k], :],
                 winWOLAsynthesis,
                 d[idxBegChunk:idxEndChunk, k],
-                normFactWOLA
+                normFactWOLA,
+                winShift=s.Ns,
+                desSigEstChunkLength=s.Ns,
+                processingType=s.desSigProcessingType,
+                yTD=yTilde[k][:, i[k], :]
                 )
-            if settings.computeLocalEstimate:
+            if s.desSigProcessingType == 'wola':
+                d[idxBegChunk:idxEndChunk, k] = tmp
+            elif s.desSigProcessingType == 'conv':
+                d[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
+            if s.computeLocalEstimate:
                 # ----- Compute desired signal chunk estimate [LOCAL] -----
-                dhatLocal[:, i[k], k], dLocal[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+                dhatLocal[:, i[k], k], tmp = subs.get_desired_signal(
                     wLocal[k][:, i[k] + 1, :],
                     ytildeHat[k][:, i[k], :dimYLocal[k]],
                     winWOLAsynthesis,
                     dLocal[idxBegChunk:idxEndChunk, k],
-                    normFactWOLA
+                    normFactWOLA,
+                    winShift=s.Ns,
+                    desSigEstChunkLength=s.Ns,
+                    processingType=s.desSigProcessingType,
+                    yTD=yTilde[k][:, i[k], :dimYLocal[k]]
                     )
-            if settings.computeCentralizedEstimate:
+                if s.desSigProcessingType == 'wola':
+                    dLocal[idxBegChunk:idxEndChunk, k] = tmp
+                elif s.desSigProcessingType == 'conv':
+                    dLocal[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
+            if s.computeCentralizedEstimate:
                 # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
-                dhatCentr[:, i[k], k], dCentr[idxBegChunk:idxEndChunk, k] = subs.get_desired_signal(
+                dhatCentr[:, i[k], k], tmp = subs.get_desired_signal(
                     wCentr[k][:, i[k] + 1, :],
                     ytildeHatCentr[k][:, i[k], :],
                     winWOLAsynthesis,
                     dCentr[idxBegChunk:idxEndChunk, k],
-                    normFactWOLA
+                    normFactWOLA,
+                    winShift=s.Ns,
+                    desSigEstChunkLength=s.Ns,
+                    processingType=s.desSigProcessingType,
+                    yTD=yTildeCentr[k][:, i[k], :]
                     )
+                if s.desSigProcessingType == 'wola':
+                    dCentr[idxBegChunk:idxEndChunk, k] = tmp
+                elif s.desSigProcessingType == 'conv':
+                    dCentr[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
             
             # Increment DANSE iteration index
             i[k] += 1
 
     print('\nSimultaneous DANSE processing all done.')
     dur = time.perf_counter() - t0
-    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}s.')
+    print(f'{np.round(masterClock[-1], 2)}s of signal processed in {str(datetime.timedelta(seconds=dur))}.')
     print(f'(Real-time processing factor: {np.round(masterClock[-1] / dur, 4)})')
 
     # Prep SRO data for export
-    sroData = classes.SROdata(estMethod=settings.asynchronicity.estimateSROs,
-                            compensation=settings.asynchronicity.compensateSROs,
+    sroData = classes.SROdata(estMethod=s.asynchronicity.estimateSROs,
+                            compensation=s.asynchronicity.compensateSROs,
                             residuals=SROresidualThroughTime,
                             estimate=SROestimateThroughTime,
-                            groundTruth=settings.asynchronicity.SROsppm / 1e6,
+                            groundTruth=s.asynchronicity.SROsppm / 1e6,
                             flagIterations=flagIterations)
 
     # Profiling
     profiler.stop()
-    profiler.print()
+    if s.printouts.profiler:
+        profiler.print()
 
     # Debugging
-    fig = sroData.plotSROdata(xaxistype='time', fs=fs[0], Ns=Ns)
-    # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=Ns)
-    plt.show(block=False)
-
+    fig = sroData.plotSROdata(xaxistype='both', fs=fs[0], Ns=s.Ns, firstUp=firstDANSEupdateRefSensor)
+    # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=s.Ns)
+    # plt.show(block=False)
     stop = 1
 
-    return d, dLocal, sroData, tStartForMetrics
+    return d, dLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor

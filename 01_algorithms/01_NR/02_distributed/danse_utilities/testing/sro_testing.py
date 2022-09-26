@@ -2,18 +2,17 @@
 from dataclasses import dataclass, field
 import sys, time
 from pathlib import Path, PurePath
-
-from matplotlib.pyplot import plot
-
+import numpy as np
 import danse_main
 from itertools import combinations
-from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, DWACDParameters, CohDriftSROEstimationParameters
+from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, PrintoutsParameters
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
 while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 sys.path.append(f'{pathToRoot}/_general_fcts')
+import class_methods.dataclass_methods as met
 if not any("01_acoustic_scenes" in s for s in sys.path):
     # Find path to root folder
     rootFolder = 'sounds-phd'
@@ -26,6 +25,8 @@ from utilsASC.classes import AcousticScenario
 
 @dataclass
 class DanseTestingParameters():
+    writeOver: bool = False                         # if True, the DANSE testing script will write over existing data if filenames conflict
+    #
     ascBasePath: str = ''                   # Path to folder containing all acoustic scenarios to consider (only used if `specificAcousticScenario==''`).
     signalsPath: str = ''                   # Path to folder containing all sound fildes to include (only used if `specificDesiredSignalFiles==''` or `specificNoiseSignalFiles==''`).
     specificAcousticScenario: list[str] = field(default_factory=list)       # Path(s) to specific acoustic scenario(s). If not [''], `ascBasePath` is ignored.
@@ -38,11 +39,16 @@ class DanseTestingParameters():
     nodeUpdating: str = 'simultaneous'      # node-updating strategy
     broadcastLength: int = 8                # length of broadcast chunk [samples]
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
-    broadcastDomain: str = 't'              # inter-node data broadcasting domain: frequency 'f' or time 't' [default]
+    broadcastScheme: str = 'wholeChunk'     # inter-node data broadcasting domain:
+                                            # -- 'wholeChunk': broadcast whole chunks of compressed signals
+                                            # -- 'samplePerSample': linear-convolution approximation of WOLA compression process, broadcast 1 sample at a time.
     performGEVD : bool = True               # if True, perform GEVD, else, regular DANSE
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()
+    printouts: PrintoutsParameters = PrintoutsParameters()
+    #
+    computeLocalEstimate: bool = False      # if True, compute also node-specific local estimate of desired signal
 
     def __post_init__(self):
         # Check inputs variable type
@@ -52,6 +58,22 @@ class DanseTestingParameters():
             self.specificDesiredSignalFiles = [self.specificDesiredSignalFiles]
         if not isinstance(self.specificNoiseSignalFiles, list) and isinstance(self.specificNoiseSignalFiles, str):
             self.specificNoiseSignalFiles = [self.specificNoiseSignalFiles]
+        # Warnings
+        if self.writeOver:
+            inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
+            if not inp in ['y', 'Y']:
+                print('Setting `danseParams.writeOver` to False. Not overwriting.')
+                self.writeOver = False
+
+    def load(self, foldername: str, silent=False):
+        return met.load(self, foldername, silent)
+
+    def save(self, foldername: str):
+        # Save most important parameters as quickly-readable .txt file
+        met.save_as_txt(self, foldername)
+        # Save data as archive
+        met.save(self, foldername)
+
 
 
 def asc_path_selection(danseParams: DanseTestingParameters):
@@ -135,7 +157,21 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
     experiments = []
     for ii in range(len(acousticScenarios)):
         for jj in range(len(sros[ii])):
-            sets = ProgramSettings(
+
+            compSROs = danseParams.asynchronicity.compensateSROs
+            if all(v == 0 for v in sros[ii][jj]):  # <-- avoid automatic warning message at `ProgramSettings` object initialization
+                compSROs = False
+
+            # Interpret broadcast scheme entry
+            if danseParams.broadcastScheme == 'wholeChunk':
+                BCdomain = 'wholeChunk_td'
+                ps = ProgramSettings()
+                BClength = ps.DFTsize // 2
+            elif danseParams.broadcastScheme == 'samplePerSample':
+                BCdomain = 'fewSamples_td'
+                BClength = 1
+
+            settings = ProgramSettings(
                     samplingFrequency=danseParams.fs,
                     acousticScenarioPath=acousticScenarios[ii],
                     desiredSignalFile=speechFiles,
@@ -143,27 +179,32 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     #
                     signalDuration=danseParams.sigDur,
                     baseSNR=danseParams.baseSNR,
-                    plotAcousticScenario=False,
-                    VADwinLength=40e-3,
-                    VADenergyFactor=4000,
                     performGEVD=danseParams.performGEVD,
                     #
                     danseUpdating=danseParams.nodeUpdating,
-                    broadcastDomain=danseParams.broadcastDomain,
-                    broadcastLength=danseParams.broadcastLength,
-                    computeLocalEstimate=False,
+                    broadcastDomain=BCdomain,
+                    broadcastLength=BClength,
+                    computeLocalEstimate=danseParams.computeLocalEstimate,
                     timeBtwExternalFiltUpdates=danseParams.timeBtwExternalFiltUpdates,
                     expAvg50PercentTime=2.,
                     #
                     asynchronicity=SamplingRateOffsets(
                         SROsppm=sros[ii][jj],
-                        compensateSROs=danseParams.asynchronicity.compensateSROs,
+                        compensateSROs=compSROs,
                         estimateSROs=danseParams.asynchronicity.estimateSROs,
-                        plotResult=danseParams.asynchronicity.plotResult
+                        plotResult=danseParams.asynchronicity.plotResult,
+                        cohDriftMethod=danseParams.asynchronicity.cohDriftMethod,
                     ),
+                    printouts=danseParams.printouts,
                     )
+            # Build export file path
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
-            experiments.append(dict([('sets', sets), ('path', exportPath)]))
+            if (np.array(settings.asynchronicity.SROsppm) != 0).any():
+                if settings.asynchronicity.compensateSROs:
+                    exportPath += f'_comp{settings.asynchronicity.estimateSROs}'
+                else:
+                    exportPath += '_nocomp'
+            experiments.append(dict([('settings', settings), ('path', exportPath)]))
 
     return experiments
 
@@ -181,16 +222,17 @@ def go(danseParams: DanseTestingParameters, exportBasePath=''):
 
     # Build experiments list
     experiments = build_experiment_parameters(danseParams, exportBasePath)
-    print(f'Experiments parameters generated. Total: {len(experiments)} experiments.')
+    print(f'Experiments parameters generated. Total: {len(experiments)} experiments to be run.')
 
     for idxExp in range(len(experiments)):
         print(f'\nRunning experiment #{idxExp+1}/{len(experiments)}...\n')
         t0 = time.perf_counter()
 
-        if not Path(experiments[idxExp]['path']).is_dir():
-            danse_main.main(experiments[idxExp]['sets'], experiments[idxExp]['path'], showPlots=0, lightExport=True)
+        if not Path(experiments[idxExp]['path']).is_dir() or danseParams.writeOver:
+            danse_main.main(experiments[idxExp]['settings'], experiments[idxExp]['path'], showPlots=0, lightExport=True)
             print(f'\nExperiment #{idxExp+1}/{len(experiments)} ran in {round(time.perf_counter() - t0, 2)}s.\n')
         else:
+            # If export folder already existing...
             print(f'...NOT RUNNING "{Path(experiments[idxExp]["path"]).name}"...')
 
     return 0

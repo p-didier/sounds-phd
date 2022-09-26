@@ -26,28 +26,33 @@ from utilsASC.classes import AcousticScenario
 @dataclass
 class MiscellaneousData:
     metricsStartIdx: np.ndarray = np.array([])  # start indices for the computation of speech enhancement metrics
+    firstDANSEupRefSensor: int = 0
 
 @dataclass
 class SROdata:
-    estMethod : str         # SRO estimation method
-    compensation : bool     # if True, compensation was applied, else, not
-    residuals : np.ndarray  # SRO residuals through time
-    estimate : np.ndarray   # SRO estimates through time
+    estMethod : str = ''                        # SRO estimation method
+    compensation : bool = False                 # if True, compensation was applied, else, not
+    residuals : np.ndarray = np.array([])       # SRO residuals through time
+    estimate : np.ndarray = np.array([])        # SRO estimates through time
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
-    flagIterations: np.ndarray = np.array([])  # DANSE iteration indices where a SRO flag was raised
+    flagIterations: np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
 
-    def plotSROdata(self, xaxistype='iterations', fs=16000, Ns=512):
+    def plotSROdata(self, xaxistype='both', fs=16000, Ns=512, firstUp=0):
         """Show evolution of SRO estimates / residuals through time.
         
         Parameters
         ----------
         xaxistype : str
-            Type of x-axis ticks/label: "iterations" = DANSE iteration indices
+            Type of x-axis ticks/label:
+            "iterations" = DANSE iteration indices
             "time" = time instants [s]
+            "both" = both of the above
         fs : float or int
             Sampling frequency of the reference node [Hz].
         Ns : int
             Number of new samples per DANSE iteration. 
+        firstUp : float
+            Instant at which the first iteration of the reference node occurred [s].
 
         Returns
         -------
@@ -66,23 +71,30 @@ class SROdata:
             else:
                 ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
             ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
-                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dashed', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
         ylims = ax.get_ylim()
         for k in range(nNodes):
-            ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
-                        colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
+            if len(self.flagIterations[k]) > 0:
+                ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
+                            colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
         ax.grid()
         ax.set_ylabel('[ppm]')
-        ax.set_xlabel('DANSE iteration $i$ [-]')
+        ax.set_xlabel('DANSE iteration $i$', loc='left')
         ax.set_xlim([0, len(self.residuals[k])])
-        if xaxistype == 'time':
+        plt.legend(bbox_to_anchor=(1.05, 1.05))
+        if xaxistype == 'both':
+            ax2 = ax.twiny()
+            ax2.set_xlabel('DANSE iteration $i$', loc='left')
+            ax2.set_xticks(ax.get_xticks())
+        if xaxistype in ['time', 'both']:
             xticks = np.linspace(start=0, stop=len(self.residuals[0]), num=9)
             ax.set_xticks(xticks)
-            ax.set_xticklabels(np.round(xticks * Ns / fs, 1))
-            ax.set_xlabel('Time $t$ [s]')
-        plt.legend(bbox_to_anchor=(1.05, 1.05))
+            ax.set_xticklabels(np.round(xticks * Ns / fs + firstUp, 2))
+            ax.set_xlabel('Time at reference node [s]', loc='left')
         plt.title('SRO estimation through time')
         plt.tight_layout()
+
+        stop = 1
 
         return fig
 
@@ -91,7 +103,9 @@ class SROdata:
 class PrintoutsParameters:
     events_parser: bool = False             # controls printouts in `events_parser()` function
     danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
+    progressPrintingInterval: float = 2.    # time interval between DANSE progress printouts [s]
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
+    profiler: bool = False                  # controls profiler printout after DANSE run
 
 
 @dataclass
@@ -235,7 +249,7 @@ class SamplingRateOffsets():
 @dataclass
 class ProgramSettings(object):
     """Class for keeping track of global simulation settings"""
-    # Signal generation parameters
+    # Signal generation
     samplingFrequency: float = 16000.       # [samples/s] base sampling frequency
     acousticScenarioPath: str = ''          # path to acoustic scenario to be used
     signalDuration: float = 1               # [s] total signal duration
@@ -244,20 +258,18 @@ class ProgramSettings(object):
     baseSNR: int = 0                        # [dB] SNR between dry desired signals and dry noise
     selfnoiseSNR: int = -50                 # [dB] microphone self-noise SNR
     referenceSensor: int = 0                # Index of the reference sensor at each node
-    stftWinLength: int = 1024               # [samples] STFT frame length
-    stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
-    stftWin: np.ndarray = np.array([])      # STFT window
     wasnTopology: str = 'fully_connected'   # WASN topology (fully connected or ad hoc)
-    # VAD parameters
+    # VAD
     VADwinLength: float = 40e-3             # [s] VAD window length
     VADenergyFactor: float = 4000           # VAD energy factor (VAD threshold = max(energy signal)/VADenergyFactor)
-    # DANSE parameters
+    # DANSE
     danseUpdating: str = 'sequential'       # node-updating scheme: "sequential" or "simultaneous"
     timeBtwExternalFiltUpdates: float = 0   # [s] minimum time between 2 consecutive external filter update (i.e. filters that are used for broadcasting)
                                             #  ^---> If 0: equivalent to updating coefficients every `chunkSize * (1 - chunkOverlap)` new captured samples 
-    chunkSize: int = 1024                   # [samples] processing chunk size
-    chunkOverlap: float = 0.5               # amount of overlap between consecutive chunks; in [0,1) -- full overlap [=1] unauthorized.
-    danseWindow: np.ndarray = np.hanning(chunkSize)     # DANSE window for FFT/IFFT operations
+    DFTsize: int = 1024                     # DFT/FFT size
+    Ns: int = DFTsize // 2                  # window shift = number of new samples per chunk [samples] 
+    winOvlp: float = 1 - Ns / DFTsize       # window overlap [/100%]
+    danseWindow: np.ndarray = np.hanning(DFTsize)     # DANSE window for FFT/IFFT operations
     initialWeightsAmplitude: float = 1.     # maximum amplitude of initial random filter coefficients
     expAvg50PercentTime: float = 2.         # [s] Time in the past at which the value is weighted by 50% via exponential averaging
                                             # -- Used to compute beta in, e.g.: Ryy[l] = beta * Ryy[l - 1] + (1 - beta) * y[l] * y[l]^H
@@ -266,26 +278,33 @@ class ProgramSettings(object):
     computeLocalEstimate: bool = False      # if True, compute also an estimate of the desired signal using only local sensor observations
     computeCentralizedEstimate: bool = False      # if True, compute also an estimate of the desired signal using all sensor observations, as in centralized processing
     bypassFilterUpdates: bool = False       # if True, only update covariance matrices, do not update filter coefficients (no adaptive filtering)
-    # Inter-node broadcasting parameters
+    # Inter-node broadcasting
     broadcastDomain: str = 'wholeChunk_fd'  # inter-node data broadcasting domain:
                                             # -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
                                             # -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
                                             # -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
     broadcastLength: int = 8                # [samples] number of (compressed) signal samples to be broadcasted at a time to other nodes
     updateTDfilterEvery : float = 1.        # [s] duration of pause between two consecutive time-domain filter updates.
-    # Speech enhancement metrics parameters
+    # Desired signal estimation
+    desSigProcessingType: str = 'wola'      # processing scheme used to compute the desired signal estimates:
+                                            # "wola": WOLA synthesis,
+                                            # "conv": linear convolution via T(z)-approximation.
+    # Speech enhancement metrics
     minFiltUpdatesForMetricsComputation: int = 15   # minimum number of DANSE filter updates that must have been performed
                                                     # at the starting sample of the signal chunk used for computating the metrics
     gammafwSNRseg: float = 0.2              # gamma exponent for fwSNRseg computation
     frameLenfwSNRseg: float = 0.03          # [s] time window duration for fwSNRseg computation
     dynamicMetricsParams: evenh.DynamicMetricsParameters = evenh.DynamicMetricsParameters()   # dynamic objective speech enhancement metrics computation parameters
-    # Asynchronicity (SRO/STO) parameters
+    # Asynchronicity (SRO/STO)
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()   # all-things SROs/STOs
-    # Other parameters
+    # Other
     plotAcousticScenario: bool = False      # if true, plot visualization of acoustic scenario. 
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
     randSeed: int = 12345                   # random generator(s) seed
     printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
+    stftWinLength: int = 1024               # [samples] STFT frame length
+    stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
+    stftWin: np.ndarray = np.array([])      # STFT window
 
     def __post_init__(self) -> None:
         # Base attribute checks
@@ -308,11 +327,8 @@ class ProgramSettings(object):
         # Check for frequency-domain broadcasting option
         if 'wholeChunk' in self.broadcastDomain:
             if self.broadcastLength != self.stftWinLength / 2:
-                val = input(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Change to Ns (error otherwise)? [y]/n  ')
-                if val in ['y', 'Y']:
-                    self.broadcastLength = int(self.stftWinLength / 2)
-                else:
-                    raise ValueError(f'When broadcasting in the freq.-domain, L must be equal to Ns.')
+                print(f'Whole-chunk broadcasting only allows L=Ns. Current value of L: {self.broadcastLength}. Changing to Ns (error otherwise).')
+                self.broadcastLength = int(self.stftWinLength / 2)
         if self.broadcastDomain not in ['wholeChunk_td', 'wholeChunk_fd', 'fewSamples_td']:
             raise ValueError(f'The broadcasting domain must be "wholeChunk_fd", "wholeChunk_td", or "fewSamples_td" (current value: "{self.broadcastDomain}").')
         # Adapt formats
@@ -334,17 +350,17 @@ class ProgramSettings(object):
         if len(self.stftWin) != self.stftWinLength:
             print(f'!! The specified STFT window length does not match the actual window. Setting `stftWin` as a Hann window of length {self.stftWinLength}.')
             self.stftWin = np.hanning(self.stftWinLength)
-        if len(self.danseWindow) != self.chunkSize:
-            print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.chunkSize}.')
-            self.danseWindow = np.hanning(self.chunkSize)
+        if len(self.danseWindow) != self.DFTsize:
+            print(f'!! The specified DANSE chunk size does not match the window length. Setting `danseWindow` as a Hann window of length {self.DFTsize}.')
+            self.danseWindow = np.hanning(self.DFTsize)
         # Check lengths consistency
         if self.broadcastLength > self.stftEffectiveFrameLen:
             raise ValueError(f'Broadcast length ({self.broadcastLength}) is too large for STFT frame size {self.stftWinLength} and {int(self.stftFrameOvlp * 100)}% overlap.')
         if self.stftEffectiveFrameLen % self.broadcastLength != 0:
             raise ValueError(f'The broadcast length L should be a divisor of the effective STFT length Ns\n(currently: Ns/L={self.stftEffectiveFrameLen}/{self.broadcastLength}={self.stftEffectiveFrameLen / self.broadcastLength}!=1)') 
         # Check that chunk overlap makes sense
-        if self.chunkOverlap >= 1:
-            raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.chunkOverlap}).')
+        if self.winOvlp >= 1:
+            raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.Ns}).')
 
         return self
 
@@ -379,8 +395,6 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
         return met.load(self, filename, silent)
 
     def save(self, filename: str):
-        # Save most important parameters as quickly-readable .txt file
-        met.save_as_txt(self, filename)
         # Save data as archive
         met.save(self, filename)
 
@@ -418,23 +432,23 @@ def sto_sro_formatting(arg):
 @dataclass
 class EnhancementMeasures:
     """Class for storing speech enhancement metrics values"""
-    snr: dict         # Unweighted SNR
-    fwSNRseg: dict    # Frequency-weighted segmental SNR
-    stoi: dict        # Short-Time Objective Intelligibility
-    pesq: dict        # Perceptual Evaluation of Speech Quality
+    snr: dict = field(default_factory=dict)         # Unweighted SNR
+    fwSNRseg: dict = field(default_factory=dict)    # Frequency-weighted segmental SNR
+    stoi: dict = field(default_factory=dict)        # Short-Time Objective Intelligibility
+    pesq: dict = field(default_factory=dict)        # Perceptual Evaluation of Speech Quality
 
 @dataclass
 class Signals(object):
     """Class to store data output by the signal generation routine"""
-    dryNoiseSources: np.ndarray                         # Dry noise source signals
-    drySpeechSources: np.ndarray                        # Dry desired (speech) source signals
-    wetIndivNoiseSources: np.ndarray                    # Wet (convolved with RIRs) noise source signals, per indiv. noise source
-    wetIndivSpeechSources: np.ndarray                   # Wet (convolved with RIRs) desired source signals, per indiv. desired source
-    wetNoise: np.ndarray                                # Wet (convolved with RIRs) noise source signals, all sources mixed
-    wetSpeech: np.ndarray                               # Wet (convolved with RIRs) desired source signals, all sources mixed
-    sensorSignals: np.ndarray                           # Sensor signals (all sources + RIRs)
-    VAD: np.ndarray                                     # Voice Activity Detector (1 = voice presence; 0 = noise only)
-    sensorToNodeTags: np.ndarray                        # Tags relating each sensor to its node
+    dryNoiseSources: np.ndarray = np.array([])          # Dry noise source signals
+    drySpeechSources: np.ndarray = np.array([])         # Dry desired (speech) source signals
+    wetIndivNoiseSources: np.ndarray = np.array([])     # Wet (convolved with RIRs) noise source signals, per indiv. noise source
+    wetIndivSpeechSources: np.ndarray = np.array([])    # Wet (convolved with RIRs) desired source signals, per indiv. desired source
+    wetNoise: np.ndarray = np.array([])                 # Wet (convolved with RIRs) noise source signals, all sources mixed
+    wetSpeech: np.ndarray = np.array([])                # Wet (convolved with RIRs) desired source signals, all sources mixed
+    sensorSignals: np.ndarray = np.array([])            # Sensor signals (all sources + RIRs)
+    VAD: np.ndarray = np.array([])                      # Voice Activity Detector (1 = voice presence; 0 = noise only)
+    sensorToNodeTags: np.ndarray = np.array([0])        # Tags relating each sensor to its node
     desiredSigEst: np.ndarray = np.array([])            # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors)
     desiredSigEstLocal: np.ndarray = np.array([])       # Desired signal(s) estimates for each node, in time-domain -- using only local observations (not data coming from neighbors)
     desiredSigEstCentralized: np.ndarray = np.array([]) # Desired signal(s) estimates for each node, in time-domain -- using all observations (centralized processing)
@@ -691,14 +705,14 @@ class Signals(object):
         # Best node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 21))
         stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBest)), [climLow, climHigh])
-        vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
+        vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs[bestNodeIdx], self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Best: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
         # Worst node
         ax = fig.add_subplot(int(nSubplotsRows * 100 + 22))
         colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorst)), [climLow, climHigh])
-        vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
+        vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs[worstNodeIdx], self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
         ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
         plt.title(f'Worst: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].after, 2)})')
         plt.xlabel('$t$ [s]')
@@ -706,14 +720,14 @@ class Signals(object):
         if plotLocalEstimate:
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 23))
             stft_subplot(ax, self.timeFrames, self.freqBins[:, bestNodeSensorIdx], 20*np.log10(np.abs(dataBestLocal)), [climLow, climHigh])
-            vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs, self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
+            vert_bar_start_idx(ax, startIdx[bestNodeIdx], self.fs[bestNodeIdx], self.timeFrames, self.freqBins[:, bestNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {bestNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{bestNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
             # Worst node
             ax = fig.add_subplot(int(nSubplotsRows * 100 + 24))
             colorb = stft_subplot(ax, self.timeFrames, self.freqBins[:, worstNodeSensorIdx], 20*np.log10(np.abs(dataWorstLocal)), [climLow, climHigh])
-            vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs, self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
+            vert_bar_start_idx(ax, startIdx[worstNodeIdx], self.fs[worstNodeIdx], self.timeFrames, self.freqBins[:, worstNodeSensorIdx])
             ax.set_ylim([ylimLow / 1e3, ylimHigh / 1e3])
             plt.title(f'Local estimate: Node {worstNodeIdx + 1} (eSTOI = {np.round(perf.stoi[f"Node{worstNodeIdx + 1}"].afterLocal, 2)})')
             plt.xlabel('$t$ [s]')
@@ -803,11 +817,11 @@ def normalize_toint16(nparray):
 @dataclass
 class Results(object):
     """Class for storing simulation results"""
-    signals: Signals = field(init=False)                       # all signals involved in run
-    enhancementEval: EnhancementMeasures = field(init=False)   # speech enhancement evaluation metrics
-    acousticScenario: AcousticScenario = field(init=False)     # acoustic scenario considered
-    sroData: SROdata = field(init=False)                       # SRO estimation data
-    other: MiscellaneousData = field(init=False)               # other data
+    signals: Signals = Signals()                                    # all signals involved in run
+    enhancementEval: EnhancementMeasures = EnhancementMeasures()    # speech enhancement evaluation metrics
+    acousticScenario: AcousticScenario = AcousticScenario()         # acoustic scenario considered
+    sroData: SROdata = SROdata()                                    # SRO estimation data
+    other: MiscellaneousData = MiscellaneousData()                  # other data
 
     def load(self, foldername: str, silent=False):
         return met.load(self, foldername, silent)
@@ -1021,8 +1035,8 @@ def vert_bar_start_idx(ax, startIdx, fs, tFrames, yRange):
     """Helper function for <Signals.plot_signals()>."""
 
     startT = startIdx / fs
-    possibleFrameIndices = [t > startT for t in tFrames]
-    ax.vlines(x=possibleFrameIndices[-1],
+    possibleFrameIndices = [t for t in tFrames if t > startT]
+    ax.vlines(x=possibleFrameIndices[1],
                 ymin=np.amin(yRange),
                 ymax=np.amax(yRange),
                 linestyles='dashed')

@@ -4,6 +4,7 @@ import scipy.signal
 from pathlib import Path
 from sklearn import preprocessing
 import scipy.io.wavfile
+import soundfile as sf
 # Custom imports
 sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\MWFpack')))
 from sig_gen import load_speech
@@ -91,7 +92,8 @@ def generate_babble(bp=BabbleParams):
             mybabble += babbler
 
     # Normalize
-    mybabble = preprocessing.scale(mybabble)   # normalize
+    # mybabble = preprocessing.scale(mybabble)  # normalize
+    mybabble = mybabble / np.amax(np.abs(mybabble)) * 0.95  # normalize
 
     if 0:
         playthis(mybabble, Fs)
@@ -101,8 +103,8 @@ def generate_babble(bp=BabbleParams):
 
 def main():
     # Parameters
-    T = 15                  # Signal duration [s]
-    Ntalkers = 50           # Number of talkers in babble
+    T = 4                  # Signal duration [s]
+    Ntalkers = 20           # Number of talkers in babble
     dataBase = 'libri'      # Reference for database where to fetch dry speech signals 
     room = 'random'         # Reference for type of room to use to generate RIRs 
                             #   -- if == 'random': generates a randomized shoebox-room within the volume bounds <Vbounds>
@@ -112,7 +114,7 @@ def main():
     T60 = 0                 # Reverberation time in room [s]
     # Export
     exportflag = True       # Only exports signal as .wav if <exportflag>.
-    exportfolder = '%s\\02_data\\02_signals\\02_noise\\babble' % os.getcwd()
+    exportfolder = '%s\\02_data\\00_raw_signals\\02_noise\\babble' % os.getcwd()
     exportfname = 'babble1'
 
     # Generate babble object
@@ -127,7 +129,7 @@ def main():
             exportfname = exportfname[:-4]
         if not os.path.isdir(exportfolder):
             os.mkdir(exportfolder)
-        scipy.io.wavfile.write('%s\\%s.wav' % (exportfolder,exportfname),Fs,mybabble)
+        sf.write('%s\\%s.wav' % (exportfolder,exportfname), mybabble, Fs)
 
     return 0
 
