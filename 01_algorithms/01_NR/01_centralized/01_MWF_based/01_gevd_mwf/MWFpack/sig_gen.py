@@ -186,7 +186,7 @@ def load_AS(fname, path_to, plot_AS=None, plot_AS_dir=''):
     return h_sn,h_nn,rs,r,rn,rd,alpha,Fs,nNodes,d_intersensor,reftxt
 
 
-def load_speech(fname, datasetsPath='C:\\Users\\u0137935\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals'):
+def load_speech(fname, datasetsPath='C:\\Users\\pdidier\\Dropbox\\BELGIUM\\KU Leuven\\SOUNDS_PhD\\02_research\\03_simulations\\99_datasets\\01_signals'):
     # load_speech -- Loads a speech signal from database (or path) <d>.d
 
     if type(fname) == list:
