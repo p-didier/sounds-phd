@@ -1,4 +1,4 @@
-import sys
+import sys, copy
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 import numpy as np
@@ -12,12 +12,11 @@ if not any("_general_fcts" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/_general_fcts')
 import class_methods.dataclass_methods as met
 from plotting.twodim import plot_side_room
-from plotting.threedim import plot_room
 
 @dataclass
 class PlottingOptions:
     nodeCircleRadius: float = None      # radius of circle to be plotted around each node (if None, compute radius dependent on nodes coordinates)
-    nodesColors: str = 'green'          # color used for each node. If "multi", use a different color for each node
+    nodesColors: str = 'multi'          # color used for each node. If "multi", use a different color for each node
     plot3D: bool = False
 
 @dataclass
@@ -76,9 +75,18 @@ class AcousticScenario:
     def load(self, foldername: str):
         return met.load(self, foldername)
     def save(self, filename: str):
-        met.save(self, filename)
+        met.save(self, filename, exportType='pkl')
 
-    def plot(self, options: PlottingOptions):
+    def plot(self, options: PlottingOptions = PlottingOptions()):
+
+        # Determine appropriate node radius for ASC subplots
+        nodeRadius = 0
+        for k in range(self.numNodes):
+            allIndices = np.arange(self.numSensors)
+            sensorIndices = allIndices[self.sensorToNodeTags == k + 1]
+            curr = np.amax(self.sensorCoords[sensorIndices, :] - np.mean(self.sensorCoords[sensorIndices, :], axis=0))
+            if curr > nodeRadius:
+                nodeRadius = copy.copy(curr)
 
         # Detect noiseless scenarios
         noiselessFlag = self.rirNoiseToSensors.shape[-1] == 0
@@ -90,7 +98,8 @@ class AcousticScenario:
                     self.sensorCoords[:, [0,1]],
                     self.sensorToNodeTags,
                     dotted=self.absCoeff==1,
-                    options=options)
+                    options=options,
+                    nodeRadius=nodeRadius)
         a0[0].set(xlabel='$x$ [m]', ylabel='$y$ [m]', title='Top view')
         #
         plot_side_room(a0[1], self.roomDimensions[1:], 
@@ -99,7 +108,9 @@ class AcousticScenario:
                     self.sensorCoords[:, [1,2]],
                     self.sensorToNodeTags,
                     dotted=self.absCoeff==1,
-                    options=options)
+                    options=options,
+                    showLegend=False,
+                    nodeRadius=nodeRadius)
         a0[1].set(xlabel='$y$ [m]', ylabel='$z$ [m]', title='Side view')
             
         # Add distance info
@@ -179,7 +190,7 @@ class ASCProgramSettings:
     def load(self, filename: str, silent=False):
         return met.load(self, filename, silent)
     def save(self, filename: str):
-        met.save(self, filename)
+        met.save(self, filename, exportType='pkl')
     
     def __post_init__(self):
         """Initial program settings checks"""

@@ -251,7 +251,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
             if currSTOI <= minSTOI:
                 worstNode, minSTOI = idxNode, currSTOI
 
-        print(f'Best node (STOI = {round(maxSTOI, 2)})')
+        print(f'Best node (eSTOI = {round(maxSTOI, 2)})')
         stoiImpLocalVsGlobal = None
         if settings.computeLocalEstimate:
             stoiBest = results.enhancementEval.stoi[f'Node{bestNode + 1}']
@@ -261,7 +261,7 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
         if showPlots:
             plt.draw()
     
-        print(f'Worst node (STOI = {round(minSTOI, 2)})')
+        print(f'Worst node (eSTOI = {round(minSTOI, 2)})')
         stoiImpLocalVsGlobal = None
         if settings.computeLocalEstimate:
             stoiBest = results.enhancementEval.stoi[f'Node{worstNode + 1}']

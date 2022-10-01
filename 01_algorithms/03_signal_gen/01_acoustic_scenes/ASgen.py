@@ -24,7 +24,7 @@ from utilsASC.classes import *
 
 # Define settings
 sets = ASCProgramSettings(
-    numScenarios=1,                   # Number of AS to generate
+    numScenarios=10,                   # Number of AS to generate
     samplingFrequency=16e3,           # Sampling frequency [samples/s]
     rirLength=2**12,                  # RIR length [samples]
     roomDimBounds=[5,5],              # [Smallest, largest] room dimension possible [m]
@@ -34,7 +34,7 @@ sets = ASCProgramSettings(
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=2,                # nr. of noise sources
     numNodes=4,                       # nr. of nodes
-    numSensorPerNode=[6,3,8,3],               # nr. of sensor per node,
+    numSensorPerNode=[1,3,2,5],               # nr. of sensor per node,
     # numSensorPerNode=[3,3],               # nr. of sensor per node,
     # numSensorPerNode=[1,1],               # nr. of sensor per node,
     # numSensorPerNode=[1,2,3],               # nr. of sensor per node,
@@ -47,12 +47,12 @@ sets = ASCProgramSettings(
     # specialCase='allNodesInSamePosition'    # special cases
 )
 
-basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/tests'
+basepath = f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023'
 # customASCname = 'testforTIDANSE'
 customASCname = None
 plotit = 1  
 exportit = 1    # If True, export the ASC, settings, and figures.
-globalSeed = 12345
+globalSeed = int("".join([str(integer) for integer in sets.numSensorPerNode]))  # use number of sensors per node to create seed [python: https://www.adamsmith.haus/python/answers/how-to-convert-a-list-of-integers-into-a-single-integer-in-python]
 
 def main(sets, basepath, globalSeed, plotit=True, exportit=True):
     """Main wrapper for acoustic scenarios generation.
@@ -118,26 +118,9 @@ def main(sets, basepath, globalSeed, plotit=True, exportit=True):
         # Plot
         if plotit:
             # Determine appropriate node radius
-            for k in range(asc.numNodes):
-                allIndices = np.arange(asc.numSensors)
-                sensorIndices = allIndices[asc.sensorToNodeTags == k + 1]
-                nodeRadius = np.amax(asc.sensorCoords[sensorIndices, :] - np.mean(asc.sensorCoords[sensorIndices, :], axis=0))
             fig = asc.plot(options=PlottingOptions(
-                nodeCircleRadius=nodeRadius,
                 nodesColors='multi'
             ))
-            
-
-            # fig = plt.figure(figsize=(8,6), constrained_layout=True)
-            # ax = fig.add_subplot(111, projection='3d')
-            # plot_room(ax, asc.roomDimensions)
-            # for k in range(asc.numNodes):
-            #     allIndices = np.arange(asc.numSensors)
-            #     sensorIndices = allIndices[asc.sensorToNodeTags == k + 1]
-            #     ax.scatter(asc.sensorCoords[sensorIndices, 0], asc.sensorCoords[sensorIndices, 1], asc.sensorCoords[sensorIndices, 2],
-            #         s=20,c=f'C{k}')
-            
-
             # plt.show()
             if exportit:
                 fig.savefig(f'{foldername}/schematic.pdf')

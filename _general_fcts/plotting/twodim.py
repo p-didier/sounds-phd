@@ -40,7 +40,7 @@ def plotSTFT(data):
     
 
 def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
-                    options, scatsize=20, dotted=False):
+                    options, scatsize=20, dotted=False, showLegend=True, nodeRadius=None):
     """Plots a 2-D room side, showing the positions of
     sources and nodes inside of it.
     Parameters
@@ -88,8 +88,8 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
             else:
                 ax.scatter(r[idxSensor,0], r[idxSensor,1], s=scatsize,c=options.nodesColors,edgecolors='black',marker='o')
         # Draw circle around node
-        if options.nodeCircleRadius is not None:
-            radius = options.nodeCircleRadius
+        if nodeRadius is not None:
+            radius = nodeRadius
         else:
             radius = np.amax(r[sensorIndices, :] - np.mean(r[sensorIndices, :], axis=0))
         if options.nodesColors == 'multi':
@@ -105,5 +105,9 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
         ax.add_patch(circ)
     ax.grid()
     ax.axis('equal')
-    ax.legend(circHandles, leg, loc='lower right')
+    if showLegend and options.nodesColors == 'multi':
+        nc = 1  # number of columbs in legend object
+        if len(circHandles) >= 4:
+            nc = 2
+        ax.legend(circHandles, leg, loc='lower right', ncol=nc, mode='expand')
     return None

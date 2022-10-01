@@ -2,9 +2,10 @@
 from dataclasses import dataclass, field
 import sys, time
 from pathlib import Path, PurePath
+from typing import Union
 import numpy as np
 import danse_main
-from itertools import combinations
+import itertools
 from danse_utilities.classes import ProgramSettings, SamplingRateOffsets, PrintoutsParameters
 # Find path to root folder
 rootFolder = 'sounds-phd'
@@ -22,6 +23,15 @@ if not any("01_acoustic_scenes" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes')
 from utilsASC.classes import AcousticScenario
 # ------------------------
+
+@dataclass
+class TestSROs():
+    type : str = 'list'     # type of SROs distribution to use.
+                            # - 'list': pick specific SRO value from a given list (`listedSROs` field)
+                            # - 'g': pick from a Gaussian distribution dictated by the `gaussianParams` field
+    listedSROs : list[float] = field(default_factory=list)
+    gaussianParams : list[float] = field(default_factory=list)  # Gaussian distribution parameters (only used if `type == 'g'`)
+                                                                # - elements: [mean SRO, standard deviation]
 
 @dataclass
 class DanseTestingParameters():
@@ -45,6 +55,7 @@ class DanseTestingParameters():
     performGEVD : bool = True               # if True, perform GEVD, else, regular DANSE
     #
     possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
+    SROdistribution: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()
     printouts: PrintoutsParameters = PrintoutsParameters()
     #
@@ -58,6 +69,9 @@ class DanseTestingParameters():
             self.specificDesiredSignalFiles = [self.specificDesiredSignalFiles]
         if not isinstance(self.specificNoiseSignalFiles, list) and isinstance(self.specificNoiseSignalFiles, str):
             self.specificNoiseSignalFiles = [self.specificNoiseSignalFiles]
+        # Ensure that SRO = 0 ppm is an option
+        if 0 not in self.possibleSROs:
+            self.possibleSROs = [0] + self.possibleSROs
         # Warnings
         if self.writeOver:
             inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
@@ -150,7 +164,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
         asc = AcousticScenario().load(acousticScenarios[ii])
         # include all possible unique combinations of SRO values, given the number of nodes in the acoustic scenario
         # --> always including an SRO of 0 ppm (reference clock) at node 1.
-        srosCurr = [list((0,) + i) for i in combinations(danseParams.possibleSROs, asc.numNodes - 1)]
+        srosCurr = [list((0,) + p) for p in itertools.product(danseParams.possibleSROs, repeat=asc.numNodes - 1)]
         sros.append(srosCurr)   
 
     # Build experiments list

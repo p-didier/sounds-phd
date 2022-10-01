@@ -15,28 +15,30 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 
 # ------------------------------- PARAMETERS ----------------------------------
 # Path where to export all test results (each experiment will be a subfolder of `exportBasePath`)
-exportBasePath = f'{Path(__file__).parent}/res/testing_SROs/automated/20220822_SROestComp_wFlags'
+exportBasePath = f'{Path(__file__).parent}/res/for_submissions/icassp2023'
 
 # Build testing parameters object
 danseTestingParams = sro_testing.DanseTestingParameters(
     # General hyperparameters
-    writeOver=True,    # if True, the script will write over existing data if filenames conflict
+    writeOver=True,    # if True, the script will overwrite existing data when filenames conflict
     #
     ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic'],  # overrides use of `danseTestingParams.ascBasePath`
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[6_3_8_3]_Ns1_Nn2/AS1_RT150ms'],  # overrides use of `danseTestingParams.ascBasePath`
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[1_3_2_3]_Ns1_Nn2/AS1_RT150ms'],  # overrides use of `danseTestingParams.ascBasePath`
+    # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic'],  # overrides use of `danseTestingParams.ascBasePath`
     #
-    fs=8000,
-    # fs=16000,
+    # fs=8000,
+    fs=16000,
     specificDesiredSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    sigDur=15,
+    sigDur=10,
     baseSNR=5,
     #
     # possibleSROs=[int(ii) for ii in np.linspace(10, 100, num=10)],
     # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
-    possibleSROs=[100],
+    # possibleSROs=[100],
     #
     timeBtwExternalFiltUpdates=3.,
     #
