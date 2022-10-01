@@ -2,7 +2,6 @@
 from dataclasses import dataclass, field
 import sys, time
 from pathlib import Path, PurePath
-from typing import Union
 import numpy as np
 import danse_main
 import itertools
@@ -32,6 +31,8 @@ class TestSROs():
     listedSROs : list[float] = field(default_factory=list)
     gaussianParams : list[float] = field(default_factory=list)  # Gaussian distribution parameters (only used if `type == 'g'`)
                                                                 # - elements: [mean SRO, standard deviation]
+    numGaussianDraws : int = 1  # number of Gaussian distribution draws to be done (i.e., number of SRO scenarios to consider)
+    gaussianSeed : int = 12345        # seed for random draws
 
 @dataclass
 class DanseTestingParameters():
@@ -54,8 +55,7 @@ class DanseTestingParameters():
                                             # -- 'samplePerSample': linear-convolution approximation of WOLA compression process, broadcast 1 sample at a time.
     performGEVD : bool = True               # if True, perform GEVD, else, regular DANSE
     #
-    possibleSROs: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
-    SROdistribution: list[float] = field(default_factory=list)     # Possible SRO values [ppm]
+    SROsParams : TestSROs = TestSROs()      # SRO-specific parameters (see "TestSROs" dataclass for details)
     asynchronicity: SamplingRateOffsets = SamplingRateOffsets()
     printouts: PrintoutsParameters = PrintoutsParameters()
     #
@@ -69,10 +69,11 @@ class DanseTestingParameters():
             self.specificDesiredSignalFiles = [self.specificDesiredSignalFiles]
         if not isinstance(self.specificNoiseSignalFiles, list) and isinstance(self.specificNoiseSignalFiles, str):
             self.specificNoiseSignalFiles = [self.specificNoiseSignalFiles]
-        # Ensure that SRO = 0 ppm is an option
-        if 0 not in self.possibleSROs:
-            self.possibleSROs = [0] + self.possibleSROs
-        # Warnings
+        # # Ensure that SRO = 0 ppm is an option
+        # if self.SROsParams.type == 'list':
+        #     if 0 not in self.SROsParams.listedSROs:
+        #         self.SROsParams.listedSROs = [0] + self.SROsParams.listedSROs
+        # # Warnings
         if self.writeOver:
             inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
             if not inp in ['y', 'Y']:
@@ -162,10 +163,29 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
     sros = []
     for ii in range(len(acousticScenarios)):
         asc = AcousticScenario().load(acousticScenarios[ii])
-        # include all possible unique combinations of SRO values, given the number of nodes in the acoustic scenario
-        # --> always including an SRO of 0 ppm (reference clock) at node 1.
-        srosCurr = [list((0,) + p) for p in itertools.product(danseParams.possibleSROs, repeat=asc.numNodes - 1)]
-        sros.append(srosCurr)   
+        
+        if danseParams.SROsParams.type == 'list':
+            # include all possible unique combinations of SRO values, given the number of nodes in the acoustic scenario
+            # --> always including an SRO of 0 ppm (reference clock) at node 1.
+            srosCurr = [list((0,) + p) for p in itertools.product(danseParams.SROsParams.listedSROs,\
+                repeat=asc.numNodes - 1)]
+        elif danseParams.SROsParams.type == 'g':
+            # draw SROs scenarios from a normal distribution
+            srosCurr = []
+            # create random generator
+            rng = np.random.default_rng(danseParams.SROsParams.gaussianSeed)
+            for _ in range(danseParams.SROsParams.numGaussianDraws):
+                draw = np.round(rng.normal(
+                    loc=danseParams.SROsParams.gaussianParams[0],       # mean
+                    scale=danseParams.SROsParams.gaussianParams[1],     # standard dev.
+                    size=(asc.numNodes - 1,)
+                    ))
+                # Turn into ints
+                draw = np.array([int(ii) for ii in draw])
+                signedDraw = rng.choice([-1,1], size=(asc.numNodes - 1,)) * draw
+                srosCurr.append([0] + list(signedDraw))
+        sros.append(srosCurr)
+
 
     # Build experiments list
     experiments = []

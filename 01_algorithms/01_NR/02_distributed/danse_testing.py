@@ -1,11 +1,14 @@
 """Main script for testing implementations of DANSE algorithm."""
 
+from random import gauss
 import sys
 
 from danse_utilities.testing import sro_testing
 from danse_utilities.classes import SamplingRateOffsets, CohDriftSROEstimationParameters, PrintoutsParameters
 from pathlib import Path, PurePath
 import numpy as np
+
+from testing.sro_testing import TestSROs
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -26,7 +29,7 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     signalsPath=f'{Path(__file__).parent}/validations/signals',
     #
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[6_3_8_3]_Ns1_Nn2/AS1_RT150ms'],  # overrides use of `danseTestingParams.ascBasePath`
-    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[1_3_2_3]_Ns1_Nn2/AS1_RT150ms'],  # overrides use of `danseTestingParams.ascBasePath`
+    specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[1_3_2_5]_Ns1_Nn2/AS2_RT150ms'],  # overrides use of `danseTestingParams.ascBasePath`
     # specificAcousticScenario=[f'{pathToRoot}/02_data/01_acoustic_scenarios/for_submissions/icassp2023/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic'],  # overrides use of `danseTestingParams.ascBasePath`
     #
     # fs=8000,
@@ -39,6 +42,15 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # possibleSROs=[int(ii) for ii in np.linspace(10, 100, num=10)],
     # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
     # possibleSROs=[100],
+    SROsParams=TestSROs(
+        # type='g',   # 'list' pick from list | 'g' pick from normal dist.
+        type='list',   # 'list' pick from list | 'g' pick from normal dist.
+        listedSROs=[100],
+        gaussianParams=[7.5, 2],    # <-- [7.5, 2]: "small SROs" case
+        # gaussianParams = [75, 20],  # <-- [75, 20]: "medium SROs" case
+        # gaussianParams = [275, 50], # <-- [275, 50]: "large SROs" case
+        numGaussianDraws=10  # number of SRO scenarios to consider
+    ),
     #
     timeBtwExternalFiltUpdates=3.,
     #
