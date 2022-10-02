@@ -35,8 +35,9 @@ class SROdata:
     residuals : np.ndarray = np.array([])       # SRO residuals through time
     estimate : np.ndarray = np.array([])        # SRO estimates through time
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
-    flagIterations: np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
-
+    flagIterations : np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
+    neighbourIndex : np.ndarray = np.array([])  # index of neighbour node corresponding to `residuals` and `estimate`
+    
     def plotSROdata(self, xaxistype='both', fs=16000, Ns=512, firstUp=0):
         """Show evolution of SRO estimates / residuals through time.
         
@@ -66,22 +67,47 @@ class SROdata:
         ax = fig.add_subplot(111)
         for k in range(nNodes):
             if self.compensation:
-                ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
-                ax.plot(self.estimate[k] * 1e6, f'C{k}--', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
+                if k == 0:
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
+                    ax.plot(self.estimate[k] * 1e6, f'C{k}--', label=f'$\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
+                else:  # adapt labels for condensed legend
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'Node {k+1}')
+                    ax.plot(self.estimate[k] * 1e6, f'C{k}--')
             else:
-                ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q_{{k,1}})$')
-            ax.hlines(y=(self.groundTruth[(k+1) % nNodes] - self.groundTruth[k]) * 1e6,
-                        xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q_{{k,1}})$')
+                if k == 0:
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
+                else:  # adapt labels for condensed legend
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'Node {k+1}')
+            # Always showing ground truths with respect to 1st neighbour:
+            # - For node k==0: 1st neighbour is k==1
+            # - For any other node: 1st neighbour is k==0
+            if k == 0:
+                ax.hlines(y=(self.groundTruth[self.neighbourIndex[k]] - self.groundTruth[k]) * 1e6,
+                            xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q={self.neighbourIndex[k]})$')
+            else:  # adapt labels for condensed legend
+                
+                ax.hlines(y=(self.groundTruth[self.neighbourIndex[k]] - self.groundTruth[k]) * 1e6,
+                            xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted')
         ylims = ax.get_ylim()
+
         for k in range(nNodes):
             if len(self.flagIterations[k]) > 0:
-                ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
-                            colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
+                if k == 0:
+                    ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
+                                colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
+                else:
+                    ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
+                                colors=f'C{k}', linestyles='dashdot')
         ax.grid()
         ax.set_ylabel('[ppm]')
         ax.set_xlabel('DANSE iteration $i$', loc='left')
         ax.set_xlim([0, len(self.residuals[k])])
-        plt.legend(bbox_to_anchor=(1.05, 1.05))
+        handles, labels = plt.gca().get_legend_handles_labels()
+        if len(self.flagIterations[0]) > 0:  # if there were flags, change legend handles order counting the flags-handle in
+            order = [0,1] + list(np.arange(nNodes+1, nNodes+3)) + list(np.arange(2, nNodes+1))
+        else:  # otherwise, do not count the flags-handle in, because it has not been generated
+            order = [0,1] + list(np.arange(nNodes, nNodes+2)) + list(np.arange(2, nNodes))
+        plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], bbox_to_anchor=(1.05, 1.05))
         if xaxistype == 'both':
             ax2 = ax.twiny()
             ax2.set_xlabel('DANSE iteration $i$', loc='left')
