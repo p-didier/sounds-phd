@@ -1,13 +1,14 @@
 from copy import copy
 import pickle, gzip
 from pathlib import Path
-from dataclasses import fields
+from dataclasses import fields, replace, make_dataclass
 from pathlib import PurePath
 import json, os
 import dataclass_wizard as dcw
+import numpy as np
 
 
-def save(self, foldername: str, exportType='json'):
+def save(self, foldername: str, exportType='pkl'):
     """
     Saves program settings so they can be loaded again later
     
@@ -37,7 +38,7 @@ def save(self, foldername: str, exportType='json'):
     print(f'<{type(self).__name__}> object data exported to directory\n".../{shortPath}".')
 
 
-def load(self, foldername: str, silent=False, dataType='json'):
+def load(self, foldername: str, silent=False, dataType='pkl'):
     """
     Loads program settings object from file
 
@@ -112,6 +113,13 @@ def save_to_json(mycls, filename):
         filename = filename_alone + '.json'
         print(f'Filename modified to "{filename}".')
 
+    # Convert arrays to lists before export
+    for field in fields(mycls):
+        if field.type is np.ndarray:
+            newVal = field.default.tolist() + ['!!NPARRAY']  # include a flag to re-conversion to np.ndarray when reading the JSON file
+            para = {field.name: newVal}
+            mycls = replace(mycls, **para)
+
     jsondict = dcw.asdict(mycls)  # https://stackoverflow.com/a/69059343
 
     with open(filename, 'w') as file_json:
@@ -131,9 +139,22 @@ def load_from_json(path_to_json_file, mycls):
 
     with open(path_to_json_file) as fp:
         d = json.load(fp)
-    mycls_out = dcw.fromdict(type(mycls), d)
-    return mycls_out
 
+    # Create surrogate class
+    c = make_dataclass('MySurrogate', [(key, type(d[key])) for key in d])
+    # Fill it in with dict entries <-- TODO -- probably simpler to directly fill in `mycls_out` from `d`
+    mycls_surrog = dcw.fromdict(c, d)
+
+    # Fill in a new correct instance of the desired dataclass
+    mycls_out = copy.copy(mycls)
+    for field in fields(mycls_surrog):
+        a = getattr(mycls_surrog, field.name)
+        if field.type is list:
+            if a[-1] == '!!NPARRAY':
+                a = np.array(a[:-1])
+        setattr(mycls_out, field.name, a)
+
+    return mycls_out
 
 def shorten_path(file_path, length=3):
     """Splits `file_path` into separate parts, select the last 
