@@ -88,12 +88,14 @@ def resample_for_sro(x, baseFs, SROppm):
         xResamp = xResamp[:len(x)]
         t = t[:len(x)]
     else:
-        # Append zeros
-        xResamp = np.concatenate((xResamp, np.zeros(len(x) - len(xResamp))))
         # Extend time stamps vector
         dt = t[1] - t[0]
         tadd = np.linspace(t[-1]+dt, t[-1]+dt*(len(x) - len(xResamp)), len(x) - len(xResamp))
         t = np.concatenate((t, tadd))
+        if len(t) < len(x):
+            stop = 1
+        # Append zeros
+        xResamp = np.concatenate((xResamp, np.zeros(len(x) - len(xResamp))))
 
     return xResamp, t, fsSRO
 

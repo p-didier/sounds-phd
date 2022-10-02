@@ -36,25 +36,25 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     fs=16000,
     specificDesiredSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     specificNoiseSignalFiles=[f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
-    sigDur=10,
+    sigDur=15,
     baseSNR=5,
     #
     # possibleSROs=[int(ii) for ii in np.linspace(10, 100, num=10)],
     # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
     # possibleSROs=[100],
     SROsParams=TestSROs(
-        # type='g',   # 'list' pick from list | 'g' pick from normal dist.
-        type='list',   # 'list' pick from list | 'g' pick from normal dist.
-        listedSROs=[100],
-        gaussianParams=[7.5, 2],    # <-- [7.5, 2]: "small SROs" case
-        # gaussianParams = [75, 20],  # <-- [75, 20]: "medium SROs" case
-        # gaussianParams = [275, 50], # <-- [275, 50]: "large SROs" case
-        numGaussianDraws=10  # number of SRO scenarios to consider
+        type='g',           # 'list' pick from list | 'g' pick from normal dist.
+        # type='list',      # 'list' pick from list | 'g' pick from normal dist.
+        # listedSROs=[100],
+        # gaussianParams=[7.5, 2],    # <-- [7.5, 2]: "small SROs" case
+        gaussianParams=[75, 20],  # <-- [75, 20]: "medium SROs" case
+        # gaussianParams=[275, 50], # <-- [275, 50]: "large SROs" case
+        numGaussianDraws=1  # number of SRO scenarios to consider
     ),
     #
     timeBtwExternalFiltUpdates=3.,
     #
-    # broadcastScheme='samplePerSample',
+    broadcastScheme='samplePerSample',
     # broadcastScheme='wholeChunk',
     performGEVD=1,
     #

@@ -711,7 +711,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                             residuals=SROresidualThroughTime,
                             estimate=SROestimateThroughTime,
                             groundTruth=s.asynchronicity.SROsppm / 1e6,
-                            flagIterations=flagIterations)
+                            flagIterations=flagIterations,
+                            neighbourIndex=np.array([n[0] for n in neighbourNodes]))
 
     # Profiling
     profiler.stop()

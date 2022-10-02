@@ -68,22 +68,22 @@ class SROdata:
         for k in range(nNodes):
             if self.compensation:
                 if k == 0:
-                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\Delta\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
-                    ax.plot(self.estimate[k] * 1e6, f'C{k}--', label=f'$\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\Delta\\hat{{\\varepsilon}}_{{{k+1}{self.neighbourIndex[k]+1}}}$')
+                    ax.plot(self.estimate[k] * 1e6, f'C{k}--', label=f'$\\hat{{\\varepsilon}}_{{{k+1}{self.neighbourIndex[k]+1}}}$')
                 else:  # adapt labels for condensed legend
                     ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'Node {k+1}')
                     ax.plot(self.estimate[k] * 1e6, f'C{k}--')
             else:
                 if k == 0:
-                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}(k={k+1},q={self.neighbourIndex[k]})$')
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$\\hat{{\\varepsilon}}_{{{k+1}{self.neighbourIndex[k]+1}}}$')
                 else:  # adapt labels for condensed legend
-                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'Node {k+1}')
+                    ax.plot(self.residuals[k] * 1e6, f'C{k}-', label=f'$(k,q)=({k+1},{self.neighbourIndex[k]+1})$')
             # Always showing ground truths with respect to 1st neighbour:
             # - For node k==0: 1st neighbour is k==1
             # - For any other node: 1st neighbour is k==0
             if k == 0:
                 ax.hlines(y=(self.groundTruth[self.neighbourIndex[k]] - self.groundTruth[k]) * 1e6,
-                            xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon(k={k+1},q={self.neighbourIndex[k]})$')
+                            xmin=0, xmax=len(self.residuals[0]), colors=f'C{k}', linestyles='dotted', label=f'$\\varepsilon_{{{k+1}{self.neighbourIndex[k]+1}}}$')
             else:  # adapt labels for condensed legend
                 
                 ax.hlines(y=(self.groundTruth[self.neighbourIndex[k]] - self.groundTruth[k]) * 1e6,
@@ -94,7 +94,7 @@ class SROdata:
             if len(self.flagIterations[k]) > 0:
                 if k == 0:
                     ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
-                                colors=f'C{k}', linestyles='dashdot', label=f'Flags $k={k+1}$')
+                                colors=f'C{k}', linestyles='dashdot', label=f'Flags {k+1}--{self.neighbourIndex[k]+1}')
                 else:
                     ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
                                 colors=f'C{k}', linestyles='dashdot')

@@ -37,7 +37,7 @@ signalsPath = f'{pathToRoot}/02_data/00_raw_signals'
 # Set experiment settings
 mySettings = ProgramSettings(
     samplingFrequency=8000,
-    acousticScenarioPath=f'{ascBasePath}/tests/J2Mk[1_1]_Ns1_Nn1/AS2_anechoic',
+    acousticScenarioPath=f'{ascBasePath}/tests/J3Mk[2_3_1]_Ns1_Nn1/AS1_anechoic',
     desiredSignalFile=[f'{signalsPath}/01_speech/{file}' for file in ['speech1.wav', 'speech2.wav']],
     # desiredSignalFile=['C:/Users/pdidier/Dropbox/BELGIUM/KU Leuven/SOUNDS_PhD/02_research/99_useful/sound_files/fur_elise_wPauses.wav'],
     noiseSignalFile=[f'{signalsPath}/02_noise/{file}' for file in ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']],
@@ -65,7 +65,7 @@ mySettings = ProgramSettings(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         # SROsppm=0,
         # SROsppm=[0, 10],
-        SROsppm=[0, 50],
+        SROsppm=[0, 50, -75],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error

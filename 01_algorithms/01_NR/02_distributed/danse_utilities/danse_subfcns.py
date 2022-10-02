@@ -556,7 +556,7 @@ def danse_compression_few_samples(yq, wqqHat, n, L, wIRprevious,
         # idDesired = np.arange(start=len(wIR) - L, stop=len(wIR))   # indices required from convolution output
         idDesired = np.arange(start=len(wIR) - L + 1, stop=len(wIR) + 1)   # indices required from convolution output
         
-        tmp = extract_few_samples_from_convolution(idDesired, wIR, yq[:, idxSensor])
+        tmp = extract_few_samples_from_convolution(idDesired, wIR[:, idxSensor], yq[:, idxSensor])
         yfiltLastSamples[:, idxSensor] = tmp
 
     zq = np.sum(yfiltLastSamples, axis=1)
