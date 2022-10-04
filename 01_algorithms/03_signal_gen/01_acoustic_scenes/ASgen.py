@@ -30,7 +30,8 @@ sets = ASCProgramSettings(
     roomDimBounds=[5,5],              # [Smallest, largest] room dimension possible [m]
     # roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
     minDistFromWalls = 0.25,
-    maxDistFromNoise = 1.5,           # maximum distance between nodes and noise source (only if `numNoiseSources==1`)
+    minDistBwNodes = 1,               # minimum distance between nodes [m]
+    maxDistFromNoise = 1.5,           # maximum distance between nodes and noise source [m] (only if `numNoiseSources==1`)
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=2,                # nr. of noise sources
     numNodes=4,                       # nr. of nodes
@@ -175,20 +176,24 @@ def genAS(sets: ASCProgramSettings):
         nodesCoords = np.repeat(nodesCoords, sets.numNodes, axis=0)
         sets.sensorSeparation = 0.0
     else:
+        nodesCoords = np.zeros((sets.numNodes, 3))
         if sets.numNoiseSources == 1:
             # Consider maximum distance from noise source
-            # boxForNodes = noiseSourceCoords - 2 * sets.maxDistFromNoise
-            # boxForNodes[boxForNodes < sets.minDistFromWalls] = sets.minDistFromWalls
-            # boxForNodes[boxForNodes > roomDimensions - sets.minDistFromWalls] = roomDimensions[boxForNodes > roomDimensions - sets.minDistFromWalls] - sets.minDistFromWalls
-            # nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), boxForNodes) + noiseSourceCoords
-            nodesCoords = np.zeros((sets.numNodes, 3))
             for ii in range(sets.numNodes):
                 distToNoiseSource = np.inf
                 while distToNoiseSource > sets.maxDistFromNoise:
                     nodesCoords[ii, :] = np.multiply(rng.uniform(0, 1, (1, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
                     distToNoiseSource = np.sqrt(np.sum((nodesCoords[ii, :] - noiseSourceCoords) ** 2))
         else:
-            nodesCoords = np.multiply(rng.uniform(0, 1, (sets.numNodes, 3)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+            # Consider minimum distance between nodes
+            for ii in range(sets.numNodes):
+                curr = np.multiply(rng.uniform(0, 1, (3,)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+                if ii > 0:
+                    dists = np.array([np.sqrt(np.sum((nodesCoords[jj, :] - curr) ** 2)) for jj in range(ii)])
+                    while any(dists < sets.minDistBwNodes):
+                        curr = np.multiply(rng.uniform(0, 1, (3,)), roomDimensions - 2 * sets.minDistFromWalls) + sets.minDistFromWalls
+                        dists = np.array([np.sqrt(np.sum((nodesCoords[jj, :] - curr) ** 2)) for jj in range(ii)])
+                nodesCoords[ii, :] = curr
     
     # Generate sensor arrays
     totalNumSensors = np.sum(sets.numSensorPerNode, dtype=int)

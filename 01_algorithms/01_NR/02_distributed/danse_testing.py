@@ -20,7 +20,7 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 # Path where to export all test results (each experiment will be a subfolder of `exportBasePath`)
 exportBasePath = f'{Path(__file__).parent}/res/for_submissions/icassp2023'
 
-# Build testing parameters object
+# Build testing pa rameters object
 danseTestingParams = sro_testing.DanseTestingParameters(
     # General hyperparameters
     writeOver=True,    # if True, the script will overwrite existing data when filenames conflict
@@ -43,27 +43,32 @@ danseTestingParams = sro_testing.DanseTestingParameters(
     # possibleSROs=[int(ii) for ii in np.linspace(0, 100, num=11)],
     # possibleSROs=[100],
     SROsParams=TestSROs(
-        type='g',           # 'list' pick from list | 'g' pick from normal dist.
+        # type='g',           # 'list' pick from list | 'g' pick from normal dist.
         # type='list',      # 'list' pick from list | 'g' pick from normal dist.
-        # listedSROs=[100],
-        # gaussianParams=[7.5, 2],    # <-- [7.5, 2]: "small SROs" case
-        gaussianParams=[75, 20],  # <-- [75, 20]: "medium SROs" case
+        type='specific',      # 'list' pick from list | 'g' pick from normal dist.
+        # listedSROs=[0, 20, -20, 50],    # small SROs, single run
+        listedSROs=[0, 0, 0, 0],    # small SROs, single run
+        # listedSROs=[0, 50, -50, 100],   # medium SROs, single run
+        # listedSROs=[0, 200, -200, 400], # large SROs, single run
+        gaussianParams=[7.5, 2],    # <-- [7.5, 2]: "small SROs" case
+        # gaussianParams=[75, 20],  # <-- [75, 20]: "medium SROs" case
         # gaussianParams=[275, 50], # <-- [275, 50]: "large SROs" case
-        numGaussianDraws=1  # number of SRO scenarios to consider
+        numGaussianDraws=10  # number of SRO scenarios to consider
     ),
     #
     timeBtwExternalFiltUpdates=3.,
     #
-    broadcastScheme='samplePerSample',
-    # broadcastScheme='wholeChunk',
+    # broadcastScheme='samplePerSample',
+    broadcastScheme='wholeChunk',
     performGEVD=1,
     #
     computeLocalEstimate=True,
+    computeCentrEstimate=True,
     #
     asynchronicity=SamplingRateOffsets(
         plotResult=True,
-        compensateSROs=True,
-        # compensateSROs=False,
+        # compensateSROs=True,
+        compensateSROs=False,
         estimateSROs='CohDrift',
         # estimateSROs='Oracle',
         cohDriftMethod=CohDriftSROEstimationParameters(

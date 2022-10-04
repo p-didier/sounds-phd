@@ -28,6 +28,7 @@ class TestSROs():
     type : str = 'list'     # type of SROs distribution to use.
                             # - 'list': pick specific SRO value from a given list (`listedSROs` field)
                             # - 'g': pick from a Gaussian distribution dictated by the `gaussianParams` field
+                            # - 'specific': a single, specific set of SROs from `listedSROs`
     listedSROs : list[float] = field(default_factory=list)
     gaussianParams : list[float] = field(default_factory=list)  # Gaussian distribution parameters (only used if `type == 'g'`)
                                                                 # - elements: [mean SRO, standard deviation]
@@ -60,6 +61,7 @@ class DanseTestingParameters():
     printouts: PrintoutsParameters = PrintoutsParameters()
     #
     computeLocalEstimate: bool = False      # if True, compute also node-specific local estimate of desired signal
+    computeCentrEstimate: bool = False      # if True, compute also centralised estimate of desired signal
 
     def __post_init__(self):
         # Check inputs variable type
@@ -184,6 +186,8 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                 draw = np.array([int(ii) for ii in draw])
                 signedDraw = rng.choice([-1,1], size=(asc.numNodes - 1,)) * draw
                 srosCurr.append([0] + list(signedDraw))
+        elif danseParams.SROsParams.type == 'specific':
+            srosCurr = [danseParams.SROsParams.listedSROs]
         sros.append(srosCurr)
 
 
@@ -219,6 +223,7 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
                     broadcastDomain=BCdomain,
                     broadcastLength=BClength,
                     computeLocalEstimate=danseParams.computeLocalEstimate,
+                    computeCentralizedEstimate=danseParams.computeCentrEstimate,
                     timeBtwExternalFiltUpdates=danseParams.timeBtwExternalFiltUpdates,
                     expAvg50PercentTime=2.,
                     #

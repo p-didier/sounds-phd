@@ -103,11 +103,18 @@ class SROdata:
         ax.set_xlabel('DANSE iteration $i$', loc='left')
         ax.set_xlim([0, len(self.residuals[k])])
         handles, labels = plt.gca().get_legend_handles_labels()
-        if len(self.flagIterations[0]) > 0:  # if there were flags, change legend handles order counting the flags-handle in
+
+        # Adapt legend handles/labels order
+        if not self.compensation and len(self.flagIterations[0]) > 0:
+            order = [0] + list(np.arange(nNodes, nNodes+2)) + list(np.arange(1, nNodes))
+        elif not self.compensation:
+            order = [0] + list(np.arange(nNodes-1, nNodes+1)) + list(np.arange(1, nNodes-1))
+        elif len(self.flagIterations[0]) > 0:  # if there were flags, change legend handles order counting the flags-handle in
             order = [0,1] + list(np.arange(nNodes+1, nNodes+3)) + list(np.arange(2, nNodes+1))
         else:  # otherwise, do not count the flags-handle in, because it has not been generated
             order = [0,1] + list(np.arange(nNodes, nNodes+2)) + list(np.arange(2, nNodes))
-        plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], bbox_to_anchor=(1.05, 1.05))
+
+        plt.legend([handles[idx] for idx in order], [labels[idx] for idx in order], bbox_to_anchor=(1.05, 1.05))
         if xaxistype == 'both':
             ax2 = ax.twiny()
             ax2.set_xlabel('DANSE iteration $i$', loc='left')
@@ -126,8 +133,14 @@ class SROdata:
 
 
 @dataclass
+class EfficiencyParameters:
+    efficientSpSBC : bool = True    # if True, perform efficient sample-per-sample broadcast
+                                    # by adapting the DANSE-events creation mechanism.
+
+@dataclass
 class PrintoutsParameters:
     events_parser: bool = False             # controls printouts in `events_parser()` function
+    events_parser_noBC: bool = False        # if True, do not print out the broadcast events in the event parser
     danseProgress: bool = True              # controls printouts during DANSE processing (indicating loop process in %)
     progressPrintingInterval: float = 2.    # time interval between DANSE progress printouts [s]
     externalFilterUpdates: bool = False     # controls printouts at DANSE external filter updates (for broadcasting)
@@ -328,6 +341,7 @@ class ProgramSettings(object):
     acScenarioPlotExportPath: str = ''      # path to directory where to export the acoustic scenario plot
     randSeed: int = 12345                   # random generator(s) seed
     printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
+    efficiency: EfficiencyParameters = EfficiencyParameters() # boolean parameters for computational efficiency
     stftWinLength: int = 1024               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
     stftWin: np.ndarray = np.array([])      # STFT window
@@ -387,6 +401,9 @@ class ProgramSettings(object):
         # Check that chunk overlap makes sense
         if self.winOvlp >= 1:
             raise ValueError(f'The processing time chunk overlap cannot be equal to or greater than 1 (current value: {self.Ns}).')
+        # Printout stuff
+        if self.efficiency.efficientSpSBC and self.printouts.events_parser:
+            self.printouts.events_parser_noBC = True  # do not print broadcast evenst in efficient sample-per-sample BC case
 
         return self
 
@@ -850,7 +867,8 @@ class Results(object):
     other: MiscellaneousData = MiscellaneousData()                  # other data
 
     def load(self, foldername: str, silent=False):
-        return met.load(self, foldername, silent)
+        a: Results = met.load(self, foldername, silent)
+        return a
 
     def __repr__(self):
         string = f'<Results> object:'

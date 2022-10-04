@@ -51,7 +51,7 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal,\
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, mySignals.desiredSigEstCentralized,\
         sroData, tStartForMetrics, firstDANSEupdateRefSensor = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
@@ -124,7 +124,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
             localSig = []
         # Adapt centralized signal estimate input value to `get_metrics()` function
         if settings.computeCentralizedEstimate:
-            centralizedSig = sigs.desiredSigEstCentralized[startIdx:, idxNode]
+            centralizedSig = sigs.desiredSigEstCentralized[startIdx[idxNode]:, idxNode]
         else:
             centralizedSig = []
         
@@ -290,7 +290,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor = danse_scripts.danse_simultaneous(
+        desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor = danse_scripts.danse_simultaneous(
             y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
@@ -298,9 +298,9 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     # Discard pre-DANSE added samples (for Fourier transform processing, see first section of this function)
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
-    # desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
+    desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor
+    return desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor
 
 
 def whiten(sig, vad=[]):

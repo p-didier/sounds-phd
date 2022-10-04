@@ -2,8 +2,6 @@
 import os
 import sys
 from turtle import color
-from matplotlib import lines
-import matplotlib
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
@@ -29,7 +27,6 @@ class PostProcParams:
                                 # - 'group_per_node_vertical': same as previous, but vertical orientation
     savefigure : bool = False   # if True, export figure as PNG and PDF format
     savePath : str = ''         # path to folder where to save file (only used if `savefigure == True`)
-    includeCentralisedPerf : bool = False   # if True, include the centralised performance inside the graph
 
 # Set post-processing parameters
 myParams = PostProcParams(
@@ -37,19 +34,12 @@ myParams = PostProcParams(
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savefigure=True,
-    savePath=Path(__file__).parent.parent,
-    includeCentralisedPerf=True
+    savePath=Path(__file__).parent.parent
 )
 
 def main():
     
     res = run(myParams)
-
-    rc = {"font.family" : "serif", 
-        "mathtext.fontset" : "stix"}
-    plt.rcParams.update(rc)
-    plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
-    plt.rcParams.update({'font.size': 12})
 
     fig = plot(res, myParams.plottype)
 
@@ -64,20 +54,15 @@ def run(params: PostProcParams):
 
     # Fetch data
     dirs = os.listdir(params.pathToResults)
-    if params.includeCentralisedPerf:
-        # Check whether there is a centralised estimate folder
-        if 'centralised' not in dirs:
-            print('Not centralised data found. Not plotting it.')
-            centralisedDir = None
-        else:
-            centralisedDir = f'{params.pathToResults}/centralised'
-    dirs = [ii for ii in dirs if ii != 'centralised']  # do not include the centralised estimation yet
+    # Find number of subdirs
+    subdirs = os.listdir(f'{params.pathToResults}/{dirs[0]}/comp')
+    nRuns = len(subdirs)
 
     # Get number of nodes
     nNodes = int(Path(params.pathToResults).stem[1])
 
     # Results arrays dimensions [type of SROs, comp/nocomp, acoustic scenario, nodes]
-    dims = (len(dirs), 2, nNodes)
+    dims = (len(dirs), 2, nRuns, nNodes)
     # Initialize arrays
     stoi = np.zeros(dims)
     stoiLocal = np.zeros(dims)
@@ -93,47 +78,29 @@ def run(params: PostProcParams):
     for ii in range(len(dirs)):
         subdirs = os.listdir(f'{params.pathToResults}/{dirs[ii]}')
         for jj in range(len(subdirs)):
+            subsubdirs = os.listdir(f'{params.pathToResults}/{dirs[ii]}/{subdirs[jj]}')
+            for kk in range(len(subsubdirs)):
+                currDirPath = f'{params.pathToResults}/{dirs[ii]}/{subdirs[jj]}/{subsubdirs[kk]}'
 
-            if 'nocomp' in subdirs[jj]:
-                idx = 0
-            else:
-                idx = 1
-            
-            currDirPath = f'{params.pathToResults}/{dirs[ii]}/{subdirs[jj]}'
+                r = Results()
+                r = r.load(currDirPath)
 
-            r = Results()
-            r = r.load(currDirPath)
-
-            # Get useful values
-            for nn in range(nNodes):
-                stoi[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].after
-                stoiLocal[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].afterLocal
-                stoiOriginal[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].before
-                snr[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].after
-                snrLocal[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].afterLocal
-                snrOriginal[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].before
-                fwSNRseg[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
-                fwSNRsegLocal[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterLocal
-                fwSNRsegOriginal[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].before
-
-    # Get centralised data (if asked)
-    stoiCentr = np.full(nNodes, fill_value=None)
-    snrCentr = np.full(nNodes, fill_value=None)
-    fwSNRsegCentr = np.full(nNodes, fill_value=None)
-    if params.includeCentralisedPerf:
-        if centralisedDir is not None:
-            r = Results()
-            r = r.load(centralisedDir)
-            for nn in range(nNodes):
-                stoiCentr[nn] = r.enhancementEval.stoi[f'Node{nn+1}'].after
-                snrCentr[nn] = r.enhancementEval.snr[f'Node{nn+1}'].after
-                fwSNRsegCentr[nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
+                # Get useful values
+                for nn in range(nNodes):
+                    stoi[ii, jj, kk, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].after
+                    stoiLocal[ii, jj, kk, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].afterLocal
+                    stoiOriginal[ii, jj, kk, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].before
+                    snr[ii, jj, kk, nn] = r.enhancementEval.snr[f'Node{nn+1}'].after
+                    snrLocal[ii, jj, kk, nn] = r.enhancementEval.snr[f'Node{nn+1}'].afterLocal
+                    snrOriginal[ii, jj, kk, nn] = r.enhancementEval.snr[f'Node{nn+1}'].before
+                    fwSNRseg[ii, jj, kk, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
+                    fwSNRsegLocal[ii, jj, kk, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterLocal
+                    fwSNRsegOriginal[ii, jj, kk, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].before
 
     res = dict([
-        ('stoi', stoi), ('stoiLocal', stoiLocal), ('stoiOriginal', stoiOriginal), ('stoiCentr', stoiCentr),\
-        ('snr', snr), ('snrLocal', snrLocal), ('snrOriginal', snrOriginal), ('snrCentr', snrCentr),\
-        ('fwSNRseg', fwSNRseg), ('fwSNRsegLocal', fwSNRsegLocal),\
-            ('fwSNRsegOriginal', fwSNRsegOriginal), ('fwSNRsegCentr', fwSNRsegCentr)
+        ('stoi', stoi), ('stoiLocal', stoiLocal), ('stoiOriginal', stoiOriginal),\
+        ('snr', snr), ('snrLocal', snrLocal), ('snrOriginal', snrOriginal),\
+        ('fwSNRseg', fwSNRseg), ('fwSNRsegLocal', fwSNRsegLocal), ('fwSNRsegOriginal', fwSNRsegOriginal)
     ])
 
     return res
@@ -150,12 +117,11 @@ def plot(res, plottype):
 
 
 def plot_grouppedpernode(res):
-    # TODO -- add option to show centralised performance
 
     ylimsSTOI = [0, 1]
-    categories = ['$400\\geq\\varepsilon\\geq 200$',\
-        '$100\\geq\\varepsilon\\geq 50$',\
-        '$50\\geq\\varepsilon\\geq 20$']
+    categories = ['$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{l}}$',\
+        '$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{m}}$',\
+        '$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{s}}$']
     w = 1/4  # width parameter
 
     # Booleans
@@ -175,12 +141,13 @@ def plot_grouppedpernode(res):
 def plot_grouppedpernode_vert(res):
 
     ylimsSTOI = [0, 1]
-    categories = ['$400\\geq\\varepsilon\\geq 200$ PPM',\
-        '$100\\geq\\varepsilon\\geq 50$ PPM',\
-        '$50\\geq\\varepsilon\\geq 20$ PPM']
+    categories = ['$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{l}}$',\
+        '$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{m}}$',\
+        '$\\varepsilon\\in\\mathcal{{E}}_\\mathrm{{s}}$']
     w = 1/4  # width parameter
 
     # Booleans
+    showErrorBars = True
     plotSecondMetric = False
 
     if plotSecondMetric:
@@ -188,15 +155,14 @@ def plot_grouppedpernode_vert(res):
         fig.set_size_inches(8, 6.5)
     else:
         fig, axes = plt.subplots(res['stoi'].shape[0], 1)
-        fig.set_size_inches(7, 6.5)
-    
+        fig.set_size_inches(6, 5.5)
     for ii in range(res['stoi'].shape[0]):
         
         if plotSecondMetric:
-            subplot_fcn_2(axes[ii, 0], res['stoi'][ii, :, :], res['stoiOriginal'][ii, :, :],
-                w, ylimsSTOI, f'C{ii}')
-            subplot_fcn_2(axes[ii, 1], res['fwSNRseg'][ii, :, :], res['fwSNRsegOriginal'][ii, :, :],
-                w, [0, 8], f'C{ii}', showLegend=True)
+            subplot_fcn_2(axes[ii, 0], res['stoi'][ii, :, :, :], res['stoiOriginal'][ii, :, :, :],
+                w, showErrorBars, ylimsSTOI, f'C{ii}')
+            subplot_fcn_2(axes[ii, 1], res['fwSNRseg'][ii, :, :, :], res['fwSNRsegOriginal'][ii, :, :, :],
+                w, showErrorBars, [0, 8], f'C{ii}', showLegend=True)
             if ii == 0:
                 axes[ii, 0].set_title('eSTOI')
                 axes[ii, 1].set_title('fwSNRseg [dB]')
@@ -205,36 +171,33 @@ def plot_grouppedpernode_vert(res):
                 axes[ii, 1].set_xlabel('Node index $k$')
             # SRO domains texts
             yplacement = np.amax(axes[ii, 1].get_ylim()) * 0.85
-            axes[ii, 1].text(x=np.amax(axes[ii, 1].get_xlim()) + .25, y=yplacement,
+            axes[ii, 1].text(x=np.amax(axes[ii, 1].get_xlim()) + 1.25, y=yplacement,
                 s=categories[ii], bbox=dict(boxstyle='round', facecolor=f'C{ii}', alpha=1), color='w',
                 fontsize=12)
-            # Centralised performance
-            if res['stoiCentr'] is not None:
-                # Plot that too
-                axes[ii, 0].hlines(y=res['stoiCentr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
-                    colors='k', linestyles='--')
-                axes[ii, 1].hlines(y=res['fwSNRsegCentr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
-                    colors='k', linestyles='--')
         else:
-            subplot_fcn_2(axes[ii], res['stoi'][ii, :, :], res['stoiOriginal'][ii, :, :],
-                w, ylimsSTOI, f'C{ii}', showLegend=True, centralised=res['stoiCentr'])
+            subplot_fcn_2(axes[ii], res['stoi'][ii, :, :, :], res['stoiOriginal'][ii, :, :, :],
+                w, showErrorBars, ylimsSTOI, f'C{ii}', showLegend=True)
             if ii == 0:
                 axes[ii].set_title('eSTOI')
             if ii == res['stoi'].shape[0] - 1:
                 axes[ii].set_xlabel('Node index $k$')
             # SRO domains texts
-            yplacement = np.amax(axes[ii].get_ylim())
-            axes[ii].text(x=np.amax(axes[ii].get_xlim()) + .25, y=yplacement,
+            yplacement = np.amax(axes[ii].get_ylim()) * 0.85
+            axes[ii].text(x=np.amax(axes[ii].get_xlim()) + 1.15, y=yplacement,
                 s=categories[ii], bbox=dict(boxstyle='round', facecolor=f'C{ii}', alpha=1), color='w',
                 fontsize=12)
-        
             
     plt.tight_layout()
 
     return fig
 
 
-def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=False, centralised=None):
+def subplot_fcn_2(ax, res, resBeforeEnhancement, w, showErrorBars, ylims, mycolor, showLegend=False):
+
+    if showErrorBars:
+        ecolor = 'k'
+    else:
+        ecolor = 'none'
 
     nNodes = res.shape[-1]
 
@@ -243,33 +206,28 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
     if ylims is not None:
         ax.set_ylim(ylims)
     # With compensation
-    handle1 = ax.bar(np.arange(nNodes) + w, res[1, :],
-        width=w, align='center', alpha=1,
+    currStoiData = res[0, :, :]
+    handle1 = ax.bar(np.arange(nNodes) + w, np.mean(currStoiData, axis=0),
+        width=w, yerr=np.std(currStoiData, axis=0), align='center', alpha=1, ecolor=ecolor, capsize=2,
         color=lighten_color(mycolor, 1), edgecolor='k')
     # Without compensation
-    handle2 = ax.bar(np.arange(nNodes), res[0, :],
-        width=w, align='center', alpha=1,
+    currStoiData = res[1, :, :]
+    handle2 = ax.bar(np.arange(nNodes), np.mean(currStoiData, axis=0),
+        width=w, yerr=np.std(currStoiData, axis=0), align='center', alpha=1, ecolor=ecolor, capsize=2,
         color=lighten_color(mycolor, 0.66), edgecolor='k')
     # Without enhancement
-    handle3 = ax.bar(np.arange(nNodes) - w, resBeforeEnhancement[0, :],
+    currStoiData = resBeforeEnhancement[0, :, :]
+    handle3 = ax.bar(np.arange(nNodes) - w, np.mean(currStoiData, axis=0),
         width=w, align='center', alpha=1,
         color=lighten_color(mycolor, 0.33), edgecolor='k')
-    handles = [handle1, handle2, handle3]   # handles for legend
-    leglabs = ['GEVD-DANSE + SRO comp.', 'GEVD-DANSE', 'Noisy sensor signal $y_{{k,1}}$']    # labels for legend
-    # Centralised
-    if centralised is not None:
-        for k in range(nNodes):
-            tmp = ax.hlines(y=centralised[k], xmin=k-w*1.5, xmax=k+w*1.5,
-                colors='k', linestyles='--')
-        handles.append(tmp)
-        leglabs.append('GEVD-MWF (no SRO)')
     ax.set_xticks(np.arange(nNodes))
     xtlabs = np.array([f'{ii+1}' for ii in range(nNodes)])
     ax.set_xticklabels(xtlabs)
     if showLegend:
-        ax.legend(handles=handles,
-            labels=leglabs,
-            bbox_to_anchor=(1, -0.1),
+        ax.legend(
+            handles=[handle1, handle2, handle3],
+            labels=['DANSE + comp.', 'DANSE', 'Original'],
+            bbox_to_anchor=(1.04, 0),
             loc="lower left"
         )
 

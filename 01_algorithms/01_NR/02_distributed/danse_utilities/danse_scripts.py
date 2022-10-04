@@ -371,7 +371,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                                             s.DFTsize,
                                             s.Ns,
                                             s.broadcastLength,
-                                            s.broadcastDomain
+                                            s.broadcastDomain,
+                                            efficient=s.efficiency.efficientSpSBC
                                             )
 
     # Extra variables TODO: -- to be treated and integrated more neatly
@@ -382,6 +383,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
         SROresidualThroughTime.append(np.zeros(numIter))
         SROestimateThroughTime.append(np.zeros(numIter))
     tStartForMetrics = np.full(asc.numNodes, fill_value=None)  # start instant for the computation of speech enhancement metrics
+    if s.efficiency.efficientSpSBC:
+        lastBroadcastInstant = np.zeros(asc.numNodes)
 
     # External filter updates (for broadcasting)
     lastExternalFiltUpdateInstant = np.zeros(asc.numNodes)   # [s]
@@ -394,7 +397,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
     for _, events in enumerate(eventsMatrix):
 
         # Parse event matrix (+ inform user)
-        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates, printouts=s.printouts.events_parser)
+        t, eventTypes, nodesConcerned = subs.events_parser(events, startUpdates,
+                                    printouts=s.printouts.events_parser,
+                                    doNotPrintBCs=s.printouts.events_parser_noBC)
 
         if t > tprint + s.printouts.progressPrintingInterval and s.printouts.danseProgress:
             print(f'----- t = {np.round(t, 2)}s | {np.round(t / masterClock[-1] * 100, 2)}% done -----')
@@ -413,28 +418,36 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                                                         fs[k],
                                                         s.broadcastDomain,
                                                         s.DFTsize, k, lk[k])
+            
+            if s.efficiency.efficientSpSBC:
+                # Count samples recorded since the last broadcast at node `k`
+                nSamplesSinceLastBroadcast = ((timeInstants[:, k] > lastBroadcastInstant[k]) & (timeInstants[:, k] <= t)).sum()
+                lastBroadcastInstant[k] = t
+                currL = nSamplesSinceLastBroadcast
+            else:
+                currL = s.broadcastLength
 
             # Perform broadcast -- update all relevant buffers in network
             zBuffer, wIR[k], previousTDfilterUpdate[k], zLocal[k] = subs.broadcast(
-                        t,
-                        k,
-                        fs[k],
-                        s.broadcastLength,
-                        yLocalForBC,
-                        wTildeExternal[k],
-                        s.DFTsize,
-                        neighbourNodes,
-                        lk,
-                        zBuffer,
-                        s.broadcastDomain,
-                        winWOLAanalysis,
-                        winWOLAsynthesis,
+                        t=t,
+                        k=k,
+                        fs=fs[k],
+                        L=currL,
+                        yk=yLocalForBC,
+                        w=wTildeExternal[k],
+                        n=s.DFTsize,
+                        neighbourNodes=neighbourNodes,
+                        lk=lk,
+                        zBuffer=zBuffer,
+                        broadcastDomain=s.broadcastDomain,
+                        winWOLAanalysis=winWOLAanalysis,
+                        winWOLAsynthesis=winWOLAsynthesis,
                         winShift=s.Ns,
                         previousTDfilterUpdate=previousTDfilterUpdate[k],
                         updateTDfilterEvery=s.updateTDfilterEvery,
                         wIRprevious=wIR[k],
-                        zTDpreviousFrame=zLocal[k],
-                    )
+                        zTDpreviousFrame=zLocal[k]
+                        )
 
             if i[k] > 20:
                 stop = 1
@@ -505,7 +518,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
 
             # Centralized estimate ↓
             if s.computeCentralizedEstimate:
-                if s.broadcastDomain != 'wholeChunk_fd':
+                if 'wholeChunk' not in s.broadcastDomain:
                     raise ValueError('NOT YET IMPLEMENTED FOR CENTRALIZED ESTIMATE')
                 yTildeCentr[k][:, i[k], :] = yCentrCurr
                 ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
@@ -725,4 +738,4 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
     # plt.show(block=False)
     stop = 1
 
-    return d, dLocal, sroData, tStartForMetrics, firstDANSEupdateRefSensor
+    return d, dLocal, dCentr, sroData, tStartForMetrics, firstDANSEupdateRefSensor

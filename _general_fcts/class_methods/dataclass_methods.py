@@ -1,7 +1,7 @@
 from copy import copy
 import pickle, gzip
 from pathlib import Path
-from dataclasses import fields, replace, make_dataclass
+from dataclasses import fields, replace, make_dataclass, is_dataclass
 from pathlib import PurePath
 import json, os
 import dataclass_wizard as dcw
@@ -114,17 +114,45 @@ def save_to_json(mycls, filename):
         print(f'Filename modified to "{filename}".')
 
     # Convert arrays to lists before export
-    for field in fields(mycls):
-        if field.type is np.ndarray:
-            newVal = field.default.tolist() + ['!!NPARRAY']  # include a flag to re-conversion to np.ndarray when reading the JSON file
-            para = {field.name: newVal}
-            mycls = replace(mycls, **para)
+    mycls = convert_arrays_to_lists(mycls)
 
     jsondict = dcw.asdict(mycls)  # https://stackoverflow.com/a/69059343
 
     with open(filename, 'w') as file_json:
         json.dump(jsondict, file_json, indent=4)
     file_json.close()
+
+
+def convert_arrays_to_lists(mycls):
+    """
+    Converts all arrays in dataclass to lists,
+    with added element to indicate they previously
+    were arrays. Does it recursively to cover
+    all potential nested dataclasses.
+    """
+
+    for field in fields(mycls):
+        val = getattr(mycls, field.name)
+        if is_dataclass(val):
+            setattr(mycls, field.name, convert_arrays_to_lists(val))
+        elif type(val) is np.ndarray:
+            newVal = val.tolist() + ['!!NPARRAY']  # include a flag to re-conversion to np.ndarray when reading the JSON file
+            para = {field.name: newVal}
+            mycls = replace(mycls, **para)  # TODO: <-- does not work with the danseWindow field... For some reason
+            stop = 1
+        elif type(val) is list:
+            # TODO: should be made recursive too (to account for, e.g., lists of lists of arrays)
+            if any([(type(v) is np.ndarray) for v in val]):
+                newVal = []
+                for ii in range(len(val)):
+                    if type(val[ii]) is np.ndarray:
+                        newVal.append(val[ii].tolist() + ['!!NPARRAY'])
+                    else:
+                        newVal.append(val[ii])
+                para = {field.name: newVal}
+                mycls = replace(mycls, **para)
+
+    return mycls
 
 
 def load_from_json(path_to_json_file, mycls):
@@ -152,6 +180,10 @@ def load_from_json(path_to_json_file, mycls):
         if field.type is list:
             if a[-1] == '!!NPARRAY':
                 a = np.array(a[:-1])
+            else: # TODO: should be made recursive (see other TODO in "save" function above)
+                for ii in range(len(a)):
+                    if a[ii][-1] == '!!NPARRAY':
+                        a[ii] = np.array(a[ii][:-1])
         setattr(mycls_out, field.name, a)
 
     return mycls_out

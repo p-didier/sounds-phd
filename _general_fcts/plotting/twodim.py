@@ -54,7 +54,9 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
     rn : [Nn x 2] np.ndarray (real)
         Noise source(s) coordinates [m]. 
     r : [N x 2] np.ndarray (real)
-        Sensor(s) coordinates [m]. 
+        Sensor(s) coordinates [m].
+    TODO: options
+        ...
     sensorToNodeTags : [N x 1] np.ndarray (int)
         Tags relating each sensor to a node number (>=1).
     scatsize : float
@@ -69,12 +71,14 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
     plot_room2D(ax, rd2D, dotted)
     # Desired sources
     for idxSensor in range(rs.shape[0]):
-        ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=scatsize,c='blue',marker='d')
-        ax.text(rs[idxSensor,0], rs[idxSensor,1], "D%i" % (idxSensor+1))
+        ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=2*scatsize,c='green',marker='d', edgecolor='k')
+        if options.texts:
+            ax.text(rs[idxSensor,0], rs[idxSensor,1], "D%i" % (idxSensor+1))
     # Noise sources
     for idxSensor in range(rn.shape[0]):
-        ax.scatter(rn[idxSensor,0], rn[idxSensor,1], s=scatsize,c='red',marker='P')
-        ax.text(rn[idxSensor,0], rn[idxSensor,1], "N%i" % (idxSensor+1))
+        ax.scatter(rn[idxSensor,0], rn[idxSensor,1], s=2*scatsize,c='red',marker='P', edgecolor='k')
+        if options.texts:
+            ax.text(rn[idxSensor,0], rn[idxSensor,1], "N%i" % (idxSensor+1))
     # Nodes and sensors
     if options.nodesColors == 'multi':
         circHandles = []
@@ -101,9 +105,11 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
             circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
                                 radius * 2, color=options.nodesColors, fill=False)
             # Add label
-            ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
+            if options.texts:
+                ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
         ax.add_patch(circ)
     ax.grid()
+    ax.set_axisbelow(True)
     ax.axis('equal')
     if showLegend and options.nodesColors == 'multi':
         nc = 1  # number of columbs in legend object

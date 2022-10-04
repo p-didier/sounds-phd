@@ -8,7 +8,7 @@ from .sro_subfcns import *
 from collections import deque
 import matplotlib.pyplot as plt
 from pathlib import Path, PurePath
-import sys
+import sys, copy
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -896,7 +896,7 @@ def fill_buffers_td_whole_chunk(k, neighbourNodes, zBuffer, zLocalK):
     return zBuffer
 
 
-def events_parser(events, startUpdates, printouts=False):
+def events_parser(events, startUpdates, printouts=False, doNotPrintBCs=False):
     """Printouts to inform user of DANSE events.
     
     Parameters
@@ -907,7 +907,9 @@ def events_parser(events, startUpdates, printouts=False):
     startUpdates : list of bools
         Node-specific flags to indicate whether DANSE updates have started. 
     printouts : bool
-        If True, inform user about current events after parsing.    
+        If True, inform user about current events after parsing. 
+    doNotPrintBCs : bool
+        If True, do not print the broadcast events (only used if `printouts == True`).
 
     Returns
     -------
@@ -928,11 +930,14 @@ def events_parser(events, startUpdates, printouts=False):
         if 'update' in eventTypes:
             txt = f't={np.round(t, 3)}s -- '
             updatesTxt = 'Updating nodes: '
-            broadcastsTxt = 'Broadcasting nodes: '
+            if doNotPrintBCs:
+                broadcastsTxt = ''
+            else:
+                broadcastsTxt = 'Broadcasting nodes: '
             flagCommaUpdating = False    # little flag to add a comma (`,`) at the right spot
             for idxEvent in range(len(eventTypes)):
                 k = int(nodesConcerned[idxEvent])   # node index
-                if eventTypes[idxEvent] == 'broadcast':
+                if eventTypes[idxEvent] == 'broadcast' and not doNotPrintBCs:
                     if idxEvent > 0:
                         broadcastsTxt += ','
                     broadcastsTxt += f'{k + 1}'
@@ -948,7 +953,7 @@ def events_parser(events, startUpdates, printouts=False):
     return t, eventTypes, nodesConcerned
 
 
-def get_events_matrix(timeInstants, N, Ns, L, bd):
+def get_events_matrix(timeInstants, N, Ns, L, bd, efficient=False):
     """Returns the matrix the columns of which to loop over in SRO-affected simultaneous DANSE.
     For each event instant, the matrix contains the instant itself (in [s]),
     the node indices concerned by this instant, and the corresponding event
@@ -969,6 +974,9 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         -- 'wholeChunk_td': broadcast whole chunks of compressed signals in the time-domain,
         -- 'wholeChunk_fd': broadcast whole chunks of compressed signals in the WOLA-domain,
         -- 'fewSamples_td': linear-convolution approximation of WOLA compression process, broadcast L ≪ Ns samples at a time.
+    efficient : bool
+        If True, create "efficient" events. Only changing the `bd == 'fewSamples_td'` case.
+        Avoids generation of unnecessary one-sample broadcast events --> saves a lot of computation time.
 
     Returns
     -------
@@ -999,9 +1007,9 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
     fs = np.zeros(nNodes)
     for k in range(nNodes):
         deltas = np.diff(timeInstants[:, k])
-        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e7))))  # allowing computer precision errors down to 1e-4*mean delta.
+        precision = int(np.ceil(np.abs(np.log10(np.mean(deltas) / 1e6))))  # allowing computer precision errors down to 1e-4*mean delta.
         if len(np.unique(np.round(deltas, precision))) > 1:
-            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(deltas))} different sample intervals detected for node {k+1}.')
+            raise ValueError(f'[NOT IMPLEMENTED] Clock jitter detected: {len(np.unique(np.round(deltas, precision)))} different sample intervals detected for node {k+1}.')
         fs[k] = np.round(1 / np.unique(np.round(deltas, precision))[0], 3)  # np.round(): not going below 1PPM precision for typical fs >= 8 kHz
 
     # Total signal duration [s] per node (after truncation during signal generation)
@@ -1018,40 +1026,57 @@ def get_events_matrix(timeInstants, N, Ns, L, bd):
         broadcastInstants = [np.arange(N/L, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
         #                              ^ note that we only start broadcasting when we have enough samples to perform compression
     elif 'fewSamples' in bd:
-        broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
-        #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
+        if efficient:
+            # Combine update instants
+            combinedUpdateInstants = list(updateInstants[0])
+            for k in range(nNodes):
+                if k > 0:
+                    for ii in range(len(updateInstants[k])):
+                        if updateInstants[k][ii] not in combinedUpdateInstants:
+                            combinedUpdateInstants.append(updateInstants[k][ii])
+            combinedUpdateInstants = np.sort(np.array(combinedUpdateInstants))
+            broadcastInstants = [combinedUpdateInstants for _ in range(nNodes)]  # same BC instants for all nodes
+        else:
+            broadcastInstants = [np.arange(1, int(numBroadcastsInTtot[k])) * L/fs[k] for k in range(nNodes)]
+            #                              ^ note that we start broadcasting sooner: when we have `L` samples, enough for linear convolution
 
-    # # Ensure that all nodes have broadcasted enough times before performing any update
-    # minWaitBeforeUpdate = np.amax([v[N // L - 1] for v in broadcastInstants])
+    # # Retrieve oracle SROs
+    # sros = np.zeros((nNodes, nNodes))
     # for k in range(nNodes):
-    #     validUpdateInstants = updateInstants[k] >= minWaitBeforeUpdate
-    #     print(len(updateInstants[k]) - sum(validUpdateInstants))
-    #     updateInstants[k] = updateInstants[k][validUpdateInstants]
-    
+    #     for q in range(nNodes):
+    #         if k != q:
+    #             sros[k, q] = int(np.round((fs[k] / fs[q] - 1) * 1e6))
+    # # Compute SRO-induced flagging instants
+    # flags = []  # one element per node
+    # for k in range(nNodes):
+    #     deltaFlagCurr = 1 / (fs[k] * np.abs(sros[k, :]) / 1e6 + 1e-14)  # 1e-14 to avoid divByZero
+    #     flagsCurr = [np.arange(ii, Ttot[k], step=ii) for ii in deltaFlagCurr]
+    #     flags.append(flagsCurr)
+
     # Build event matrix
-    outputEvents = build_events_matrix(updateInstants, broadcastInstants, nNodes)
+    outputEvents = build_events_matrix(updateInstants, broadcastInstants)
 
     return outputEvents, fs
 
 
-def build_events_matrix(updateInstants, broadcastInstants, nNodes):
+def build_events_matrix(updateInstants, broadcastInstants):
     """Sub-function of `get_events_matrix`, building the events matrix
     from the update and broadcast instants.
     
     Parameters
     ----------
-    updateInstants : list of np.ndarrays (floats)
+    updateInstants : [nNodes x 1] list of np.ndarrays (float)
         Update instants per node [s].
-    broadcastInstants : list of np.ndarrays (floats)
+    broadcastInstants : [nNodes x 1] list of np.ndarrays (float)
         Broadcast instants per node [s].
-    nNodes : int
-        Number of nodes in the network.
 
     Returns
     -------
     outputEvents : [Ne x 1] list of [3 x 1] np.ndarrays containing lists of floats
         Event instants matrix. One column per event instant.
     """
+
+    nNodes = len(updateInstants)
 
     numUniqueUpdateInstants = sum([len(np.unique(updateInstants[k])) for k in range(nNodes)])
     # Number of unique broadcast instants across the WASN
@@ -1197,12 +1222,12 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
         # TODO: other outputs
     """
     # Check inputs
-    if np.round(t * fs) != np.round(t * fs, 9):
-        raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
+    # if np.round(t * fs) != np.round(t * fs, 9):
+    #     raise ValueError('Unexpected time instant: does not correspond to a specific sample.')
+        # print('Time instant does not correspond to a specific sample - ignore broadcast.')
 
     if len(yk) < n:
         print('Cannot perform compression: not enough local signals samples.')
-
     else:
         if broadcastDomain == 'wholeChunk_fd':
             # Frequency-domain chunk-wise broadcasting
@@ -1233,6 +1258,10 @@ def broadcast(t, k, fs, L, yk, w, n, neighbourNodes, lk, zBuffer,
             if np.abs(t - previousTDfilterUpdate) >= updateTDfilterEvery:
                 updateBroadcastFilter = True
                 previousTDfilterUpdate = t
+
+            # # TEST TEST TEST TEST TEST TEST TEST TEST TEST TEST 
+            # L = yk.shape[0]
+            # # TEST TEST TEST TEST TEST TEST TEST TEST TEST TEST             
 
             zLocal, wIR = danse_compression_few_samples(yk, w, n, L,
                                             wIRprevious,

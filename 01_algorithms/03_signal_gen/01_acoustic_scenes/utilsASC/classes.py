@@ -18,6 +18,7 @@ class PlottingOptions:
     nodeCircleRadius: float = None      # radius of circle to be plotted around each node (if None, compute radius dependent on nodes coordinates)
     nodesColors: str = 'multi'          # color used for each node. If "multi", use a different color for each node
     plot3D: bool = False
+    texts: bool = True
 
 @dataclass
 class AcousticScenario:
@@ -45,9 +46,9 @@ class AcousticScenario:
         seed : int
             Seed to create a random generator (only used if `rng is None`).
         """
-        self.numDesiredSources = self.desiredSourceCoords.shape[0]      # number of desired sources
-        self.numSensors = self.sensorCoords.shape[0]                    # number of sensors
-        self.numNoiseSources = self.noiseSourceCoords.shape[0]          # number of noise sources
+        self.numDesiredSources = len(self.desiredSourceCoords)      # number of desired sources
+        self.numSensors = len(self.sensorCoords)                    # number of sensors
+        self.numNoiseSources = len(self.noiseSourceCoords)          # number of noise sources
         self.numSensorPerNode = np.unique(self.sensorToNodeTags, return_counts=True)[-1]    # number of sensors per node
         # # Address topology
         # if self.topology == 'fully_connected':
@@ -73,7 +74,8 @@ class AcousticScenario:
     
     # Save and load
     def load(self, foldername: str):
-        return met.load(self, foldername)
+        a: AcousticScenario = met.load(self, foldername)
+        return a
     def save(self, filename: str):
         met.save(self, filename, exportType='pkl')
 
@@ -171,6 +173,7 @@ class micArrayAttributes:
 class ASCProgramSettings:
     """Class for keeping track of global simulation settings"""
     roomDimBounds: list[float] = field(default_factory=list)   # [m] [smallest, largest] room dimension possible 
+    minDistBwNodes: float = 0.                      # [m] minimum distance between nodes
     minDistFromWalls: float = 0.                    # [m] minimum distance between room boundaries and elements in the room
     maxDistFromNoise: float = 99.                   # [m] maximum distance between nodes and noise source (only if `numNoiseSources==1`)
     numScenarios: int = 1                           # number of AS to generate
