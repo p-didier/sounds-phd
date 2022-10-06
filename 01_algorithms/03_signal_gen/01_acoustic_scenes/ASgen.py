@@ -30,7 +30,7 @@ sets = ASCProgramSettings(
     roomDimBounds=[5,5],              # [Smallest, largest] room dimension possible [m]
     # roomDimBounds=[10,10],              # [Smallest, largest] room dimension possible [m]
     minDistFromWalls = 0.25,
-    minDistBwNodes = 1,               # minimum distance between nodes [m]
+    minDistBwNodes = 2,               # minimum distance between nodes [m]
     maxDistFromNoise = 1.5,           # maximum distance between nodes and noise source [m] (only if `numNoiseSources==1`)
     numSpeechSources=1,               # nr. of speech sources
     numNoiseSources=2,                # nr. of noise sources

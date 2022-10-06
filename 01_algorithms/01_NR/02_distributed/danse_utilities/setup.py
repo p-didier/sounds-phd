@@ -467,7 +467,6 @@ def generate_signals(settings: classes.ProgramSettings):
     oVAD = np.zeros_like(oVADsourceSpecific)
     oVAD[oVADsourceSpecific == asc.numDesiredSources] = 1   # only set global VAD = 1 when all sources are active
 
-
     # Load + pre-process dry noise signals and build wet noise signals
     dryNoiseSignals = np.zeros((signalLength, asc.numNoiseSources))
     wetNoiseSignals = np.zeros((signalLength, asc.numNoiseSources, asc.numSensors))

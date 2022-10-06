@@ -18,7 +18,8 @@ class PlottingOptions:
     nodeCircleRadius: float = None      # radius of circle to be plotted around each node (if None, compute radius dependent on nodes coordinates)
     nodesColors: str = 'multi'          # color used for each node. If "multi", use a different color for each node
     plot3D: bool = False
-    texts: bool = True
+    texts: bool = True      # if True, show the desired and noise sources references on the graph itself
+    nodesNr: bool = True    # if True, show the node numbers on the graph itself
 
 @dataclass
 class AcousticScenario:

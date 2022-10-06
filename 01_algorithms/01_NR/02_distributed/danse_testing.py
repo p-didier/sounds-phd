@@ -20,7 +20,7 @@ sys.path.append(f'{pathToRoot}/_general_fcts')
 # Path where to export all test results (each experiment will be a subfolder of `exportBasePath`)
 exportBasePath = f'{Path(__file__).parent}/res/for_submissions/icassp2023'
 
-# Build testing pa rameters object
+# Build testing parameters object
 danseTestingParams = sro_testing.DanseTestingParameters(
     # General hyperparameters
     writeOver=True,    # if True, the script will overwrite existing data when filenames conflict

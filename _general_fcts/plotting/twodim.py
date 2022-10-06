@@ -71,7 +71,7 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
     plot_room2D(ax, rd2D, dotted)
     # Desired sources
     for idxSensor in range(rs.shape[0]):
-        ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=2*scatsize,c='green',marker='d', edgecolor='k')
+        ax.scatter(rs[idxSensor,0], rs[idxSensor,1], s=2*scatsize,c='lime',marker='d', edgecolor='k')
         if options.texts:
             ax.text(rs[idxSensor,0], rs[idxSensor,1], "D%i" % (idxSensor+1))
     # Noise sources
@@ -104,9 +104,11 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
         else:
             circ = plt.Circle((np.mean(r[sensorIndices,0]), np.mean(r[sensorIndices,1])),
                                 radius * 2, color=options.nodesColors, fill=False)
-            # Add label
-            if options.texts:
-                ax.text(np.amax(r[sensorIndices,0]), np.amax(r[sensorIndices,1]), "Node %i" % (idxNode+1))
+        # Add label
+        if options.nodesNr:
+            ax.text(np.mean(r[sensorIndices,0]) + 1.5*radius,
+                    np.mean(r[sensorIndices,1]) + 1.5*radius,
+                    f'$\\mathbf{{{idxNode+1}}}$', c=f'C{idxNode}')
         ax.add_patch(circ)
     ax.grid()
     ax.set_axisbelow(True)

@@ -4,6 +4,7 @@ import sys
 from turtle import color
 from matplotlib import lines
 import matplotlib
+from more_itertools import first
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ class PostProcParams:
     savefigure : bool = False   # if True, export figure as PNG and PDF format
     savePath : str = ''         # path to folder where to save file (only used if `savefigure == True`)
     includeCentralisedPerf : bool = False   # if True, include the centralised performance inside the graph
+    firstMetric: str = 'eSTOI'       # first metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
+    secondMetric: str = 'fwSNRseg'  # second metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
 
 # Set post-processing parameters
 myParams = PostProcParams(
@@ -38,7 +41,11 @@ myParams = PostProcParams(
     plottype='group_per_node_vertical',
     savefigure=True,
     savePath=Path(__file__).parent.parent,
-    includeCentralisedPerf=True
+    includeCentralisedPerf=True,
+    firstMetric='eSTOI',
+    # firstMetric='SNR',
+    # firstMetric='fwSNRseg',
+    secondMetric='fwSNRseg',
 )
 
 def main():
@@ -51,7 +58,7 @@ def main():
     plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
     plt.rcParams.update({'font.size': 12})
 
-    fig = plot(res, myParams.plottype)
+    fig = plot(res, myParams.plottype, myParams.firstMetric, myParams.secondMetric)
 
     if myParams.savefigure:
         fig.savefig(f'{myParams.savePath}/myfig.png')
@@ -130,8 +137,8 @@ def run(params: PostProcParams):
                 fwSNRsegCentr[nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
 
     res = dict([
-        ('stoi', stoi), ('stoiLocal', stoiLocal), ('stoiOriginal', stoiOriginal), ('stoiCentr', stoiCentr),\
-        ('snr', snr), ('snrLocal', snrLocal), ('snrOriginal', snrOriginal), ('snrCentr', snrCentr),\
+        ('eSTOI', stoi), ('eSTOILocal', stoiLocal), ('eSTOIOriginal', stoiOriginal), ('eSTOICentr', stoiCentr),\
+        ('SNR', snr), ('SNRLocal', snrLocal), ('SNROriginal', snrOriginal), ('SNRCentr', snrCentr),\
         ('fwSNRseg', fwSNRseg), ('fwSNRsegLocal', fwSNRsegLocal),\
             ('fwSNRsegOriginal', fwSNRsegOriginal), ('fwSNRsegCentr', fwSNRsegCentr)
     ])
@@ -139,68 +146,81 @@ def run(params: PostProcParams):
     return res
 
 
-def plot(res, plottype):
+def plot(res, plottype, metric1, metric2):
 
     if plottype == 'group_per_node':
-        fig = plot_grouppedpernode(res)
+        fig = plot_grouppedpernode(res, metric1, metric2)
     elif plottype == 'group_per_node_vertical':
-        fig = plot_grouppedpernode_vert(res)
+        fig = plot_grouppedpernode_vert(res, metric1, metric2)
     
     return fig
 
 
-def plot_grouppedpernode(res):
+def plot_grouppedpernode(res, metric1, metric2):
     # TODO -- add option to show centralised performance
-
-    ylimsSTOI = [0, 1]
-    categories = ['$400\\geq\\varepsilon\\geq 200$',\
-        '$100\\geq\\varepsilon\\geq 50$',\
-        '$50\\geq\\varepsilon\\geq 20$']
+    # vvv HARD-CODED but ok
+    categories = ['$400\\geq|\\varepsilon|\\geq 200$ PPM',\
+        '$100\\geq|\\varepsilon|\\geq 50$ PPM',\
+        '$40\\geq|\\varepsilon|\\geq 20$ PPM']
     w = 1/4  # width parameter
 
     # Booleans
     showErrorBars = False
 
+    ylims1 = None
+    ylims2 = None
+    if metric1 == 'eSTOI':
+        ylims1 = [0,1]
+    if metric2 == 'eSTOI':
+        ylims2 = [0,1]
+        
     fig, axes = plt.subplots(2,1)
     fig.set_size_inches(6.5, 4)
-    subplot_fcn(axes[0], res['stoi'], res['stoiOriginal'], w, showErrorBars, ylimsSTOI, categories)
-    axes[0].set_ylabel('$\Delta$eSTOI')
-    subplot_fcn(axes[1], res['fwSNRseg'], res['fwSNRsegOriginal'], w, showErrorBars, None, categories)
-    axes[1].set_ylabel('$\Delta$fwSNRseg')
+    subplot_fcn(axes[0], res[metric1], res[f'{metric1}Original'], w, showErrorBars, ylims1, categories)
+    axes[0].set_ylabel(metric1)
+    subplot_fcn(axes[1], res[metric2], res[f'{metric2}Original'], w, showErrorBars, ylims2, categories)
+    axes[1].set_ylabel(metric2)
     plt.tight_layout()
 
     return fig
 
 
-def plot_grouppedpernode_vert(res):
+def plot_grouppedpernode_vert(res, metric1, metric2):
 
-    ylimsSTOI = [0, 1]
-    categories = ['$400\\geq\\varepsilon\\geq 200$ PPM',\
-        '$100\\geq\\varepsilon\\geq 50$ PPM',\
-        '$50\\geq\\varepsilon\\geq 20$ PPM']
+    # vvv HARD-CODED but ok
+    categories = ['$400\\geq|\\varepsilon|\\geq 200$ PPM',\
+        '$100\\geq|\\varepsilon|\\geq 50$ PPM',\
+        '$40\\geq|\\varepsilon|\\geq 20$ PPM']
     w = 1/4  # width parameter
 
     # Booleans
     plotSecondMetric = False
+    
+    ylims1 = None
+    ylims2 = None
+    if metric1 == 'eSTOI':
+        ylims1 = [0,1]
+    if metric2 == 'eSTOI':
+        ylims2 = [0,1]
 
     if plotSecondMetric:
-        fig, axes = plt.subplots(res['stoi'].shape[0], 2)
+        fig, axes = plt.subplots(res[metric1].shape[0], 2)
         fig.set_size_inches(8, 6.5)
     else:
-        fig, axes = plt.subplots(res['stoi'].shape[0], 1)
+        fig, axes = plt.subplots(res[metric1].shape[0], 1)
         fig.set_size_inches(7, 6.5)
     
-    for ii in range(res['stoi'].shape[0]):
+    for ii in range(res[metric1].shape[0]):
         
         if plotSecondMetric:
-            subplot_fcn_2(axes[ii, 0], res['stoi'][ii, :, :], res['stoiOriginal'][ii, :, :],
-                w, ylimsSTOI, f'C{ii}')
-            subplot_fcn_2(axes[ii, 1], res['fwSNRseg'][ii, :, :], res['fwSNRsegOriginal'][ii, :, :],
+            subplot_fcn_2(axes[ii, 0], res[metric1][ii, :, :], res[f'{metric1}Original'][ii, :, :],
+                w, ylims1, f'C{ii}')
+            subplot_fcn_2(axes[ii, 1], res[metric2][ii, :, :], res[f'{metric2}Original'][ii, :, :],
                 w, [0, 8], f'C{ii}', showLegend=True)
             if ii == 0:
-                axes[ii, 0].set_title('eSTOI')
-                axes[ii, 1].set_title('fwSNRseg [dB]')
-            if ii == res['stoi'].shape[0] - 1:
+                axes[ii, 0].set_title(metric1)
+                axes[ii, 1].set_title(metric2)
+            if ii == res[metric1].shape[0] - 1:
                 axes[ii, 0].set_xlabel('Node index $k$')
                 axes[ii, 1].set_xlabel('Node index $k$')
             # SRO domains texts
@@ -209,18 +229,18 @@ def plot_grouppedpernode_vert(res):
                 s=categories[ii], bbox=dict(boxstyle='round', facecolor=f'C{ii}', alpha=1), color='w',
                 fontsize=12)
             # Centralised performance
-            if res['stoiCentr'] is not None:
+            if res[f'{metric1}Centr'] is not None:
                 # Plot that too
-                axes[ii, 0].hlines(y=res['stoiCentr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
+                axes[ii, 0].hlines(y=res[f'{metric1}Centr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
                     colors='k', linestyles='--')
-                axes[ii, 1].hlines(y=res['fwSNRsegCentr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
+                axes[ii, 1].hlines(y=res[f'{metric2}Centr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
                     colors='k', linestyles='--')
         else:
-            subplot_fcn_2(axes[ii], res['stoi'][ii, :, :], res['stoiOriginal'][ii, :, :],
-                w, ylimsSTOI, f'C{ii}', showLegend=True, centralised=res['stoiCentr'])
+            subplot_fcn_2(axes[ii], res[metric1][ii, :, :], res[f'{metric1}Original'][ii, :, :],
+                w, ylims1, f'C{ii}', showLegend=True, centralised=res[f'{metric1}Centr'])
             if ii == 0:
-                axes[ii].set_title('eSTOI')
-            if ii == res['stoi'].shape[0] - 1:
+                axes[ii].set_title(metric1)
+            if ii == res[metric1].shape[0] - 1:
                 axes[ii].set_xlabel('Node index $k$')
             # SRO domains texts
             yplacement = np.amax(axes[ii].get_ylim())
