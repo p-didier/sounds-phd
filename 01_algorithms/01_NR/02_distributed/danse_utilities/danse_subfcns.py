@@ -608,14 +608,16 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
     # Number of frequency lines expected (for freq.-domain processing)
     nExpectedFreqLines = int(N / 2 + 1)
 
+    # Initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
     if broadcastDomain == 'wholeChunk_fd':
         zk = np.empty((nExpectedFreqLines, 0), dtype=complex)
     elif broadcastDomain == 'wholeChunk_td':
-        zk = np.empty((N, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
+        zk = np.empty((N, 0), dtype=float)
     elif broadcastDomain == 'fewSamples_td':
-        zk = np.empty((N, 0), dtype=float)       # initialize compressed signal matrix ($\mathbf{z}_{-k}$ in [1]'s notation)
-        # raise ValueError('[NOT YET IMPLEMENTED]')     # TODO: do that
-    bufferFlags = np.zeros(len(neighs))    # flags (positive: +1; negative: -1; or none: 0) -- indicate buffer over- or under-flow
+        zk = np.empty((N, 0), dtype=float)
+
+    # Initialise flags vector (overflow: >0; underflow: <0; or none: ==0)
+    bufferFlags = np.zeros(len(neighs))
 
     for idxq in range(len(neighs)):
         

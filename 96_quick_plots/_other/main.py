@@ -2,6 +2,14 @@ import sys
 
 import utils.sroplot1
 from pathlib import Path
+import matplotlib.pyplot as plt
+
+# Matplotlib settings
+rc = {"font.family" : "serif", 
+    "mathtext.fontset" : "stix"}
+plt.rcParams.update(rc)
+plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
+plt.rcParams.update({'font.size': 11})
 
 def main():
 

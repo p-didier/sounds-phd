@@ -35,8 +35,9 @@ class PostProcParams:
     secondMetric: str = 'fwSNRseg'  # second metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
 
 # Set post-processing parameters
-myParams = PostProcParams(
-    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',
+p = PostProcParams(
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',
+    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_SpS',
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savefigure=True,
@@ -50,7 +51,7 @@ myParams = PostProcParams(
 
 def main():
     
-    res = run(myParams)
+    res = run(p)
 
     rc = {"font.family" : "serif", 
         "mathtext.fontset" : "stix"}
@@ -58,13 +59,12 @@ def main():
     plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
     plt.rcParams.update({'font.size': 12})
 
-    fig = plot(res, myParams.plottype, myParams.firstMetric, myParams.secondMetric)
+    fig = plot(res, p.plottype, p.firstMetric, p.secondMetric)
 
-    if myParams.savefigure:
-        fig.savefig(f'{myParams.savePath}/myfig.png')
-        fig.savefig(f'{myParams.savePath}/myfig.pdf')
+    if p.savefigure:
+        fig.savefig(f'{p.savePath}/myfig__{Path(p.pathToResults).stem}.png')
+        fig.savefig(f'{p.savePath}/myfig__{Path(p.pathToResults).stem}.pdf')
     plt.show()
-    
 
 
 def run(params: PostProcParams):
@@ -79,6 +79,8 @@ def run(params: PostProcParams):
         else:
             centralisedDir = f'{params.pathToResults}/centralised'
     dirs = [ii for ii in dirs if ii != 'centralised']  # do not include the centralised estimation yet
+    # Invert order of directories to process SROs from small to large
+    dirs = np.flip(dirs)
 
     # Get number of nodes
     nNodes = int(Path(params.pathToResults).stem[1])
@@ -159,9 +161,11 @@ def plot(res, plottype, metric1, metric2):
 def plot_grouppedpernode(res, metric1, metric2):
     # TODO -- add option to show centralised performance
     # vvv HARD-CODED but ok
-    categories = ['$400\\geq|\\varepsilon|\\geq 200$ PPM',\
+    categories = [
+        '$40\\geq|\\varepsilon|\\geq 20$ PPM',\
         '$100\\geq|\\varepsilon|\\geq 50$ PPM',\
-        '$40\\geq|\\varepsilon|\\geq 20$ PPM']
+        '$400\\geq|\\varepsilon|\\geq 200$ PPM'
+        ]
     w = 1/4  # width parameter
 
     # Booleans
@@ -188,9 +192,12 @@ def plot_grouppedpernode(res, metric1, metric2):
 def plot_grouppedpernode_vert(res, metric1, metric2):
 
     # vvv HARD-CODED but ok
-    categories = ['$400\\geq|\\varepsilon|\\geq 200$ PPM',\
+    categories = [
+        '$40\\geq|\\varepsilon|\\geq 20$ PPM',\
         '$100\\geq|\\varepsilon|\\geq 50$ PPM',\
-        '$40\\geq|\\varepsilon|\\geq 20$ PPM']
+        '$400\\geq|\\varepsilon|\\geq 200$ PPM'
+        ]
+    colors = ['C4', 'C2', 'C1']
     w = 1/4  # width parameter
 
     # Booleans
@@ -214,9 +221,9 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
         
         if plotSecondMetric:
             subplot_fcn_2(axes[ii, 0], res[metric1][ii, :, :], res[f'{metric1}Original'][ii, :, :],
-                w, ylims1, f'C{ii}')
+                w, ylims1, colors[ii])
             subplot_fcn_2(axes[ii, 1], res[metric2][ii, :, :], res[f'{metric2}Original'][ii, :, :],
-                w, [0, 8], f'C{ii}', showLegend=True)
+                w, [0, 8], colors[ii], showLegend=True)
             if ii == 0:
                 axes[ii, 0].set_title(metric1)
                 axes[ii, 1].set_title(metric2)
@@ -226,7 +233,7 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
             # SRO domains texts
             yplacement = np.amax(axes[ii, 1].get_ylim()) * 0.85
             axes[ii, 1].text(x=np.amax(axes[ii, 1].get_xlim()) + .25, y=yplacement,
-                s=categories[ii], bbox=dict(boxstyle='round', facecolor=f'C{ii}', alpha=1), color='w',
+                s=categories[ii], bbox=dict(boxstyle='round', facecolor=colors[ii], alpha=1), color='w',
                 fontsize=12)
             # Centralised performance
             if res[f'{metric1}Centr'] is not None:
@@ -237,18 +244,16 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
                     colors='k', linestyles='--')
         else:
             subplot_fcn_2(axes[ii], res[metric1][ii, :, :], res[f'{metric1}Original'][ii, :, :],
-                w, ylims1, f'C{ii}', showLegend=True, centralised=res[f'{metric1}Centr'])
+                w, ylims1, colors[ii], showLegend=True, centralised=res[f'{metric1}Centr'])
             if ii == 0:
                 axes[ii].set_title(metric1)
             if ii == res[metric1].shape[0] - 1:
                 axes[ii].set_xlabel('Node index $k$')
             # SRO domains texts
-            yplacement = np.amax(axes[ii].get_ylim())
+            yplacement = np.amax(axes[ii].get_ylim()) * 0.9
             axes[ii].text(x=np.amax(axes[ii].get_xlim()) + .25, y=yplacement,
-                s=categories[ii], bbox=dict(boxstyle='round', facecolor=f'C{ii}', alpha=1), color='w',
+                s=categories[ii], bbox=dict(boxstyle='round', facecolor=colors[ii], alpha=1), color='w',
                 fontsize=12)
-        
-            
     plt.tight_layout()
 
     return fig
@@ -258,7 +263,7 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
 
     nNodes = res.shape[-1]
 
-    ax.grid()
+    # ax.grid()
     ax.set_axisbelow(True)
     if ylims is not None:
         ax.set_ylim(ylims)
@@ -276,20 +281,24 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
         color=lighten_color(mycolor, 0.33), edgecolor='k')
     handles = [handle1, handle2, handle3]   # handles for legend
     leglabs = ['GEVD-DANSE + SRO comp.', 'GEVD-DANSE', 'Noisy sensor signal $y_{{k,1}}$']    # labels for legend
+    # Add grey vertical lines
+    ax.vlines(x=np.arange(nNodes-1) + 0.5, ymin=np.amin(ax.get_ylim()), ymax=np.amax(ax.get_ylim()),\
+        colors='tab:gray', linestyles='-')
     # Centralised
     if centralised is not None:
         for k in range(nNodes):
-            tmp = ax.hlines(y=centralised[k], xmin=k-w*1.5, xmax=k+w*1.5,
+            tmp = ax.hlines(y=centralised[k], xmin=k-w*2, xmax=k+w*2,
                 colors='k', linestyles='--')
         handles.append(tmp)
         leglabs.append('GEVD-MWF (no SRO)')
     ax.set_xticks(np.arange(nNodes))
     xtlabs = np.array([f'{ii+1}' for ii in range(nNodes)])
     ax.set_xticklabels(xtlabs)
+    ax.set_xlim([-0.5, nNodes-0.5])  
     if showLegend:
         ax.legend(handles=handles,
             labels=leglabs,
-            bbox_to_anchor=(1, -0.1),
+            bbox_to_anchor=(1, 0),
             loc="lower left"
         )
 

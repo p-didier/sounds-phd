@@ -73,7 +73,7 @@ def plotsro(exportpath=None, style='rb', showNumSamples=True):
     ax.vlines(y, ymin=np.full_like(y, -1), ymax=u[idx_y] + delta, colors=col2, linestyles=':')
     ax.hlines([-1,1], xmin=-0.5, xmax=int(n), colors='tab:gray')
     yticks = [-1, 1, delta]
-    labsyticks = ['Node $q$', 'Node $k$', 'Analog signal']
+    labsyticks = ['Node $q$', 'Node $k$', 'Signal']
     if showNumSamples:  # show number of samples at each node
         previousValue = 0
         zo = 999

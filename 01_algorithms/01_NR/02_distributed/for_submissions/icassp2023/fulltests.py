@@ -23,7 +23,7 @@ class TestsParams:
 p = TestsParams(
     pathToASC='02_data/01_acoustic_scenarios/for_submissions/icassp2023/J4Mk[1_3_2_5]_Ns1_Nn2/AS18_RT150ms',
     computeCentralised=False,
-    deltaSROs=[0],
+    deltaSROs=[20,50,200],
     exportBasePath='01_algorithms/01_NR/02_distributed/res/for_submissions/icassp2023',
 )
 # -------------------------------------------
@@ -44,7 +44,7 @@ def main():
     for ii in range(nTest):
         if p.computeCentralised and ii == nTest - 1:
             params = dict([
-                ('listedSROs', [0] * nNodes), ('comp', False), ('bc', 'wholeChunk'),\
+                ('listedSROs', [0] * nNodes), ('comp', False), ('bc', 'samplePerSample'),\
                 ('computeCentrEstimate', True), ('ASC', p.pathToASC)   # centralised case
             ])
         else:
@@ -56,7 +56,7 @@ def main():
                 ])
             else:
                 params = dict([
-                    ('listedSROs', lsros), ('comp', False), ('bc', 'wholeChunk'),\
+                    ('listedSROs', lsros), ('comp', False), ('bc', 'samplePerSample'),\
                     ('computeCentrEstimate', False), ('ASC', p.pathToASC)  # don't compensate SROs
                 ])
 

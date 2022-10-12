@@ -7,6 +7,13 @@ params_epsSmall = [7.5, 2]
 params_epsMedium = [75, 20]
 params_epsLarge = [275, 50]
 
+# Matplotlib parameters
+rc = {"font.family" : "serif", 
+    "mathtext.fontset" : "stix"}
+plt.rcParams.update(rc)
+plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
+plt.rcParams.update({'font.size': 12})
+
 import matplotlib.pyplot as plt
 fig, axes = plt.subplots(1,1)
 fig.set_size_inches(8.5, 3.5)
