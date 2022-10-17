@@ -2,7 +2,6 @@
 #%%
 from pathlib import Path, PurePath
 import sys
-from unittest import result
 import matplotlib.pyplot as plt
 import numpy as np
 # Find path to root folder

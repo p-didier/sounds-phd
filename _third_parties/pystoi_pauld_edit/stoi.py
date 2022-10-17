@@ -1,7 +1,6 @@
 import numpy as np
 import warnings
 from . import utils
-import resampy
 
 # Constant definition
 FS = 10000                          # Sampling frequency
@@ -157,30 +156,26 @@ def stoi_any_fs(x, y, fs_sig, extended=False):
                         'found {} and {}'.format(x.shape, y.shape))
 
     # Base window duration
-    winLength = N_FRAME / FS   # [s]
+    winDur = N_FRAME / FS   # [s]
 
-    # if fs_sig > FS:
-    #     # Adapt base window length
-    #     winLength = int(np.floor(winDur * fs_sig))
-    # elif fs_sig < FS:
-    #     # Problematic: frequency range of critical bands may not be preserved -- see taal2011a footnote page 2.
-    #     winLength = int(np.floor(winDur * fs_sig))
-    #     # print(f'/!\ Sampling frequency lower than 10 kHz: Frequency range of critical bands may not be preserved.')   
-    # else:
-    #     winLength = N_FRAME
-    #     # x = utils.resample_oct(x, FS, fs_sig)
-    #     # y = utils.resample_oct(y, FS, fs_sig)
-    
-    if fs_sig != FS:
-        x = resampy.resample(x, fs_sig, FS)
-        y = resampy.resample(y, fs_sig, FS)
+    if fs_sig > FS:
+        # Adapt base window length
+        winLength = int(np.floor(winDur * fs_sig))
+    elif fs_sig < FS:
+        # Problematic: frequency range of critical bands may not be preserved -- see taal2011a footnote page 2.
+        winLength = int(np.floor(winDur * fs_sig))
+        # print(f'/!\ Sampling frequency lower than 10 kHz: Frequency range of critical bands may not be preserved.')   
+    else:
+        winLength = N_FRAME
+        # x = utils.resample_oct(x, FS, fs_sig)
+        # y = utils.resample_oct(y, FS, fs_sig)
 
     # Remove silent frames
-    x, y = utils.remove_silent_frames(x, y, DYN_RANGE, N_FRAME, int(N_FRAME/2))
+    x, y = utils.remove_silent_frames(x, y, DYN_RANGE, winLength, int(winLength/2))
 
     # Take STFT
-    x_spec = utils.stft(x, N_FRAME, NFFT, overlap=2).transpose()
-    y_spec = utils.stft(y, N_FRAME, NFFT, overlap=2).transpose()
+    x_spec = utils.stft(x, winLength, NFFT, overlap=2).transpose()
+    y_spec = utils.stft(y, winLength, NFFT, overlap=2).transpose()
 
     # Ensure at least 30 frames for intermediate intelligibility
     if x_spec.shape[-1] < N:
