@@ -36,8 +36,8 @@ class PostProcParams:
 
 # Set post-processing parameters
 p = PostProcParams(
-    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',
-    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_SpS',
+    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_SpS',
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savefigure=True,
