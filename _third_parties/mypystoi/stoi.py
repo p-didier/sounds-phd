@@ -156,8 +156,8 @@ def stoi_any_fs(x, y, fs_sig, extended=False):
         raise Exception('x and y should have the same length,' +
                         'found {} and {}'.format(x.shape, y.shape))
 
-    # Base window duration
-    winLength = N_FRAME / FS   # [s]
+    # # Base window duration
+    # winLength = N_FRAME / FS   # [s]
 
     # if fs_sig > FS:
     #     # Adapt base window length
