@@ -3,7 +3,6 @@ import numpy as np
 import time, datetime
 from . import classes
 from . import danse_subfcns as subs
-import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 import copy
 

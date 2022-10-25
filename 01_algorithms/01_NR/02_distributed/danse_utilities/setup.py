@@ -199,7 +199,9 @@ def get_istft(X, fs, settings: classes.ProgramSettings):
     return x, t
 
 
-def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, settings: classes.ProgramSettings):
+def prep_for_ffts(signals: classes.Signals,
+                    asc: classes.AcousticScenario,
+                    settings: classes.ProgramSettings):
     """Zero-padding and signals length adaptation to ensure correct FFT/IFFT operation.
     Based on FFT implementation by `scipy.signal` module.
 
@@ -219,7 +221,7 @@ def prep_for_ffts(signals: classes.Signals, asc: classes.AcousticScenario, setti
     t : np.ndarray of floats
         Corresponding time stamps.
     nadd : int
-        Number of zeros added at the of signal after frame-extension (step 2) below).
+        Number of zeros added at the of signal after frame-extension (step 2 below).
     """
 
     frameSize = settings.stftWinLength
@@ -461,7 +463,6 @@ def generate_signals(settings: classes.ProgramSettings):
             tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
 
-
     # Get VAD consensus
     oVADsourceSpecific = np.sum(oVADsourceSpecific, axis=1)
     oVAD = np.zeros_like(oVADsourceSpecific)
@@ -488,6 +489,14 @@ def generate_signals(settings: classes.ProgramSettings):
         for jj in range(asc.numSensors):
             tmp = sig.fftconvolve(dryNoiseSignals[:, ii], asc.rirNoiseToSensors[:, jj, ii])
             wetNoiseSignals[:, ii, jj] = tmp[:signalLength]
+
+    # Scale noise [fixed SNR at node 1's reference sensor]
+    noiseAtNode1 = np.sum(wetNoiseSignals[:, :, 0], axis=1)
+    psdNoiseNode1 = np.mean(np.abs(noiseAtNode1) ** 2)
+    psdSpeech = np.mean(np.abs(wetDesiredSignals[:, 0, 0]) ** 2)
+    snrCurr = 10 * np.log10(psdSpeech / psdNoiseNode1)
+    requiredSNRchange = settings.baseSNR - snrCurr
+    wetNoiseSignals *= 10 ** (-requiredSNRchange / 20)
 
     # Build speech-only and noise-only signals
     wetNoise = np.sum(wetNoiseSignals, axis=1)      # sum all noise sources at each sensor

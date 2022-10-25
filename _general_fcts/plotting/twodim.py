@@ -113,6 +113,10 @@ def plot_side_room(ax, rd2D, rs, rn, r, sensorToNodeTags,
     ax.grid()
     ax.set_axisbelow(True)
     ax.axis('equal')
+    ax.set_xticks(np.arange(rd2D[0] + 2))
+    ax.set_yticks(np.arange(rd2D[1] + 2))
+    ax.set_xlim([-0.5, rd2D[0]+0.5])
+    ax.set_ylim([-0.5, rd2D[1]+0.5])
     if showLegend and options.nodesColors == 'multi':
         nc = 1  # number of columbs in legend object
         if len(circHandles) >= 4:

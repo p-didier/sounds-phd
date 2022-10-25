@@ -44,7 +44,7 @@ mySettings = ProgramSettings(
     #
     wasnTopology='fully_connected',
     #
-    signalDuration=15,
+    signalDuration=5,
     baseSNR=5,
     #
     DFTsize=2**10,     # DFT size
@@ -65,7 +65,7 @@ mySettings = ProgramSettings(
         plotResult=1,               # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
         # SROsppm=0,
         # SROsppm=[0, 10],
-        SROsppm=[0, 100],
+        SROsppm=[0, 50],
         compensateSROs=True,
         # compensateSROs=False,
         # estimateSROs='Oracle',    # <-- Oracle SRO knowledge, no estimation error
@@ -81,9 +81,10 @@ mySettings = ProgramSettings(
             # startAfterNupdates=2,
             alpha=0.95,
             # alpha=0,
-            alphaEps=0.05,  # only if `loop=='closed'`
-            loop='open',
-            # loop='closed',
+            # alphaEps=0.05,  # only if `loop=='closed'`
+            alphaEps=0.5,  # only if `loop=='closed'`
+            # loop='open',
+            loop='closed',
         )
     ),
     #

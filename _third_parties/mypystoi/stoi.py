@@ -185,9 +185,9 @@ def stoi_any_fs(x, y, fs_sig, extended=False):
     # Ensure at least 30 frames for intermediate intelligibility
     if x_spec.shape[-1] < N:
         warnings.warn('Not enough STFT frames to compute intermediate '
-                      'intelligibility measure after removing silent '
-                      'frames. Returning 1e-5. Please check you wav files',
-                      RuntimeWarning)
+                    'intelligibility measure after removing silent '
+                    'frames. Returning 1e-5. Please check you wav files',
+                    RuntimeWarning)
         return 1e-5
 
     # Apply OB matrix to the spectrograms as in Eq. (1)

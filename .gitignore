@@ -1,4 +1,4 @@
-*.pkl.gz
+*.gz
 *.wav
 *.csv
 *.png

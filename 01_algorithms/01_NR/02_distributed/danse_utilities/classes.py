@@ -37,6 +37,13 @@ class SROdata:
     groundTruth : list[float] = field(default_factory=list)  # ground truth SROs per node
     flagIterations : np.ndarray = np.array([])   # DANSE iteration indices where a SRO flag was raised
     neighbourIndex : np.ndarray = np.array([])  # index of neighbour node corresponding to `residuals` and `estimate`
+
+    def load(self, filename: str, silent=False):
+        return met.load(self, filename, silent)
+
+    def save(self, filename: str):
+        # Save data as archive
+        met.save(self, filename)
     
     def plotSROdata(self, xaxistype='both', fs=16000, Ns=512, firstUp=0):
         """Show evolution of SRO estimates / residuals through time.
@@ -94,13 +101,13 @@ class SROdata:
             if len(self.flagIterations[k]) > 0:
                 if k == 0:
                     ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
-                                colors=f'C{k}', linestyles='dashdot', label=f'Flags {k+1}--{self.neighbourIndex[k]+1}')
+                                colors=f'C{k}', linestyles='dashdot', label=f'FSD')
                 else:
                     ax.vlines(x=self.flagIterations[k], ymin=np.amin(ylims), ymax=np.amax(ylims),
                                 colors=f'C{k}', linestyles='dashdot')
         ax.grid()
         ax.set_ylabel('[ppm]')
-        ax.set_xlabel('DANSE iteration $i$', loc='left')
+        ax.set_xlabel('WOLA frame $i$', loc='left')
         ax.set_xlim([0, len(self.residuals[k])])
         handles, labels = plt.gca().get_legend_handles_labels()
 
@@ -124,7 +131,7 @@ class SROdata:
             ax.set_xticks(xticks)
             ax.set_xticklabels(np.round(xticks * Ns / fs + firstUp, 2))
             ax.set_xlabel('Time at reference node [s]', loc='left')
-        plt.title('SRO estimation through time')
+        # plt.title('SRO estimation through time')
         plt.tight_layout()
 
         stop = 1

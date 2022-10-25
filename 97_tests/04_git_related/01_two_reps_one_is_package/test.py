@@ -23,8 +23,8 @@ while PurePath(pathToRoot).name != rootFolder:
 sys.path.append(f'{pathToRoot}')
 print(sys.path)
 
-from danse.utils.hello import hello
+# from danse.utils.hello import hello
 
-hello()
+# hello()
 
 stop = 1

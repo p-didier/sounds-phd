@@ -1,16 +1,11 @@
 
 import os
 import sys
-from turtle import color
-from matplotlib import lines
-import matplotlib
-from more_itertools import first
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 
-from pyparsing import col
 # Find path to root folder
 rootFolder = 'sounds-phd'
 pathToRoot = Path(__file__)
@@ -18,8 +13,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed')
 sys.path.append(f'{pathToRoot}/_general_fcts')
-from danse_utilities.classes import Results, ProgramSettings
-import danse_utilities
+from danse_utilities.classes import Results
 from plotting.general import lighten_color
 
 @dataclass
@@ -197,7 +191,8 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
         '$100\\geq|\\varepsilon|\\geq 50$ PPM',\
         '$400\\geq|\\varepsilon|\\geq 200$ PPM'
         ]
-    colors = ['C4', 'C2', 'C1']
+    # colors = ['C4', 'C2', 'C1']
+    colors = [(19/255, 103/255, 159/255), (192/255, 0, 0), (0, 0, 0)]
     w = 1/4  # width parameter
 
     # Booleans
@@ -280,7 +275,7 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
         width=w, align='center', alpha=1,
         color=lighten_color(mycolor, 0.33), edgecolor='k')
     handles = [handle1, handle2, handle3]   # handles for legend
-    leglabs = ['GEVD-DANSE + SRO comp.', 'GEVD-DANSE', 'Noisy sensor signal $y_{{k,1}}$']    # labels for legend
+    leglabs = ['GEVD-DANSE + SRO comp.', 'GEVD-DANSE', 'Noisy sensor signal $\dot{y}_{{k,1}}$']    # labels for legend
     # Add grey vertical lines
     ax.vlines(x=np.arange(nNodes-1) + 0.5, ymin=np.amin(ax.get_ylim()), ymax=np.amax(ax.get_ylim()),\
         colors='tab:gray', linestyles='-')
