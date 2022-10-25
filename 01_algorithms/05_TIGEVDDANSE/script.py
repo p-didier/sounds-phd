@@ -91,10 +91,10 @@ def main():
     wasn = sig_ut.build_wasn(room,  vad, wetSpeechAtRefSensor, PARAMS.wasn)
 
     # Run DANSE
-    out = danse_it_up(wasn, PARAMS)
+    out, wasnUpdated = danse_it_up(wasn, PARAMS)
 
     # Post-processing (visualization, etc.)
-    postprocess(out, wasn, room, PARAMS)
+    postprocess(out, wasnUpdated, room, PARAMS)
 
 
 def danse_it_up(wasn: list[Node], p: TestParameters):
@@ -112,25 +112,20 @@ def danse_it_up(wasn: list[Node], p: TestParameters):
     -------
     out : `DANSEoutputs` object
         DANSE outputs (signals, etc.)
+    wasn : list of `Node` objects
+        WASN under consideration after DANSE processing.
     """
 
     # Prep for FFTs (zero-pad)
     for k in range(p.wasn.nNodes):  # for each node
-        # wasn[k].data, wasn[k].timeStamps, _ = base.prep_sigs_for_FFT(
-        #     y=wasn[k].data,
-        #     N=p.danseParams.DFTsize,
-        #     Ns=p.danseParams.Ns,
-        #     t=wasn[k].timeStamps
-        # )
-
         # Derive exponential averaging factor for `Ryy` and `Rnn` updates
         wasn[k].beta = np.exp(np.log(0.5) / \
             (p.danseParams.t_expAvg50p * wasn[k].fs / p.danseParams.Ns))
 
     # Launch DANSE
-    out = core.danse(wasn, p.danseParams)
+    out, wasnUpdated = core.danse(wasn, p.danseParams)
 
-    return out
+    return out, wasnUpdated
 
 
 def postprocess(out: pp.DANSEoutputs,
@@ -146,7 +141,7 @@ def postprocess(out: pp.DANSEoutputs,
     out : `danse.danse_toolbox.d_post.DANSEoutputs` object
         DANSE outputs (signals, etc.)
     wasn : list of `Node` objects
-        WASN under consideration.
+        WASN under consideration, after DANSE processing.
     room : `pyroomacoustics.room.ShoeBox` object
         Acoustic scenario under consideration.
     p : `TestParameters` object
@@ -178,7 +173,7 @@ def postprocess(out: pp.DANSEoutputs,
         out.plot_perf(wasn, p.exportFolder)
 
         # Plot signals at specific nodes (+ export)
-        out.plot_sigs()
+        out.plot_sigs(wasn, p.exportFolder)
 
     stop = 1
 
