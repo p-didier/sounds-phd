@@ -15,3 +15,21 @@ def get_closest(array, values):
         idxs[prev_idx_is_less] -= 1
     
     return idxs
+
+
+def normalize_toint16(nparray):
+    """Normalizes a NumPy array to integer 16.
+    Parameters
+    ----------
+    nparray : np.ndarray
+        Input array to be normalized.
+
+    Returns
+    ----------
+    nparrayNormalized : np.ndarray
+        Normalized array.
+    """
+    amplitude = np.iinfo(np.int16).max
+    nparrayNormalized = (amplitude * nparray / \
+        np.amax(nparray) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
+    return nparrayNormalized
