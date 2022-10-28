@@ -1,6 +1,7 @@
 
 import sys
 import resampy
+import scipy.stats
 import numpy as np
 from copy import copy
 import matplotlib.pyplot as plt
@@ -147,8 +148,55 @@ def apply_sro_sto(
 
     sigsOut = np.zeros((nSamples, nSensors))
     timeVectOut = np.zeros((nSamples, nNodes))
+    sroPerSample = np.zeros((nSamples, nNodes))
     if timeVaryingSRO.timeVarying:
         fs = np.zeros((nSamples, nSensors))
+        for m in range(nSensors):
+            k = sensorToNodeTags[m] - 1     # corresponding node index
+            # Derive SRO change instants
+            sroChanges = scipy.stats.bernoulli.rvs(
+                timeVaryingSRO.probVarPerSample, size=nSamples
+            )
+            t = np.arange(nSamples) / baseFs
+            sroChangeInstants = t[sroChanges == 1]
+            # Derive SRO values at those instants
+            sroKeyValues = np.random.normal(
+                SROsppm[k],
+                timeVaryingSRO.varRange,
+                size=len(sroChangeInstants)
+            )
+            # Interpolate to get SRO value at each sample
+            idxBeg = 0
+            previousSRO = SROsppm[k]
+            for ii in range(len(sroChangeInstants)):
+                idxEnd = int(sroChangeInstants[ii] * baseFs)
+                if timeVaryingSRO.smoothingFunction == 'linear':
+                    # Linear transition between SRO key values
+                    sroChunk = np.linspace(
+                        start=previousSRO,
+                        stop=sroKeyValues[ii],
+                        num=idxEnd - idxBeg
+                    )
+                elif timeVaryingSRO.smoothingFunction == 'logistic':
+                    # Logistic curve transition between SRO key values
+                    w = (idxEnd - idxBeg) / 30    # hard-coded but ok [28.10.2022]
+                    vals = np.arange(-(idxEnd - idxBeg)/2, (idxEnd - idxBeg)/2)
+                    sigma = 1 / (1 + np.exp(-(1 - vals) / w))
+                    sroChunk = previousSRO + (sroKeyValues[ii] - previousSRO)\
+                        * (1 - sigma)
+                sroPerSample[idxBeg:idxEnd] = sroChunk
+                idxBeg = idxEnd
+                previousSRO = sroKeyValues[ii]
+            sroPerSample[idxEnd:, k] = sroChunk[-1]
+
+            # Resample signal
+            # TODO: https://dsp.stackexchange.com/a/8551 
+            # TODO: https://dsp.stackexchange.com/a/8551 
+            # TODO: https://dsp.stackexchange.com/a/8551 
+            # TODO: https://dsp.stackexchange.com/a/8551 
+            # TODO: https://dsp.stackexchange.com/a/8551 
+
+            stop = 1
     else:
         # Apply STOs / SROs
         fs = np.zeros(nSensors)

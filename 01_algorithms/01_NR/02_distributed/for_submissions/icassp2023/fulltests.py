@@ -1,4 +1,4 @@
-import sys
+import sys, re
 from pathlib import Path, PurePath
 from dataclasses import dataclass, field
 # Find path to root folder
@@ -31,7 +31,12 @@ PARAMS = TestsParams(
     computeCentralised=True,
     deltaSROs=[0,20,50,200],
     exportBasePath=EXPORTPATH,
-    timeVaryingSROs=False,
+    timeVaryingSROs=SROsTimeVariation(
+        timeVarying=True,
+        varRange=10,
+        smoothed=True,
+        probVarPerSample=0.0001
+    ),
     # noiseType='white',      # white noise
     # noiseType='ssn',        # speech-shaped noise
     noiseType='babble',     # babble noise
@@ -88,13 +93,18 @@ def main():
 
 def run_simul(params, exportBasePath):
 
+    # Infer number of noise sources from ASC path name
+    # (https://stackoverflow.com/a/28526377)
+    nNoiseS = int(re.findall(
+        "\d+", Path(params['ASC']).parent.stem[-3:]
+    )[0])
     # Determine which noise to use
     if params['noiseType'] == 'white':
         noiseFiles = ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']
     elif params['noiseType'] == 'ssn':
         noiseFiles = ['ssn/ssn_speech1.wav', 'ssn/ssn_speech2.wav']
     elif params['noiseType'] == 'babble':
-        noiseFiles = ['babble/babble1.wav', 'babble/babble2.wav']
+        noiseFiles = [f'babble/babble{ii + 1}.wav' for ii in range(nNoiseS)]
 
     # Generate test parameters
     danseTestingParams = sro_testing.DanseTestingParameters(
@@ -143,10 +153,8 @@ def run_simul(params, exportBasePath):
             cohDriftMethod=CohDriftSROEstimationParameters(
                 loop='open'
             ),
-            timeVaryingSROs=SROsTimeVariation(
-                # vvvvvvvvvvvvvv
-                timeVarying=params['timeVaryingSROs']
-            )
+            # vvvvvvvvvvvvvv
+            timeVaryingSROs=params['timeVaryingSROs']
         ),
         printouts=PrintoutsParameters(
             progressPrintingInterval=0.5
