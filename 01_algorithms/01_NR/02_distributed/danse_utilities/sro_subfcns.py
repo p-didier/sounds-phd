@@ -13,7 +13,7 @@ while PurePath(pathToRoot).name != rootFolder:
     pathToRoot = pathToRoot.parent
 if not any("danse_utilities" in s for s in sys.path):
     sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/02_distributed/danse_utilities')
-from classes import DWACDParameters, ProgramSettings
+from classes import DWACDParameters, ProgramSettings, SROsTimeVariation
 
 
 def apply_sto(x, stoDelay, fs):
@@ -76,12 +76,7 @@ def resample_for_sro(x, baseFs, SROppm):
         xResamp = resampy.core.resample(x, baseFs, fsSRO)
     else:
         xResamp = copy(x)
-
-    # tOriginal = np.arange(len(x)) / baseFs
-    # numSamplesPostResamp = int(np.floor(fsSRO / baseFs * len(x)))
-    # xResamp, t = sig.resample(x, num=numSamplesPostResamp, t=tOriginal)
-    # t = np.arange(0, numSamplesPostResamp) * (tOriginal[1] - tOriginal[0]) * x.shape[0] / float(numSamplesPostResamp) + tOriginal[0]    # based on line 3116 in `scipy.signal.resample`
-
+    
     t = np.arange(len(xResamp)) / fsSRO
 
     if len(xResamp) >= len(x):
@@ -92,16 +87,24 @@ def resample_for_sro(x, baseFs, SROppm):
         dt = t[1] - t[0]
         tadd = np.linspace(t[-1]+dt, t[-1]+dt*(len(x) - len(xResamp)), len(x) - len(xResamp))
         t = np.concatenate((t, tadd))
-        if len(t) < len(x):
-            stop = 1
         # Append zeros
         xResamp = np.concatenate((xResamp, np.zeros(len(x) - len(xResamp))))
 
     return xResamp, t, fsSRO
 
 
-def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plotit=False):
-    """Applies sampling rate offsets (SROs) and sampling time offsets (STOs) to signals.
+def apply_sro_sto(
+        sigs,
+        baseFs,
+        sensorToNodeTags,
+        SROsppm,
+        STOdelays,
+        plotit=False,
+        timeVaryingSRO: SROsTimeVariation = SROsTimeVariation(),
+    ):
+    """
+    Applies sampling rate offsets (SROs) and
+    sampling time offsets (STOs) to signals.
 
     Parameters
     ----------
@@ -117,6 +120,8 @@ def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plo
         STO-induced delay per node [s].
     plotit : bool
         If True, plots a visualization of the applied signal changes.
+    timeVaryingSRO : `SROsTimeVariation` object
+        Contains time-varying SRO parameters.
 
     Returns
     -------
@@ -128,63 +133,79 @@ def apply_sro_sto(sigs, baseFs, sensorToNodeTags, SROsppm, STOinducedDelays, plo
         Sensor-specific sampling frequency, after SRO application. 
     """
     # Extract useful variables
-    numSamples = sigs.shape[0]
-    numSensors = sigs.shape[-1]
-    numNodes = len(np.unique(sensorToNodeTags))
+    nSamples = sigs.shape[0]
+    nSensors = sigs.shape[-1]
+    nNodes = len(np.unique(sensorToNodeTags))
 
     # Check / adapt SROs object size
-    if len(SROsppm) != numNodes:
+    if len(SROsppm) != nNodes:
         if len(SROsppm) == 1:
-            print(f'Applying the same SRO ({SROsppm} ppm) to all {numNodes} nodes.')
-            SROsppm = np.repeat(SROsppm[0], numNodes)
+            print(f'Applying the same SRO ({SROsppm} ppm) to all {nNodes} nodes.')
+            SROsppm = np.repeat(SROsppm[0], nNodes)
         else:
-            raise ValueError(f'An incorrect number of SRO values was provided ({len(SROsppm)} for {numNodes} nodes).')
+            raise ValueError(f'An incorrect number of SRO values was provided ({len(SROsppm)} for {nNodes} nodes).')
 
-    # Apply STOs / SROs
-    sigsOut       = np.zeros((numSamples, numSensors))
-    timeVectorOut = np.zeros((numSamples, numNodes))
-    fs = np.zeros(numSensors)
-    for idxSensor in range(numSensors):
-        k = sensorToNodeTags[idxSensor] - 1     # corresponding node index
-        # Apply SROs
-        sigsOut[:, idxSensor], timeVectorOut[:, k], fs[idxSensor] = resample_for_sro(sigs[:, idxSensor], baseFs, SROsppm[k])
-        # Apply STOs
-        sigsOut[:, idxSensor] = apply_sto(sigsOut[:, idxSensor], STOinducedDelays[k], fs[idxSensor])
+    sigsOut = np.zeros((nSamples, nSensors))
+    timeVectOut = np.zeros((nSamples, nNodes))
+    if timeVaryingSRO.timeVarying:
+        fs = np.zeros((nSamples, nSensors))
+    else:
+        # Apply STOs / SROs
+        fs = np.zeros(nSensors)
+        for m in range(nSensors):
+            k = sensorToNodeTags[m] - 1     # corresponding node index
+            # Apply SROs
+            sigsOut[:, m], timeVectOut[:, k], fs[m] = resample_for_sro(
+                sigs[:, m], baseFs, SROsppm[k]
+            )
+            # Apply STOs
+            sigsOut[:, m] = apply_sto(
+                sigsOut[:, m], STOdelays[k], fs[m]
+            )
 
     # Plot
     if plotit:
-        minimumObservableDrift = 1   # plot enough samples to observe drifts of at least that many samples on all signals
-        smallestDriftFrequency = np.amin(SROsppm[SROsppm != 0]) / 1e6 * baseFs  # [samples/s]
-        samplesToPlot = int(minimumObservableDrift / smallestDriftFrequency * baseFs)
+        # plot enough samples to observe drifts of
+        # at least that many samples on all signals.
+        minObservableDrift = 1
+        smallestDriftFreq = np.amin(SROsppm[SROsppm != 0]) / 1e6 * baseFs
+        samplesToPlot = int(minObservableDrift / smallestDriftFreq * baseFs)
         markerFormats = ['o','v','^','<','>','s','*','D']
         fig = plt.figure(figsize=(8,4))
         ax = fig.add_subplot(111)
-        for k in range(numNodes):
-            allSensors = np.arange(numSensors)
-            idxSensor = allSensors[sensorToNodeTags == (k + 1)]
-            if isinstance(idxSensor, np.ndarray):
-                idxSensor = idxSensor[0]
-            markerline, _, _ = ax.stem(timeVectorOut[:samplesToPlot, k], sigsOut[:samplesToPlot, idxSensor],
-                    linefmt=f'C{k}', markerfmt=f'C{k}{markerFormats[k % len(markerFormats)]}',
-                    label=f'Node {k + 1} - $\\varepsilon={SROsppm[k]}$ ppm')
+        for k in range(nNodes):
+            allSensors = np.arange(nSensors)
+            m = allSensors[sensorToNodeTags == (k + 1)]
+            if isinstance(m, np.ndarray):
+                m = m[0]
+            markerline, _, _ = ax.stem(
+                timeVectOut[:samplesToPlot, k],
+                sigsOut[:samplesToPlot, m],
+                linefmt=f'C{k}',
+                markerfmt=f'C{k}{markerFormats[k % len(markerFormats)]}',
+                label=f'Node {k + 1} - $\\varepsilon={SROsppm[k]}$ ppm'
+            )
             markerline.set_markerfacecolor('none')
         ax.set(xlabel='$t$ [s]', title='SROs / STOs visualization')
         ax.grid()
         plt.tight_layout()
         plt.show()
 
-    return sigsOut, timeVectorOut, fs
+    return sigsOut, timeVectOut, fs
 
-def cohdrift_sro_estimation(wPos: np.ndarray,
-                            wPri: np.ndarray,
-                            avgResProd,
-                            Ns,
-                            ld,
-                            alpha=0.95,
-                            method='gs',
-                            flagFirstSROEstimate=False,
-                            bufferFlagPos=0,
-                            bufferFlagPri=0):
+
+def cohdrift_sro_estimation(
+    wPos: np.ndarray,
+    wPri: np.ndarray,
+    avgResProd,
+    Ns,
+    ld,
+    alpha=0.95,
+    method='gs',
+    flagFirstSROEstimate=False,
+    bufferFlagPos=0,
+    bufferFlagPri=0
+    ):
     """Estimates residual SRO using a coherence drift technique.
     
     Parameters
@@ -196,27 +217,35 @@ def cohdrift_sro_estimation(wPos: np.ndarray,
     avg_res_prod : [2*(N-1) x 1] np.ndarray (complex)
         Exponentially averaged complex conjugate product of `wPos` and `wPri`
     Ns : int
-        Number of new samples at each new STFT frame, counting overlap (`Ns=N*(1-O)`, where `O` is the amount of overlap [/100%])
+        Number of new samples at each new STFT frame,
+        counting overlap (`Ns=N*(1-O)`, where `O` is
+        the amount of overlap [/100%]).
     ld : int
         Number of STFT frames separating `wPos` from `wPri`.
     alpha : float
         Exponential averaging constant (DWACD method: .95).
     method : str
-        Method to use to retrieve SRO once the exponentially averaged product has been computed.
+        Method to use to retrieve SRO once the exponentially
+        averaged product has been computed.
     flagFirstSROEstimate : bool
-        If True, this is the first SRO estimation round --> do not apply exponential averaging.
+        If True, this is the first SRO estimation round
+        --> do not apply exponential averaging.
     bufferFlagPos : int
-        Cumulate buffer flags from initialization to current iteration, for current node pair.
+        Cumulate buffer flags from initialization to current iteration,
+        for current node pair.
     bufferFlagPri : int
-        Cumulate buffer flags from initialization to "current iteration - `ld`", for current node pair.
+        Cumulate buffer flags from initialization to
+        "current iteration - `ld`", for current node pair.
 
     Returns
     -------
     sro_est : float
         Estimated residual SRO
-        -- `nLocalSensors` first elements of output should be zero (no intra-node SROs)
+        -- `nLocalSensors` first elements of output
+        should be zero (no intra-node SROs).
     avg_res_prod_out : [2*(N-1) x 1] np.ndarray (complex)
-        Exponentially averaged residuals (complex conjugate) product - post-processing.
+        Exponentially averaged residuals (complex conjugate)
+        product - post-processing.
     """
 
     # "Residuals" product
@@ -228,11 +257,13 @@ def cohdrift_sro_estimation(wPos: np.ndarray,
         -1
     )
     # Account for potential buffer flags (extra / missing sample)
-    res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) * np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
+    res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) *\
+        np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
 
     # Update the average coherence product
     if flagFirstSROEstimate:
-        avgResProd_out = res_prod     # <-- 1st SRO estimation, no exponential averaging (initialization)
+        # vvv 1st SRO estimation, no exponential averaging (initialization)
+        avgResProd_out = res_prod
     else:
         avgResProd_out = alpha * avgResProd + (1 - alpha) * res_prod 
 
@@ -248,10 +279,17 @@ def cohdrift_sro_estimation(wPos: np.ndarray,
         epsmax = 400 * 1e-6
         kmin, kmax = 1, len(wPri)
         kappa = np.arange(kmin, kmax)    # freq. bins indices
-        norm_phase = np.angle(avgResProd_out[(len(avgResProd_out) // 2 - 1 + kmin):(len(avgResProd_out) // 2 - 1 + kmax)])\
-                                                * len(wPri) / (2 * (ld * Ns) * kappa * epsmax)
-        mean_phase = np.mean(np.abs(avgResProd_out[(len(avgResProd_out) // 2 - 1 + kmin):(len(avgResProd_out) // 2 - 1 + kmax)])\
-                                                * np.exp(1j * norm_phase))
+        norm_phase = np.angle(
+            avgResProd_out[(len(avgResProd_out) // 2 - 1 + kmin):\
+                (len(avgResProd_out) // 2 - 1 + kmax)])\
+            * len(wPri) / (2 * (ld * Ns) * kappa * epsmax
+        )
+        mean_phase = np.mean(
+            np.abs(avgResProd_out[
+                (len(avgResProd_out) // 2 - 1 + kmin):\
+                (len(avgResProd_out) // 2 - 1 + kmax)
+            ]) * np.exp(1j * norm_phase)
+        )
         sro_est = - epsmax / np.pi * np.angle(mean_phase)
 
     elif method == 'ls':
@@ -276,8 +314,8 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
     References
     ----------
     [1] Gburrek, Tobias, Joerg Schmalenstroeer, and Reinhold Haeb-Umbach.
-        "On Synchronization of Wireless Acoustic Sensor Networks in the Presence
-        of Time-Varying Sampling Rate Offsets and Speaker Changes."
+        "On Synchronization of Wireless Acoustic Sensor Networks in the
+        Presence of Time-Varying Sampling Rate Offsets and Speaker Changes."
         ICASSP 2022-2022 IEEE International Conference on Acoustics,
         Speech and Signal Processing (ICASSP). IEEE, 2022.
     [2] DWACD repository: https://github.com/fgnt/paderwasn
@@ -292,7 +330,8 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         estimated, in the STFT domain (`Nf` freq. bins, `Nl` time frames)
     ref_sigSTFT : [Nf x Nl] np.ndarray (complex)
         Matrix corresponding to the reference signal (Should have the
-        same length as sig), in the STFT domain (`Nf` freq. bins, `Nl` time frames)
+        same length as sig), in the STFT domain (`Nf` freq. bins,
+        `Nl` time frames).
     activity_sig : [Nl x 1] np.ndarray (int or bool)
         Vector containing the sample-wise information of source
         activity in the signal sig
@@ -314,7 +353,13 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         SRO estimate [NOT in ppm]
     """
 
-    def calc_psd_stft(frame_shift_welch, fft_size, stft_seg_i, stft_seg_j, sro=0.):
+    def calc_psd_stft(
+        frame_shift_welch,
+        fft_size,
+        stft_seg_i,
+        stft_seg_j,
+        sro=0.
+        ):
         """Estimate the (cross) power spectral density (PSD) from the given
         signal segments using a Welch method, starting from the STFT domain.
 
@@ -341,7 +386,7 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         return np.mean(stft_seg_i * np.conj(stft_seg_j), axis=-1)
 
 
-    def calc_coherence_stft(frame_shift_welch, fft_size, seg, seg_ref, sro):
+    def calc_coherence_stft(shift_welch, fft_size, seg, seg_ref, sro):
         """Estimate the coherence from the given signal segments, 
         directly in the STFT domain.
 
@@ -362,9 +407,9 @@ def dwacd_sro_estimation(sigSTFT, ref_sigSTFT, activity_sig, activity_ref_sig,
         gamma [Nf x 1] np.ndarray (complex)
             Coherence of the signal and the reference signal
         """
-        cpsd = calc_psd_stft(frame_shift_welch, fft_size, seg_ref, seg, sro)
-        psd_ref_sig = calc_psd_stft(frame_shift_welch, fft_size, seg_ref, seg_ref)
-        psd_sig = calc_psd_stft(frame_shift_welch, fft_size, seg, seg)
+        cpsd = calc_psd_stft(shift_welch, fft_size, seg_ref, seg, sro)
+        psd_ref_sig = calc_psd_stft(shift_welch, fft_size, seg_ref, seg_ref)
+        psd_sig = calc_psd_stft(shift_welch, fft_size, seg, seg)
         gamma = cpsd / (np.sqrt(psd_ref_sig * psd_sig) + 1e-13)
         return gamma
 

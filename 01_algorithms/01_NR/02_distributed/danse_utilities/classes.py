@@ -29,6 +29,10 @@ class MiscellaneousData:
     firstDANSEupRefSensor: int = 0
 
 @dataclass
+class SROsTimeVariation:
+    timeVarying: bool = False   # if True, make SROs time-varying
+
+@dataclass
 class SROdata:
     estMethod : str = ''                        # SRO estimation method
     compensation : bool = False                 # if True, compensation was applied, else, not
@@ -273,6 +277,7 @@ class SamplingRateOffsets():
     dwacd: DWACDParameters = DWACDParameters()  # parameters for Dynamic Weighted Average Coherence Drift SRO estimation
     cohDriftMethod: CohDriftSROEstimationParameters = CohDriftSROEstimationParameters()     # parameters for "Coherence drift" SRO estimation method
     plotResult: bool = False                # if True, plot results via function `sro_subfcns.SROdata.plotSROdata()`
+    timeVaryingSROs: bool = False           # if True, consider time-varying SROs
 
     def __post_init__(self):
         # Base checks

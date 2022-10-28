@@ -43,7 +43,7 @@ sets = ASCProgramSettings(
     # arrayGeometry='linear',         # microphone array geometry (only used if numSensorPerNode > 1)
     # arrayGeometry='radius',           # microphone array geometry (only used if numSensorPerNode > 1)
     arrayGeometry='grid3d',           # microphone array geometry (only used if numSensorPerNode > 1)
-    sensorSeparation=0.2,            # separation between sensor in array (only used if numSensorPerNode > 1) [m]
+    sensorSeparation=0.1,            # separation between sensor in array (only used if numSensorPerNode > 1) [m]
     revTime=0.15,                      # reverberation time [s]
     # specialCase='allNodesInSamePosition'    # special cases
 )

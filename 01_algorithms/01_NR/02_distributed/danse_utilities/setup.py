@@ -371,11 +371,11 @@ def pre_process_signal(rawSignal, desiredDuration, originalFs, targetFs):
     return sig_out
 
 
-def generate_signals(settings: classes.ProgramSettings):
+def generate_signals(s: classes.ProgramSettings):
     """Generates signals based on acoustic scenario and raw files.
     Parameters
     ----------
-    settings : ProgramSettings object
+    s : `ProgramSettings` object
         The settings for the current run.
 
     Returns
@@ -389,37 +389,37 @@ def generate_signals(settings: classes.ProgramSettings):
     """
 
     # Load acoustic scenario
-    asc = AcousticScenario().load(settings.acousticScenarioPath)
+    asc = AcousticScenario().load(s.acousticScenarioPath)
     if not hasattr(asc, 'nodeLinks'):
         asc.__post_init__()
 
     # Detect conflicts
-    if asc.numDesiredSources > len(settings.desiredSignalFile):
-        raise ValueError(f'{settings.desiredSignalFile} "desired" signal files provided while {asc.numDesiredSources} are needed.')
-    if asc.numNoiseSources > len(settings.noiseSignalFile):
-        raise ValueError(f'{settings.noiseSignalFile} "noise" signal files provided while {asc.numNoiseSources} are needed.')
-    if asc.numNodes != len(settings.asynchronicity.SROsppm):
-        if (np.array(settings.asynchronicity.SROsppm) == 0).all():
-            settings.asynchronicity.SROsppm = np.zeros(asc.numNodes)
+    if asc.numDesiredSources > len(s.desiredSignalFile):
+        raise ValueError(f'{len(s.desiredSignalFile)} "desired" signal files provided while {asc.numDesiredSources} are needed.')
+    if asc.numNoiseSources > len(s.noiseSignalFile):
+        raise ValueError(f'{len(s.noiseSignalFile)} "noise" signal files provided while {asc.numNoiseSources} are needed.')
+    if asc.numNodes != len(s.asynchronicity.SROsppm):
+        if (np.array(s.asynchronicity.SROsppm) == 0).all():
+            s.asynchronicity.SROsppm = np.zeros(asc.numNodes)
         else:
             raise ValueError('Number of nodes does not match number of given non-zero SRO values.')
-    if asc.numNodes != len(settings.asynchronicity.STOinducedDelays):
-        if (np.array(settings.asynchronicity.STOinducedDelays) == 0).all():
-            settings.asynchronicity.STOinducedDelays = np.zeros(asc.numNodes)
+    if asc.numNodes != len(s.asynchronicity.STOinducedDelays):
+        if (np.array(s.asynchronicity.STOinducedDelays) == 0).all():
+            s.asynchronicity.STOinducedDelays = np.zeros(asc.numNodes)
         else:
             raise ValueError('Number of nodes does not match number of given non-zero STO values.')
 
     # Adapt sampling frequency
-    if asc.samplingFreq != settings.samplingFrequency:
+    if asc.samplingFreq != s.samplingFrequency:
         # Resample RIRs
         for ii in range(asc.rirDesiredToSensors.shape[1]):
             for jj in range(asc.rirDesiredToSensors.shape[2]):
-                resampled = resampy.resample(asc.rirDesiredToSensors[:, ii, jj], asc.samplingFreq, settings.samplingFrequency)
+                resampled = resampy.resample(asc.rirDesiredToSensors[:, ii, jj], asc.samplingFreq, s.samplingFrequency)
                 if ii == 0 and jj == 0:
                     rirDesiredToSensors_resampled = np.zeros((resampled.shape[0], asc.rirDesiredToSensors.shape[1], asc.rirDesiredToSensors.shape[2]))
                 rirDesiredToSensors_resampled[:, ii, jj] = resampled
             for jj in range(asc.rirNoiseToSensors.shape[2]):
-                resampled = resampy.resample(asc.rirNoiseToSensors[:, ii, jj], asc.samplingFreq, settings.samplingFrequency)
+                resampled = resampy.resample(asc.rirNoiseToSensors[:, ii, jj], asc.samplingFreq, s.samplingFrequency)
                 if ii == 0 and jj == 0:
                     rirNoiseToSensors_resampled = np.zeros((resampled.shape[0], asc.rirNoiseToSensors.shape[1], asc.rirNoiseToSensors.shape[2]))
                 rirNoiseToSensors_resampled[:, ii, jj] = resampled
@@ -427,10 +427,10 @@ def generate_signals(settings: classes.ProgramSettings):
         if asc.rirNoiseToSensors.shape[2] > 0:  # account for noiseless scenario
             asc.rirNoiseToSensors = rirNoiseToSensors_resampled
         # Modify ASC object parameter
-        asc.samplingFreq = settings.samplingFrequency
+        asc.samplingFreq = s.samplingFrequency
 
     # Desired signal length [samples]
-    signalLength = int(settings.signalDuration * asc.samplingFreq) 
+    signalLength = int(s.signalDuration * asc.samplingFreq) 
 
     # Load + pre-process dry desired signals and build wet desired signals
     dryDesiredSignals = np.zeros((signalLength, asc.numDesiredSources))
@@ -438,29 +438,45 @@ def generate_signals(settings: classes.ProgramSettings):
     oVADsourceSpecific = np.zeros((signalLength, asc.numDesiredSources))
     for ii in range(asc.numDesiredSources):
         # Load signal
-        rawSignal, fsRawSignal = sf.read(settings.desiredSignalFile[ii])
+        rawSignal, fsRawSignal = sf.read(s.desiredSignalFile[ii])
 
         # Pre-process (resample, truncate, whiten)
-        dryDesiredSignals[:, ii] = pre_process_signal(rawSignal,
-                                                    settings.signalDuration,
-                                                    fsRawSignal,
-                                                    asc.samplingFreq)
+        dryDesiredSignals[:, ii] = pre_process_signal(
+            rawSignal,
+            s.signalDuration,
+            fsRawSignal,
+            asc.samplingFreq
+        )
 
         # Convolve with RIRs to create wet signals - TO GET THE VAD
         for jj in range(asc.numSensors):
-            tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
+            tmp = sig.fftconvolve(
+                dryDesiredSignals[:, ii],
+                asc.rirDesiredToSensors[:, jj, ii]
+            )
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
 
         # Voice Activity Detection (pre-truncation/resampling)
-        thrsVAD = np.amax(wetDesiredSignals[:, ii, 0] ** 2) / settings.VADenergyFactor
-        oVADsourceSpecific[:, ii], _ = VAD.oracleVAD(wetDesiredSignals[:, ii, 0], settings.VADwinLength, thrsVAD, asc.samplingFreq)
+        thrsVAD = np.amax(wetDesiredSignals[:, ii, 0] ** 2) / s.VADenergyFactor
+        oVADsourceSpecific[:, ii], _ = VAD.oracleVAD(
+            wetDesiredSignals[:, ii, 0],
+            s.VADwinLength,
+            thrsVAD,
+            asc.samplingFreq
+        )
 
         # Whiten dry signal 
-        dryDesiredSignals[:, ii] = whiten(dryDesiredSignals[:, ii], oVADsourceSpecific[:, ii])
+        dryDesiredSignals[:, ii] = whiten(
+            dryDesiredSignals[:, ii],
+            oVADsourceSpecific[:, ii]
+        )
 
         # Convolve with RIRs to create wet signals - For actual use
         for jj in range(asc.numSensors):
-            tmp = sig.fftconvolve(dryDesiredSignals[:, ii], asc.rirDesiredToSensors[:, jj, ii])
+            tmp = sig.fftconvolve(
+                dryDesiredSignals[:, ii],
+                asc.rirDesiredToSensors[:, jj, ii]
+            )
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
 
     # Get VAD consensus
@@ -473,21 +489,27 @@ def generate_signals(settings: classes.ProgramSettings):
     wetNoiseSignals = np.zeros((signalLength, asc.numNoiseSources, asc.numSensors))
     for ii in range(asc.numNoiseSources):
 
-        rawSignal, fsRawSignal = sf.read(settings.noiseSignalFile[ii])
-        tmp = pre_process_signal(rawSignal,
-                                    settings.signalDuration,
-                                    fsRawSignal,
-                                    asc.samplingFreq)
+        rawSignal, fsRawSignal = sf.read(s.noiseSignalFile[ii])
+
+        tmp = pre_process_signal(
+            rawSignal,
+            s.signalDuration,
+            fsRawSignal,
+            asc.samplingFreq
+        )
 
         # Whiten signal 
         tmp = whiten(tmp, oVAD)
 
         # Set SNR
-        dryNoiseSignals[:, ii] = 10 ** (-settings.baseSNR / 20) * tmp
+        dryNoiseSignals[:, ii] = 10 ** (-s.baseSNR / 20) * tmp
 
         # Convolve with RIRs to create wet signals
         for jj in range(asc.numSensors):
-            tmp = sig.fftconvolve(dryNoiseSignals[:, ii], asc.rirNoiseToSensors[:, jj, ii])
+            tmp = sig.fftconvolve(
+                dryNoiseSignals[:, ii],
+                asc.rirNoiseToSensors[:, jj, ii]
+            )
             wetNoiseSignals[:, ii, jj] = tmp[:signalLength]
 
     # Scale noise [fixed SNR at node 1's reference sensor]
@@ -495,7 +517,7 @@ def generate_signals(settings: classes.ProgramSettings):
     psdNoiseNode1 = np.mean(np.abs(noiseAtNode1) ** 2)
     psdSpeech = np.mean(np.abs(wetDesiredSignals[:, 0, 0]) ** 2)
     snrCurr = 10 * np.log10(psdSpeech / psdNoiseNode1)
-    requiredSNRchange = settings.baseSNR - snrCurr
+    requiredSNRchange = s.baseSNR - snrCurr
     wetNoiseSignals *= 10 ** (-requiredSNRchange / 20)
 
     # Build speech-only and noise-only signals
@@ -505,42 +527,55 @@ def generate_signals(settings: classes.ProgramSettings):
     wetSpeech_norm = wetSpeech / np.amax(np.abs(wetNoise + wetSpeech))  # Normalize
 
     # --- Apply STOs / SROs ---
-    wetNoise_norm, _, _ = sro_subfcns.apply_sro_sto(wetNoise_norm, asc.samplingFreq, asc.sensorToNodeTags,
-                                settings.asynchronicity.SROsppm, settings.asynchronicity.STOinducedDelays)
-    wetSpeech_norm, timeStampsSROs, fsSROs = sro_subfcns.apply_sro_sto(wetSpeech_norm, asc.samplingFreq, asc.sensorToNodeTags,
-                                settings.asynchronicity.SROsppm, settings.asynchronicity.STOinducedDelays)
+    wetNoise_norm, _, _ = sro_subfcns.apply_sro_sto(
+        wetNoise_norm,
+        asc.samplingFreq,
+        asc.sensorToNodeTags,
+        s.asynchronicity.SROsppm,
+        s.asynchronicity.STOinducedDelays,
+        timeVaryingSRO=s.asynchronicity.timeVaryingSROs
+    )
+    wetSpeech_norm, timeStampsSROs, fsSROs = sro_subfcns.apply_sro_sto(
+        wetSpeech_norm,
+        asc.samplingFreq,
+        asc.sensorToNodeTags,
+        s.asynchronicity.SROsppm,
+        s.asynchronicity.STOinducedDelays,
+        timeVaryingSRO=s.asynchronicity.timeVaryingSROs
+    )
     # Set reference node (for master clock) based on SRO values
-    masterClockNodeIdx = np.where(np.array(settings.asynchronicity.SROsppm) == 0)[0][0]
+    masterClockNodeIdx = np.where(np.array(s.asynchronicity.SROsppm) == 0)[0][0]
     # ------------------
 
     # Build sensor signals
     sensorSignals = wetSpeech_norm + wetNoise_norm
 
     # Add self-noise to microphones
-    rng = np.random.default_rng(settings.randSeed)
+    rng = np.random.default_rng(s.randSeed)
     for k in range(sensorSignals.shape[-1]):
-        selfnoise = 10 ** (settings.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
+        selfnoise = 10 ** (s.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
         sensorSignals[:, k] += selfnoise
     
     # Build output class object
-    signals = classes.Signals(dryNoiseSources=dryNoiseSignals,
-                                drySpeechSources=dryDesiredSignals,
-                                wetIndivNoiseSources=wetNoiseSignals,
-                                wetIndivSpeechSources=wetDesiredSignals,
-                                wetNoise=wetNoise_norm,
-                                wetSpeech=wetSpeech_norm,
-                                sensorSignals=sensorSignals,
-                                VAD=oVAD,
-                                sensorToNodeTags=asc.sensorToNodeTags,
-                                fs=fsSROs,
-                                referenceSensor=settings.referenceSensor,
-                                timeStampsSROs=timeStampsSROs,
-                                masterClockNodeIdx=masterClockNodeIdx
-                                )
+    signals = classes.Signals(
+        dryNoiseSources=dryNoiseSignals,
+        drySpeechSources=dryDesiredSignals,
+        wetIndivNoiseSources=wetNoiseSignals,
+        wetIndivSpeechSources=wetDesiredSignals,
+        wetNoise=wetNoise_norm,
+        wetSpeech=wetSpeech_norm,
+        sensorSignals=sensorSignals,
+        VAD=oVAD,
+        sensorToNodeTags=asc.sensorToNodeTags,
+        fs=fsSROs,
+        referenceSensor=s.referenceSensor,
+        timeStampsSROs=timeStampsSROs,
+        masterClockNodeIdx=masterClockNodeIdx
+    )
                                 
     # Check validity of chosen reference sensor
-    if (signals.nSensorPerNode < settings.referenceSensor + 1).any():
-        conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < settings.referenceSensor + 1]
-        raise ValueError(f'The reference sensor index chosen ({settings.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
+    if (signals.nSensorPerNode < s.referenceSensor + 1).any():
+        conflictIdx = signals.nSensorPerNode[signals.nSensorPerNode < s.referenceSensor + 1]
+        raise ValueError(f'The reference sensor index chosen ({s.referenceSensor}) conflicts with the number of sensors in node(s) {conflictIdx}.')
 
     return signals, asc

@@ -71,11 +71,7 @@ class DanseTestingParameters():
             self.specificDesiredSignalFiles = [self.specificDesiredSignalFiles]
         if not isinstance(self.specificNoiseSignalFiles, list) and isinstance(self.specificNoiseSignalFiles, str):
             self.specificNoiseSignalFiles = [self.specificNoiseSignalFiles]
-        # # Ensure that SRO = 0 ppm is an option
-        # if self.SROsParams.type == 'list':
-        #     if 0 not in self.SROsParams.listedSROs:
-        #         self.SROsParams.listedSROs = [0] + self.SROsParams.listedSROs
-        # # Warnings
+        # Warnings
         if self.writeOver:
             inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
             if not inp in ['y', 'Y']:
@@ -94,7 +90,8 @@ class DanseTestingParameters():
 
 
 def asc_path_selection(danseParams: DanseTestingParameters):
-    """Acoustic scenario and sound files paths selection for DANSE tests.
+    """
+    Acoustic scenario and sound files paths selection for DANSE tests.
     
     Parameters
     ----------
@@ -142,8 +139,9 @@ def asc_path_selection(danseParams: DanseTestingParameters):
     return acousticScenarios, speechFiles, noiseFiles
 
 
-def build_experiment_parameters(danseParams: DanseTestingParameters, exportBasePath=''):
-    """Builds `experiments` object for DANSE testing.
+def build_experiment_parameters(dp: DanseTestingParameters, exportBasePath=''):
+    """
+    Builds `experiments` object for DANSE testing.
     
     Parameters
     ----------
@@ -155,39 +153,44 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
     Returns
     -------
     experiments : list of dicts (ProgramSettings objects ; str)
-        Experiment settings, one per acoustic scenario considered and per SROs combinations. 
+        Experiment settings, one per acoustic scenario considered
+        and per SROs combinations.
     """
 
     # Get explicit path lists
-    acousticScenarios, speechFiles, noiseFiles = asc_path_selection(danseParams)
+    acousticScenarios, speechFiles, noiseFiles = asc_path_selection(dp)
 
     # Get all possible SRO combinations
     sros = []
     for ii in range(len(acousticScenarios)):
         asc = AcousticScenario().load(acousticScenarios[ii])
         
-        if danseParams.SROsParams.type == 'list':
-            # include all possible unique combinations of SRO values, given the number of nodes in the acoustic scenario
-            # --> always including an SRO of 0 ppm (reference clock) at node 1.
-            srosCurr = [list((0,) + p) for p in itertools.product(danseParams.SROsParams.listedSROs,\
-                repeat=asc.numNodes - 1)]
-        elif danseParams.SROsParams.type == 'g':
+        if dp.SROsParams.type == 'list':
+            # include all possible unique combinations of SRO values,
+            # given the number of nodes in the acoustic scenario;
+            # always including an SRO of 0 ppm (reference clock) at node 1.
+            srosCurr = [list((0,) + p) for p in itertools.product(
+                dp.SROsParams.listedSROs, repeat=asc.numNodes - 1
+                )]
+        elif dp.SROsParams.type == 'g':
             # draw SROs scenarios from a normal distribution
             srosCurr = []
             # create random generator
-            rng = np.random.default_rng(danseParams.SROsParams.gaussianSeed)
-            for _ in range(danseParams.SROsParams.numGaussianDraws):
+            rng = np.random.default_rng(dp.SROsParams.gaussianSeed)
+            for _ in range(dp.SROsParams.numGaussianDraws):
                 draw = np.round(rng.normal(
-                    loc=danseParams.SROsParams.gaussianParams[0],       # mean
-                    scale=danseParams.SROsParams.gaussianParams[1],     # standard dev.
+                    loc=dp.SROsParams.gaussianParams[0],    # mean
+                    scale=dp.SROsParams.gaussianParams[1],  # std
                     size=(asc.numNodes - 1,)
                     ))
                 # Turn into ints
                 draw = np.array([int(ii) for ii in draw])
-                signedDraw = rng.choice([-1,1], size=(asc.numNodes - 1,)) * draw
+                signedDraw = rng.choice(
+                    [-1,1], size=(asc.numNodes - 1,)
+                ) * draw
                 srosCurr.append([0] + list(signedDraw))
-        elif danseParams.SROsParams.type == 'specific':
-            srosCurr = [danseParams.SROsParams.listedSROs]
+        elif dp.SROsParams.type == 'specific':
+            srosCurr = [dp.SROsParams.listedSROs]
         sros.append(srosCurr)
 
 
@@ -196,54 +199,59 @@ def build_experiment_parameters(danseParams: DanseTestingParameters, exportBaseP
     for ii in range(len(acousticScenarios)):
         for jj in range(len(sros[ii])):
 
-            compSROs = danseParams.asynchronicity.compensateSROs
-            if all(v == 0 for v in sros[ii][jj]):  # <-- avoid automatic warning message at `ProgramSettings` object initialization
+            compSROs = dp.asynchronicity.compensateSROs
+            # vvv avoid automatic warning message at
+            # `ProgramSettings` object initialization
+            if all(v == 0 for v in sros[ii][jj]):
                 compSROs = False
 
             # Interpret broadcast scheme entry
-            if danseParams.broadcastScheme == 'wholeChunk':
+            if dp.broadcastScheme == 'wholeChunk':
                 BCdomain = 'wholeChunk_td'
                 ps = ProgramSettings()
                 BClength = ps.DFTsize // 2
-            elif danseParams.broadcastScheme == 'samplePerSample':
+            elif dp.broadcastScheme == 'samplePerSample':
                 BCdomain = 'fewSamples_td'
                 BClength = 1
 
             settings = ProgramSettings(
-                    samplingFrequency=danseParams.fs,
+                    samplingFrequency=dp.fs,
                     acousticScenarioPath=acousticScenarios[ii],
                     desiredSignalFile=speechFiles,
                     noiseSignalFile=noiseFiles,
                     #
-                    signalDuration=danseParams.sigDur,
-                    baseSNR=danseParams.baseSNR,
-                    performGEVD=danseParams.performGEVD,
+                    signalDuration=dp.sigDur,
+                    baseSNR=dp.baseSNR,
+                    performGEVD=dp.performGEVD,
                     #
-                    danseUpdating=danseParams.nodeUpdating,
+                    danseUpdating=dp.nodeUpdating,
                     broadcastDomain=BCdomain,
                     broadcastLength=BClength,
-                    computeLocalEstimate=danseParams.computeLocalEstimate,
-                    computeCentralizedEstimate=danseParams.computeCentrEstimate,
-                    timeBtwExternalFiltUpdates=danseParams.timeBtwExternalFiltUpdates,
+                    computeLocalEstimate=dp.computeLocalEstimate,
+                    computeCentralizedEstimate=dp.computeCentrEstimate,
+                    timeBtwExternalFiltUpdates=dp.timeBtwExternalFiltUpdates,
                     expAvg50PercentTime=2.,
                     #
                     asynchronicity=SamplingRateOffsets(
                         SROsppm=sros[ii][jj],
                         compensateSROs=compSROs,
-                        estimateSROs=danseParams.asynchronicity.estimateSROs,
-                        plotResult=danseParams.asynchronicity.plotResult,
-                        cohDriftMethod=danseParams.asynchronicity.cohDriftMethod,
+                        estimateSROs=dp.asynchronicity.estimateSROs,
+                        plotResult=dp.asynchronicity.plotResult,
+                        cohDriftMethod=dp.asynchronicity.cohDriftMethod,
+                        timeVaryingSROs=dp.asynchronicity.timeVaryingSROs
                     ),
-                    printouts=danseParams.printouts,
+                    printouts=dp.printouts,
                     )
             # Build export file path
-            exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'     # experiment export path
+            exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'
             if (np.array(settings.asynchronicity.SROsppm) != 0).any():
                 if settings.asynchronicity.compensateSROs:
                     exportPath += f'_comp{settings.asynchronicity.estimateSROs}'
                 else:
                     exportPath += '_nocomp'
-            experiments.append(dict([('settings', settings), ('path', exportPath)]))
+            experiments.append(dict([
+                ('settings', settings), ('path', exportPath)
+            ]))
 
     return experiments
 
@@ -268,7 +276,12 @@ def go(danseParams: DanseTestingParameters, exportBasePath=''):
         t0 = time.perf_counter()
 
         if not Path(experiments[idxExp]['path']).is_dir() or danseParams.writeOver:
-            danse_main.main(experiments[idxExp]['settings'], experiments[idxExp]['path'], showPlots=0, lightExport=True)
+            danse_main.main(
+                experiments[idxExp]['settings'],
+                experiments[idxExp]['path'],
+                showPlots=0,
+                lightExport=True
+            )
             print(f'\nExperiment #{idxExp+1}/{len(experiments)} ran in {round(time.perf_counter() - t0, 2)}s.\n')
         else:
             # If export folder already existing...

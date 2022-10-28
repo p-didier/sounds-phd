@@ -36,7 +36,7 @@ def main():
     x, fs = sf.read(s.filePath)
     x = x[:, np.newaxis]
     # Apply SRO
-    x_sro, _, _ = apply_sro_sto(x, fs, [1], [s.sro], STOinducedDelays=[0])
+    x_sro, _, _ = apply_sro_sto(x, fs, [1], [s.sro], STOdelays=[0])
 
     numChunks = int(len(x) // s.stftWinShift) - 1
     Xcurr = np.zeros((s.dftSize, numChunks), dtype=complex)
