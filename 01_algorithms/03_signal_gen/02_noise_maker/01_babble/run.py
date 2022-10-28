@@ -1,18 +1,70 @@
 import numpy as np
 import sys, os
 import scipy.signal
-from pathlib import Path
+from pathlib import Path, PurePath
 from sklearn import preprocessing
 import scipy.io.wavfile
 import soundfile as sf
 # Custom imports
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '01_algorithms\\01_NR\\01_centralized\\01_MWF_based\\01_GEVD_MWF\MWFpack')))
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+if not any("01_centralized" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/01_algorithms/01_NR/01_centralized/01_MWF_based/01_GEVD_MWF\MWFpack')
 from sig_gen import load_speech
-currdir = Path(__file__).resolve().parent
-sys.path.append(os.path.abspath(os.path.join(currdir.parent.parent, '01_acoustic_scenes\\rimPypack')))
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '_general_fcts')))
+if not any("rimPypack" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/01_algorithms/03_signal_gen/01_acoustic_scenes/rimPypack')
 from rimPy import rimPy
+if not any("_general_fcts" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/_general_fcts')
 from playsounds.playsounds import playthis
+## vvv Useful for debugging
+import matplotlib.pyplot as plt
+
+
+def main():
+    # Parameters
+    nBabbles = 10   # number of babbles to generate
+    Ttot = 20               # Signal duration [s]
+    Ntalkers = 20           # Number of talkers in babble
+    dataBase = 'libri'      # Reference for database where to fetch dry speech signals 
+    room = 'random'         # Reference for type of room to use to generate RIRs 
+                            #   -- if == 'random': generates a randomized shoebox-room within the volume bounds <Vbounds>
+                            #   -- if == 'specific': generates a specific shoebox-room with the dimensions <rd>
+    Vbounds = [70, 150]     # Room volume bounds [low, high] [m] -- only used if <room> == 'random'
+    rd_specific = [6,5,7]   # Specific room dimensions [x,y,z] [m] -- only used if <room> == 'specific'
+    t60 = 0                 # Reverberation time in room [s]
+    # Export
+    exportflag = True       # Only exports signal as .wav if <exportflag>.
+    exportfolder = f'{pathToRoot}/02_data/00_raw_signals/02_noise/babble'
+
+    # Prepare generation
+    bp = BabbleParams(
+        Ttot, Ntalkers, dataBase,
+        room, Vbounds, rd_specific, t60
+    )
+    bp.bprint()     # inform user
+    for ii in range(nBabbles):
+        print(f'----- BABBLE {ii+1}/{nBabbles} -----')
+        # Generate a babble
+        mybabble, Fs = generate_babble(bp)
+        # Export
+        if exportflag:
+            if not Path(exportfolder).is_dir():
+                Path(exportfolder).mkdir()
+            sf.write(_get_export_name(exportfolder), mybabble, Fs)
+
+    return 0
+
+
+def _get_export_name(folder):
+    """Defines .wav file export name."""
+    if folder[-1] in ['/', '\\']:
+        folder = folder[:-1]
+    nFiles = len([f for f in os.listdir(folder) if f[-4:]=='.wav'])
+    return f'{folder}/babble{nFiles + 1}.wav'
 
 
 class BabbleParams:
@@ -36,7 +88,7 @@ class BabbleParams:
 
 
 def load_babbler(database, duration):
-
+    """Load a babbler (one talker)"""
     babbler, Fs = load_speech(database)
     babblerout = np.copy(babbler)
     while len(babblerout)/Fs < duration:
@@ -49,8 +101,8 @@ def load_babbler(database, duration):
     return babblerout,Fs
 
 
-def generate_babble(bp=BabbleParams):
-
+def generate_babble(bp: BabbleParams):
+    """Generate babble noise from parameters"""
     # ---------- Room ----------
     # Dimensions
     if bp.room == 'random':
@@ -73,26 +125,31 @@ def generate_babble(bp=BabbleParams):
     print('Generating babble...')
     for ii in range(bp.N):
         print('... Babbler #%i/%i ...' % (ii+1,bp.N))
-        babbler,Fs = load_babbler(bp.db, bp.T)
+        babbler,Fs = load_babbler(bp.db, bp.T * 1.5)
+        # ^^^ `*1.5` to avoid problems of too short file when truncating
         babbler = babbler[:, np.newaxis]
         # Get RIR
         rir = rimPy(mic_pos, babbler_pos[ii,:], rd, RefCoeff, rir_dur, Fs)
         if ii == 0:
             print('RIR length: %i samples' % (rir_dur*Fs))
-        # import matplotlib.pyplot as plt
-        # fig,ax = plt.subplots()
-        # ax.plot(rir)
         # Convolve with RIR 
         babbler = scipy.signal.fftconvolve(babbler, rir)
-        babbler = babbler[:int(bp.T*Fs), :]
+        if babbler.ndim == 1:
+            babbler = babbler[:, np.newaxis]
+        # Detect initial silence
+        idxStart = np.argmax(np.abs(babbler) ** 2\
+            >= np.amax(np.abs(babbler) ** 2) / 10)
+        # Truncate
+        uttDur = 1  # [s] duration of a typical utterance
+        uttShift = int(uttDur * Fs)
+        babbler = babbler[idxStart:int(bp.T*Fs) + idxStart + uttShift, :]
         # Build babble
         if ii == 0:
-            mybabble = babbler
+            mybabble = babbler[uttShift:]
         else:
-            mybabble += babbler
+            mybabble += babbler[uttShift:]
 
     # Normalize
-    # mybabble = preprocessing.scale(mybabble)  # normalize
     mybabble = mybabble / np.amax(np.abs(mybabble)) * 0.95  # normalize
 
     if 0:
@@ -100,38 +157,6 @@ def generate_babble(bp=BabbleParams):
 
     return mybabble, Fs
 
-
-def main():
-    # Parameters
-    T = 4                  # Signal duration [s]
-    Ntalkers = 20           # Number of talkers in babble
-    dataBase = 'libri'      # Reference for database where to fetch dry speech signals 
-    room = 'random'         # Reference for type of room to use to generate RIRs 
-                            #   -- if == 'random': generates a randomized shoebox-room within the volume bounds <Vbounds>
-                            #   -- if == 'specific': generates a specific shoebox-room with the dimensions <rd>
-    Vbounds = [70, 150]     # Room volume bounds [low, high] [m] -- only used if <room> == 'random'
-    rd_specific = [6,5,7]   # Specific room dimensions [x,y,z] [m] -- only used if <room> == 'specific'
-    T60 = 0                 # Reverberation time in room [s]
-    # Export
-    exportflag = True       # Only exports signal as .wav if <exportflag>.
-    exportfolder = '%s\\02_data\\00_raw_signals\\02_noise\\babble' % os.getcwd()
-    exportfname = 'babble1'
-
-    # Generate babble object
-    bp = BabbleParams(T, Ntalkers, dataBase, room, Vbounds, rd_specific, T60)
-    bp.bprint()     # inform user
-
-    mybabble, Fs = generate_babble(bp)
-
-    # Export
-    if exportflag:
-        if '.' in exportfname:
-            exportfname = exportfname[:-4]
-        if not os.path.isdir(exportfolder):
-            os.mkdir(exportfolder)
-        sf.write('%s\\%s.wav' % (exportfolder,exportfname), mybabble, Fs)
-
-    return 0
 
 if __name__== "__main__" :
     sys.exit(main())
