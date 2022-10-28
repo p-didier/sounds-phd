@@ -170,14 +170,20 @@ def apply_sro_sto(
             previousSRO = SROsppm[k]
             for ii in range(len(sroChangeInstants)):
                 idxEnd = int(sroChangeInstants[ii] * baseFs)
-                if timeVaryingSRO.smoothingFunction == 'linear':
+                if timeVaryingSRO.transition == 'step':
+                    # Step transition between SRO key values
+                    sroChunk = np.full(
+                        idxEnd - idxBeg,
+                        fill_value=sroKeyValues[ii]
+                    )
+                elif timeVaryingSRO.transition == 'linear':
                     # Linear transition between SRO key values
                     sroChunk = np.linspace(
                         start=previousSRO,
                         stop=sroKeyValues[ii],
                         num=idxEnd - idxBeg
                     )
-                elif timeVaryingSRO.smoothingFunction == 'logistic':
+                elif timeVaryingSRO.transition == 'logistic':
                     # Logistic curve transition between SRO key values
                     w = (idxEnd - idxBeg) / 30    # hard-coded but ok [28.10.2022]
                     vals = np.arange(-(idxEnd - idxBeg)/2, (idxEnd - idxBeg)/2)
@@ -190,11 +196,32 @@ def apply_sro_sto(
             sroPerSample[idxEnd:, k] = sroChunk[-1]
 
             # Resample signal
-            # TODO: https://dsp.stackexchange.com/a/8551 
-            # TODO: https://dsp.stackexchange.com/a/8551 
-            # TODO: https://dsp.stackexchange.com/a/8551 
-            # TODO: https://dsp.stackexchange.com/a/8551 
-            # TODO: https://dsp.stackexchange.com/a/8551 
+            if timeVaryingSRO.transition == 'step':
+                resampledSig = np.array([])
+                timeVector = np.array([])
+                idxBeg = 0
+                for ii in range(len(sroChangeInstants)):
+                    idxEnd = int(sroChangeInstants[ii] * baseFs)
+                    currChunk, timeVectorChunk, _ = resample_for_sro(
+                        sigs[idxBeg:idxEnd, m], baseFs, sroKeyValues[ii]
+                    )
+                    resampledSig = np.concatenate((resampledSig, currChunk))
+                    timeVector = np.concatenate((timeVector, timeVectorChunk))
+                    idxBeg = idxEnd
+                lastChunk, lastTimeChunk, _ = resample_for_sro(
+                    sigs[idxEnd:, m], baseFs, sroKeyValues[-1]
+                )
+                resampledSig = np.concatenate((resampledSig, lastChunk))
+                timeVector = np.concatenate((timeVector, lastTimeChunk))
+                sigsOut[:, m] = resampledSig
+                timeVectOut[:, k] = timeVector
+            else:
+                raise ValueError()
+                # TODO: https://dsp.stackexchange.com/a/8551 
+                # TODO: https://dsp.stackexchange.com/a/8551 
+                # TODO: https://dsp.stackexchange.com/a/8551 
+                # TODO: https://dsp.stackexchange.com/a/8551 
+                # TODO: https://dsp.stackexchange.com/a/8551 
 
             stop = 1
     else:

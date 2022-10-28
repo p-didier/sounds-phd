@@ -32,10 +32,10 @@ class MiscellaneousData:
 class SROsTimeVariation:
     timeVarying: bool = False   # if True, make SROs time-varying
     varRange: float = 0.        # range of SRO variation around base SRO
-    smoothed: bool = True       # if True, the transition between one SRO
-        # value to the next is smooth. Else, immediate (step function).
-    smoothingFunction: str = 'logistic' # smoothing function
-        # in between constant SRO values ('linear', 'logistic').
+    transition: str = 'step' # transition type between constant SROs
+        # -'step': step-function (no smoothing)
+        # -'linear': linear interpolation between one SRO value to the next
+        # -'logistic': logistic function smoothing one SRO value into the next
     probVarPerSample: float = 0.    # proba. of an SRO value change per sample
 
     def __post_init__(self):

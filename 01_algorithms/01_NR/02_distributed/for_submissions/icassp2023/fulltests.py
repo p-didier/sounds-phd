@@ -35,7 +35,8 @@ PARAMS = TestsParams(
         timeVarying=True,
         varRange=10,
         smoothed=True,
-        probVarPerSample=0.0001
+        probVarPerSample=0.0001,
+        transition='step'
     ),
     # noiseType='white',      # white noise
     # noiseType='ssn',        # speech-shaped noise
