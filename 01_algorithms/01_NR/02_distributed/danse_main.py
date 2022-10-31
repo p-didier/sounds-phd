@@ -140,7 +140,7 @@ def main(mySettings: ProgramSettings, exportPath, showPlots=1, lightExport=True)
     # Check if experiment has already been run
     runExpFlag = False
     if Path(exportPath).is_dir():
-        val = input(f'Already existing experiment "{PurePath(exportPath).name}" in folder "{PurePath(Path(exportPath).parent).name}".\nRe-run experiment anyway? [Y/N]  ')
+        val = input(f'Already existing experiment "{PurePath(exportPath).name}" in folder "{Path(exportPath).parent.stem}".\nRe-run experiment anyway? [Y/N]  ')
         if val == 'y' or val == 'Y':
             runExpFlag = True
             print(f'\nRe-running experiment "{PurePath(exportPath).name}" ...\n')

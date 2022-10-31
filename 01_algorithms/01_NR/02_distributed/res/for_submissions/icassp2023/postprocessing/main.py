@@ -30,9 +30,11 @@ class PostProcParams:
 
 # Set post-processing parameters
 p = PostProcParams(
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffwn',  # w/ diffuse white noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_wn',  # w/ white noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_ssn',   # w/ SSN
-    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_bab',   # w/ babble noise
+    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffbab',   # w/ diffuse babble noise
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_bab',   # w/ babble noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_10cmspacing',
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_SpS',
     # plottype='group_per_node',

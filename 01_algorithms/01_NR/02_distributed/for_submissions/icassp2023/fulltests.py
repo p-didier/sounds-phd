@@ -14,6 +14,7 @@ from danse_utilities.classes import SROsTimeVariation
 class TestsParams:
     pathToASC: str = '' # path to acoustic scenario to consider
     computeCentralised: bool = False    # if True, compute centralised
+    baseSNR: float = 0.  # SNR at ref. mic. of node 1
     deltaSROs: list[int] = field(default_factory=list)  # list of SROs
         # ^^^ 2 simulations per element: w/ and w/out comp.
     exportBasePath: str = ''        # path to exported files
@@ -28,19 +29,22 @@ PARAMS = TestsParams(
     pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS18_RT150ms',
     # vvv 10 cm mic. spacing vvv
     # pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS37_RT150ms',
+    baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
     deltaSROs=[0,20,50,200],
     exportBasePath=EXPORTPATH,
     timeVaryingSROs=SROsTimeVariation(
-        timeVarying=True,
+        timeVarying=False,
         varRange=10,
-        smoothed=True,
         probVarPerSample=0.0001,
         transition='step'
     ),
-    # noiseType='white',      # white noise
-    # noiseType='ssn',        # speech-shaped noise
-    noiseType='babble',     # babble noise
+    # noiseType='white',      # white noise (localised)
+    # noiseType='white_diffuse',      # white noise (diffuse)
+    # noiseType='ssn',        # speech-shaped noise (localised)
+    # noiseType='ssn_diffuse',        # speech-shaped noise (diffuse)
+    # noiseType='babble',     # babble noise (localised)
+    noiseType='babble_diffuse',     # babble noise (diffuse)
 )
 
 
@@ -100,12 +104,16 @@ def run_simul(params, exportBasePath):
         "\d+", Path(params['ASC']).parent.stem[-3:]
     )[0])
     # Determine which noise to use
-    if params['noiseType'] == 'white':
+    if 'white' in params['noiseType']:
         noiseFiles = ['whitenoise_signal_1.wav', 'whitenoise_signal_2.wav']
-    elif params['noiseType'] == 'ssn':
+    elif 'ssn' in params['noiseType']:
         noiseFiles = ['ssn/ssn_speech1.wav', 'ssn/ssn_speech2.wav']
-    elif params['noiseType'] == 'babble':
+    elif 'babble' in params['noiseType']:
         noiseFiles = [f'babble/babble{ii + 1}.wav' for ii in range(nNoiseS)]
+    # Make diffuse or not
+    diffuseNoise = False
+    if 'diffuse' in params['noiseType']:
+        diffuseNoise = True
 
     # Generate test parameters
     danseTestingParams = sro_testing.DanseTestingParameters(
@@ -127,6 +135,8 @@ def run_simul(params, exportBasePath):
             f'{pathToRoot}/02_data/00_raw_signals/02_noise/{file}'\
                 for file in noiseFiles
         ],
+        # vvvvvvvvvvvvvv
+        diffuseNoise=diffuseNoise,
         sigDur=15,
         baseSNR=5,
         #

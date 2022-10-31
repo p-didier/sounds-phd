@@ -44,6 +44,7 @@ class DanseTestingParameters():
     specificAcousticScenario: list[str] = field(default_factory=list)       # Path(s) to specific acoustic scenario(s). If not [''], `ascBasePath` is ignored.
     specificDesiredSignalFiles: list[str] = field(default_factory=list)     # Path(s) to specific desired signal file(s). If not [''], `signalsPath` is ignored for desired signals.
     specificNoiseSignalFiles: list[str] = field(default_factory=list)       # Path(s) to specific noise signal file(s). If not [''], `signalsPath` is ignored for noise signals.
+    diffuseNoise: bool = False              # if True, make noise diffuse
     #
     fs: float = 16000.                      # based sampling frequency [Hz]
     sigDur: float = 1.                      # signals duration [s]
@@ -219,6 +220,7 @@ def build_experiment_parameters(dp: DanseTestingParameters, exportBasePath=''):
                     acousticScenarioPath=acousticScenarios[ii],
                     desiredSignalFile=speechFiles,
                     noiseSignalFile=noiseFiles,
+                    diffuseNoise=dp.diffuseNoise,
                     #
                     signalDuration=dp.sigDur,
                     baseSNR=dp.baseSNR,

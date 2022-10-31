@@ -190,7 +190,7 @@ def apply_sro_sto(
                     sigma = 1 / (1 + np.exp(-(1 - vals) / w))
                     sroChunk = previousSRO + (sroKeyValues[ii] - previousSRO)\
                         * (1 - sigma)
-                sroPerSample[idxBeg:idxEnd] = sroChunk
+                sroPerSample[idxBeg:idxEnd, k] = sroChunk
                 idxBeg = idxEnd
                 previousSRO = sroKeyValues[ii]
             sroPerSample[idxEnd:, k] = sroChunk[-1]

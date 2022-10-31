@@ -479,14 +479,31 @@ def generate_signals(s: classes.ProgramSettings):
             )
             wetDesiredSignals[:, ii, jj] = tmp[:signalLength]
 
-    # Get VAD consensus
-    oVADsourceSpecific = np.sum(oVADsourceSpecific, axis=1)
-    oVAD = np.zeros_like(oVADsourceSpecific)
-    oVAD[oVADsourceSpecific == asc.numDesiredSources] = 1   # only set global VAD = 1 when all sources are active
-
     # Load + pre-process dry noise signals and build wet noise signals
     dryNoiseSignals = np.zeros((signalLength, asc.numNoiseSources))
     wetNoiseSignals = np.zeros((signalLength, asc.numNoiseSources, asc.numSensors))
+    if s.diffuseNoise:
+        print(f"Making noise diffuse (keep only 1st noise source: '{Path(s.noiseSignalFile[0]).name}').")
+        # Change RIRs to make diffuse (while keeping reverb.)
+        baseRIR = asc.rirNoiseToSensors[:, s.referenceSensor, 0]
+        # ^^^ only keep first noise source
+        # Truncate to get rid of time of flight delay
+        idxStart = np.argmax(np.abs(baseRIR) ** 2\
+            >= np.amax(np.abs(baseRIR) ** 2) / 10)
+        truncRIR = np.concatenate(
+            (baseRIR[idxStart:], np.zeros(idxStart))
+        )
+        # Replace RIRs
+        truncRIRs = np.repeat(
+            truncRIR[:, np.newaxis],
+            asc.rirNoiseToSensors.shape[1],
+            axis=1
+        )
+        asc.rirNoiseToSensors = np.repeat(
+            truncRIRs[:, :, np.newaxis],
+            asc.rirNoiseToSensors.shape[2],
+            axis=2
+        )
     for ii in range(asc.numNoiseSources):
 
         rawSignal, fsRawSignal = sf.read(s.noiseSignalFile[ii])
@@ -499,7 +516,7 @@ def generate_signals(s: classes.ProgramSettings):
         )
 
         # Whiten signal 
-        tmp = whiten(tmp, oVAD)
+        tmp = whiten(tmp)
 
         # Set SNR
         dryNoiseSignals[:, ii] = 10 ** (-s.baseSNR / 20) * tmp
@@ -555,6 +572,12 @@ def generate_signals(s: classes.ProgramSettings):
     for k in range(sensorSignals.shape[-1]):
         selfnoise = 10 ** (s.selfnoiseSNR / 20) * np.amax(np.abs(sensorSignals[:, k])) * whiten(rng.uniform(-1, 1, (signalLength,)))
         sensorSignals[:, k] += selfnoise
+
+    # Get VAD consensus
+    oVADsourceSpecific = np.sum(oVADsourceSpecific, axis=1)
+    oVAD = np.zeros_like(oVADsourceSpecific)
+    # vvv only set global VAD = 1 when all sources are active
+    oVAD[oVADsourceSpecific == asc.numDesiredSources] = 1
     
     # Build output class object
     signals = classes.Signals(
