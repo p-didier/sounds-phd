@@ -139,6 +139,7 @@ def generate_babble(bp: BabbleParams):
         # Detect initial silence
         idxStart = np.argmax(np.abs(babbler) ** 2\
             >= np.amax(np.abs(babbler) ** 2) / 10)
+        idxStart -= int(0.01 * Fs)  # get rid of potential clicks
         # Truncate
         uttDur = 1  # [s] duration of a typical utterance
         uttShift = int(uttDur * Fs)

@@ -191,8 +191,13 @@ class CohDriftSROEstimationParameters():
                 "mean" (similar to Online WACD implementation [2]),
                 "ls" (least-squares estimate over frequency bins [3])
     alphaEps : float
-        Residual SRO incrementation factor:
-        $\\hat{\\varepsilon}^i = \\hat{\\varepsilon}^{i-1} + `alphaEps` * \\Delta\\varepsilon^i$
+        Residual SRO incrementation factor (only used if `loop == 'closed'`)
+        $\\hat{\\varepsilon}^i = \\hat{\\varepsilon}^{i-1} +
+            `alphaEps` * \\Delta\\varepsilon^i$.
+    loop : str
+        Type of SRO est.+comp. loop:
+            -"closed": estimating SRO residual from compensated signal;
+            -"open": estimating SRO from non-compensated signal.
 
     References
     ----------

@@ -13,6 +13,7 @@ from danse_utilities.classes import SROsTimeVariation
 @dataclass
 class TestsParams:
     pathToASC: str = '' # path to acoustic scenario to consider
+    sigDur: float = 15. # signal duration [s]
     computeCentralised: bool = False    # if True, compute centralised
     baseSNR: float = 0.  # SNR at ref. mic. of node 1
     deltaSROs: list[int] = field(default_factory=list)  # list of SROs
@@ -29,9 +30,10 @@ PARAMS = TestsParams(
     pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS18_RT150ms',
     # vvv 10 cm mic. spacing vvv
     # pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS37_RT150ms',
+    sigDur=5,
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
-    deltaSROs=[0,20,50,200],
+    deltaSROs=[20,50,200],
     exportBasePath=EXPORTPATH,
     timeVaryingSROs=SROsTimeVariation(
         timeVarying=False,
@@ -43,8 +45,8 @@ PARAMS = TestsParams(
     # noiseType='white_diffuse',      # white noise (diffuse)
     # noiseType='ssn',        # speech-shaped noise (localised)
     # noiseType='ssn_diffuse',        # speech-shaped noise (diffuse)
-    # noiseType='babble',     # babble noise (localised)
-    noiseType='babble_diffuse',     # babble noise (diffuse)
+    noiseType='babble',     # babble noise (localised)
+    # noiseType='babble_diffuse',     # babble noise (diffuse)
 )
 
 
@@ -92,6 +94,8 @@ def main():
         params['ASC'] = PARAMS.pathToASC
         params['timeVaryingSROs'] = PARAMS.timeVaryingSROs
         params['noiseType'] = PARAMS.noiseType
+        params['sigDur'] = PARAMS.sigDur
+        params['baseSNR'] = PARAMS.baseSNR
 
         run_simul(params, PARAMS.exportBasePath)
 
@@ -111,9 +115,7 @@ def run_simul(params, exportBasePath):
     elif 'babble' in params['noiseType']:
         noiseFiles = [f'babble/babble{ii + 1}.wav' for ii in range(nNoiseS)]
     # Make diffuse or not
-    diffuseNoise = False
-    if 'diffuse' in params['noiseType']:
-        diffuseNoise = True
+    diffuseNoise = 'diffuse' in params['noiseType']
 
     # Generate test parameters
     danseTestingParams = sro_testing.DanseTestingParameters(
@@ -137,8 +139,10 @@ def run_simul(params, exportBasePath):
         ],
         # vvvvvvvvvvvvvv
         diffuseNoise=diffuseNoise,
-        sigDur=15,
-        baseSNR=5,
+        # vvvvvvvvvvvvvv
+        sigDur=params['sigDur'],
+        # vvvvvvvvvvvvvv
+        baseSNR=params['baseSNR'],
         #
         SROsParams=TestSROs(
             type='specific',
