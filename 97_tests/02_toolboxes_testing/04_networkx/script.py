@@ -13,7 +13,6 @@ CONNECTIONDIST = 4  # maximum distance for two nodes to be able to communicate
 SQUAREROOMDIM = 10
 SEED = 12335
 COLORDEFAULTLINK = 'k'
-COLORLEAFLINK = 'g'
 COLORBESTSNRLINK = 'r'
 COLORINFERENCELINK = 'b'
 OUTPUTFOLDER = f'{Path(__file__).parent}/out/{NNODES}nodes'
@@ -90,8 +89,8 @@ def main():
         # Compute reduction in computations
         reduction.append([
             len(data.edgecolors),
-            1 - sum(np.array(data.edgecolors) == COLORBESTSNRLINK)\
-                / len(data.edgecolors)
+            1 - sum(np.array(data.edgecolors, dtype=object)\
+                == COLORBESTSNRLINK) / len(data.edgecolors)
         ])
 
         # Plot
@@ -135,42 +134,30 @@ def get_graph_colors(myG, adjdict, SNRs):
     nodes = list(myG.nodes)
     edgecolors = [COLORDEFAULTLINK] * len(edges)
 
-    # List leaf nodes
-    leaves = np.array([ii for ii in nodes if len(adjdict[ii]) == 1])
-
     for k in nodes:
         edgeidx = np.array([h for h in range(len(edges)) if k in edges[h]])
         if len(edgeidx) == 0:
             continue
         # Order indices
         edgeidx = _order_edge_idx(edgeidx, edges, k)
-
-        # Non-leaf nodes with best SNRs
+        # Nodes with best SNRs
         bestSNRnodes = []
-        if k not in leaves:
-            # List neighbors
-            stemNeighs = np.array(adjdict[k])
-            if all(SNRs[k] >= SNRs[stemNeighs]):
-                bestSNRnodes.append(k)
-                passiveEdgeIdx = edgeidx[np.arange(len(stemNeighs)) + len(edgeidx) // 2]
-                activeEdgeIdx = edgeidx[np.arange(len(stemNeighs))]
-                for ii in range(len(passiveEdgeIdx)):
-                    if edgecolors[passiveEdgeIdx[ii]] == COLORDEFAULTLINK:
-                        edgecolors[passiveEdgeIdx[ii]] = (0,0,0,0)
-                for ii in range(len(activeEdgeIdx)):
-                    if edgecolors[activeEdgeIdx[ii]] == COLORDEFAULTLINK:
-                        edgecolors[activeEdgeIdx[ii]] = COLORBESTSNRLINK
-        # Leaf nodes
-        else:
-            for jj in range(len(edgeidx) // 2):
-                # vvv make outgoing arrow transparent
-                edgecolors[edgeidx[len(edgeidx) - jj - 1]] = COLORLEAFLINK
-                # vvv make incoming arrow green
-                edgecolors[edgeidx[jj]] = (0,0,0,0)
+        # List neighbors
+        stemNeighs = np.array(adjdict[k])
+        if all(SNRs[k] >= SNRs[stemNeighs]):
+            bestSNRnodes.append(k)
+            passiveEdgeIdx = edgeidx[np.arange(len(stemNeighs)) + len(edgeidx) // 2]
+            activeEdgeIdx = edgeidx[np.arange(len(stemNeighs))]
+            for ii in range(len(passiveEdgeIdx)):
+                if edgecolors[passiveEdgeIdx[ii]] == COLORDEFAULTLINK:
+                    edgecolors[passiveEdgeIdx[ii]] = (0,0,0,0)
+            for ii in range(len(activeEdgeIdx)):
+                if edgecolors[activeEdgeIdx[ii]] == COLORDEFAULTLINK:
+                    edgecolors[activeEdgeIdx[ii]] = COLORBESTSNRLINK
         
     # Consider other non-best-SNR nodes
     edgecolors = _non_best_snr_node(
-        nodes, bestSNRnodes, leaves, adjdict, edges, edgecolors
+        nodes, bestSNRnodes, adjdict, edges, edgecolors
     )
 
     # Repeat process until entire network is covered
@@ -202,21 +189,21 @@ def get_graph_colors(myG, adjdict, SNRs):
 
         # Consider other non-best-SNR nodes
         edgecolors = _non_best_snr_node(
-            remainingNodes, bestSNRnodes, leaves, adjdict, edges, edgecolors
+            remainingNodes, bestSNRnodes, adjdict, edges, edgecolors
         )
 
     return edgecolors
 
-def _non_best_snr_node(nodes, bestSNRnodes, leaves, adjdict, edges, edgecolors):
+def _non_best_snr_node(nodes, bestSNRnodes, adjdict, edges, edgecolors):
     """Update edge colors for non-best SNR nodes: two-nodes-to-one SRO
     inference."""
     for k in nodes:
-        if k not in bestSNRnodes and k not in leaves:
+        if k not in bestSNRnodes:
             # List neighbors
             neighbors = np.array(adjdict[k])
             # For each neighbor, check adjacency
             for ii in range(len(neighbors)):
-                if neighbors[ii] in bestSNRnodes or neighbors[ii] in leaves:
+                if neighbors[ii] in bestSNRnodes:
                     pass
                 else:
                     # Check if `k` and `neighbors[ii]` have common neighbors.
@@ -298,7 +285,7 @@ def plot_network(G, layout, edge_color=None):
     axes.set_ylabel('$y$ [m]')
     axes.set_xlim([0, SQUAREROOMDIM])
     axes.set_ylim([0, SQUAREROOMDIM])
-    ti = f'Red: computing SRO; Blue: infering SRO; Green: leaf node\n{sum(np.array(edge_color) == COLORBESTSNRLINK)} SRO estimations (vs. {len(edge_color)} links) -- {int((1 - sum(np.array(edge_color) == COLORBESTSNRLINK) / len(edge_color)) * 100)}% reduction.)'
+    ti = f'Red: computes SRO (see arrow); Blue: infers SRO\n{sum(np.array(edge_color, dtype=object) == COLORBESTSNRLINK)} SRO estimations (vs. {len(edge_color)} links) -- {int((1 - sum(np.array(edge_color, dtype=object) == COLORBESTSNRLINK) / len(edge_color)) * 100)}% reduction.)'
     axes.set_title(ti)
     
     return fig, axes
