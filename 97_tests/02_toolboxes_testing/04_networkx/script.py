@@ -41,15 +41,8 @@ def main():
     sourcePos = np.random.uniform(0, SQUAREROOMDIM, size=(1, 2))
     SNRs = 1 / distance_matrix(posNodes, sourcePos)  # distance (SNR-like)
 
-    # Derive edge colors and directions
+    # Derive edge colors and directions (1st pass)
     edgecolors = get_graph_colors(myG, adjdict, SNRs)
-
-    # Create new graph based on remaining edges
-    remainingEdges = np.array(myG.edges)[np.array(edgecolors) == COLORDEFAULTLINK]
-    remainingEdges = [tuple(ii) for ii in remainingEdges]
-    myGnew = nx.DiGraph(remainingEdges)
-    adjdictnew = {ii : tuple(myGnew.adj[ii]) for ii in list(myGnew.nodes)}
-    edgecolors2 = get_graph_colors(myGnew, adjdictnew, SNRs[list(myGnew.nodes)])
 
     # Plot
     axes = plot_network(myG, layout, edgecolors)
@@ -65,9 +58,8 @@ def get_graph_colors(myG, adjdict, SNRs):
     propagation (and redundancy reduction) rules."""
     
     edges = np.array(myG.edges)
-    edgecolors = [COLORDEFAULTLINK] * len(edges)
-
     nodes = list(myG.nodes)
+    edgecolors = [COLORDEFAULTLINK] * len(edges)
 
     # List leaf nodes
     leaves =  np.array([ii for ii in nodes if len(adjdict[ii]) == 1])
@@ -77,10 +69,7 @@ def get_graph_colors(myG, adjdict, SNRs):
         if len(edgeidx) == 0:
             continue
         # Order indices
-        firstNodeidx = [ii for ii in range(len(edgeidx)) if edges[edgeidx[ii]][0] == k]
-        secondNodeidx = [ii for ii in range(len(edgeidx)) if edges[edgeidx[ii]][1] == k]
-        reorderingIdx = np.concatenate((firstNodeidx, secondNodeidx))
-        edgeidx = edgeidx[reorderingIdx]
+        edgeidx = _order_edge_idx(edgeidx, edges, k)
 
         # Non-leaf nodes with best SNRs
         bestSNRnodes = []
@@ -104,6 +93,47 @@ def get_graph_colors(myG, adjdict, SNRs):
                 edgecolors[edgeidx[jj]] = (0,0,0,0)
         
     # Consider other non-best-SNR nodes
+    edgecolors = _non_best_snr_node(
+        nodes, bestSNRnodes, leaves, adjdict, edges, edgecolors
+    )
+
+    # Repeat process until entire network is covered
+    while COLORDEFAULTLINK in edgecolors:
+        # Get remaining edges and nodes
+        remainingEdges = edges[
+            np.array(edgecolors, dtype=object) == COLORDEFAULTLINK
+        ]
+        remainingNodes = np.unique(remainingEdges)
+        # Repeat the process - derive best SNR nodes
+        bestSNRnodes = []
+        for k in remainingNodes:
+            edgeidx = np.array([h for h in range(len(edges)) if k in edges[h]])
+            # Order indices
+            edgeidx = _order_edge_idx(edgeidx, edges, k)
+
+            # List neighbors
+            stemNeighs = np.array([ii for ii in adjdict[k] if ii in remainingNodes])
+            if all(SNRs[k] >= SNRs[stemNeighs]):
+                bestSNRnodes.append(k)
+                passiveEdgeIdx = edgeidx[np.arange(len(adjdict[k])) + len(edgeidx) // 2]
+                activeEdgeIdx = edgeidx[np.arange(len(adjdict[k]))]
+                for ii in range(len(passiveEdgeIdx)):
+                    if edgecolors[passiveEdgeIdx[ii]] == COLORDEFAULTLINK:
+                        edgecolors[passiveEdgeIdx[ii]] = (0,0,0,0)
+                for ii in range(len(activeEdgeIdx)):
+                    if edgecolors[activeEdgeIdx[ii]] == COLORDEFAULTLINK:
+                        edgecolors[activeEdgeIdx[ii]] = COLORBESTSNRLINK
+
+        # Consider other non-best-SNR nodes
+        edgecolors = _non_best_snr_node(
+            remainingNodes, bestSNRnodes, leaves, adjdict, edges, edgecolors
+        )
+
+    return edgecolors
+
+def _non_best_snr_node(nodes, bestSNRnodes, leaves, adjdict, edges, edgecolors):
+    """Update edge colors for non-best SNR nodes: two-nodes-to-one SRO
+    inference."""
     for k in nodes:
         if k not in bestSNRnodes and k not in leaves:
             # List neighbors
@@ -128,8 +158,16 @@ def get_graph_colors(myG, adjdict, SNRs):
                             edgecolors[idx11] = COLORINFERENCELINK
                             edgecolors[idx12] = COLORINFERENCELINK
                             break
-
     return edgecolors
+
+
+def _order_edge_idx(edgeidx, edges, k):
+    """Order edgeidx variable so that all outwards going edges are listed
+    first, then all inwards edges are listed."""
+    firstNodeidx = [ii for ii in range(len(edgeidx)) if edges[edgeidx[ii]][0] == k]
+    secondNodeidx = [ii for ii in range(len(edgeidx)) if edges[edgeidx[ii]][1] == k]
+    reorderingIdx = np.concatenate((firstNodeidx, secondNodeidx))
+    return edgeidx[reorderingIdx]
 
 
 def _eidx(k,q,edges):
