@@ -1,53 +1,127 @@
 import networkx as nx
 import numpy as np
-import sys, copy
+import sys
 import matplotlib.pyplot as plt
 from scipy.spatial import distance_matrix
+from pathlib import Path
+from dataclasses import dataclass
 
-NNODES = 10
-CONNECTIONDIST = 2  # maximum distance for two nodes to be able to communicate
-SQUAREROOMDIM = 5
+NNODES = 20
+MINNODEDIST = 0.75   # minimum distance between nodes
+MINDISTTOWALLS = 0.25   # minimum node-wall distance
+CONNECTIONDIST = 4  # maximum distance for two nodes to be able to communicate
+SQUAREROOMDIM = 10
 SEED = 12335
 COLORDEFAULTLINK = 'k'
 COLORLEAFLINK = 'g'
 COLORBESTSNRLINK = 'r'
 COLORINFERENCELINK = 'b'
+OUTPUTFOLDER = f'{Path(__file__).parent}/out/{NNODES}nodes'
+
+NWASNS = 50
 
 np.random.seed(SEED)
 
+@dataclass
+class ASCWASN():
+    posNodes: np.ndarray = np.array([])     # node positions
+    sourcePos: np.ndarray = np.array([])    # source position
+    dim: int = 2    # problem dimensionality (2 or 3)
+
+    def __post_init__(self):
+        if self.dim not in [2, 3]:
+            raise ValueError(f'Incorrect problem dimensionality ({self.dim}-D).')
+        # Distance (SNR-like)
+        self.SNRs = 1 / distance_matrix(self.posNodes, self.sourcePos)
+        # Layout
+        self.layout = _get_layout_dict(self.posNodes)
+        
+    def init_wasn(self):
+        # Inter-node distance matrix
+        distNodes = distance_matrix(self.posNodes, self.posNodes)
+        # Generate connections matrix
+        connMat = np.zeros_like(distNodes)
+        connMat[distNodes <= CONNECTIONDIST] = 1
+        # Make symmetric (https://stackoverflow.com/a/28904854)
+        # and fill diagonal with 1's
+        connMat = np.maximum(connMat, connMat.T)
+        np.fill_diagonal(connMat, 1)
+        # Create adjacency dictionary
+        self.adjdict = _get_adjacency_dict(connMat)
+        # Generate directed graph
+        self.wasn = nx.DiGraph(self.adjdict)
+
+    def _get_graph_colors(self):
+        """Derive edge colors and directions"""
+        self.edgecolors = get_graph_colors(self.wasn, self.adjdict, self.SNRs)
+
+    def plotwasn(self):
+        fig, axes = plot_network(self.wasn, self.layout, self.edgecolors)
+        axes.scatter(
+            self.sourcePos[0, 0],
+            self.sourcePos[0, 1],
+            s=70,
+            c='m',
+            label='Source')
+        axes.legend()
+        plt.tight_layout()
+        return fig
+
+
 def main():
     
-    # Generate random 2D node layout
-    posNodes = np.random.uniform(0, SQUAREROOMDIM, size=(NNODES, 2))
-    # Compute distance matrix
-    distNodes = distance_matrix(posNodes, posNodes)
+    reduction = []
+    for idxmain in range(NWASNS):
+        print(f"Computing network topology and SRO inference pattern {idxmain+1}/{NWASNS}...")
 
-    # Generate connections matrix
-    connMat = np.zeros_like(distNodes)
-    connMat[distNodes <= CONNECTIONDIST] = 1
-    # Make symmetric (https://stackoverflow.com/a/28904854)
-    # and fill diagonal with 1's
-    connMat = np.maximum(connMat, connMat.T)
-    np.fill_diagonal(connMat, 1)
-    # Create adjacency dictionary
-    adjdict = _get_adjacency_dict(connMat)
+        # Generate WASN
+        data = ASCWASN(
+            posNodes=generate_points_with_min_distance(
+                NNODES, SQUAREROOMDIM, MINNODEDIST
+            ),
+            sourcePos=np.random.uniform(0, SQUAREROOMDIM, size=(1, 2)),
+            dim=2
+        )
+        # Initialise WASN
+        data.init_wasn()
+        # Derive edge colors and directions
+        data._get_graph_colors()
 
-    # Generate directed graph
-    myG = nx.DiGraph(adjdict) 
-    # Get layout dictionary (for plotting correctly)
-    layout = _get_layout_dict(posNodes)
+        # Compute reduction in computations
+        reduction.append([
+            len(data.edgecolors),
+            1 - sum(np.array(data.edgecolors) == COLORBESTSNRLINK)\
+                / len(data.edgecolors)
+        ])
 
-    # Generate random source position
-    sourcePos = np.random.uniform(0, SQUAREROOMDIM, size=(1, 2))
-    SNRs = 1 / distance_matrix(posNodes, sourcePos)  # distance (SNR-like)
-
-    # Derive edge colors and directions (1st pass)
-    edgecolors = get_graph_colors(myG, adjdict, SNRs)
-
-    # Plot
-    axes = plot_network(myG, layout, edgecolors)
-    axes.scatter(sourcePos[0, 0], sourcePos[0, 1], s=100, c='r')
-    plt.tight_layout()	
+        # Plot
+        fig = data.plotwasn()
+        if not Path(OUTPUTFOLDER).is_dir():
+            Path(OUTPUTFOLDER).mkdir()
+        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.png')
+        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.pdf')
+        plt.close(fig)
+        
+    # Sort and plot reduction
+    reduction = np.sort(np.array(reduction, dtype=float), axis=0)
+    fig, axes = plt.subplots(1,1)
+    fig.set_size_inches(5.5, 3.5)
+    axes.scatter(reduction[:, 0], reduction[:, 1] * 100)
+    coef = np.polyfit(reduction[:, 0], reduction[:, 1] * 100, 1)
+    poly1d_fn = np.poly1d(coef) 
+    x = np.arange(np.amin(reduction[:, 0]), np.amax(reduction[:, 0]))
+    axes.plot(x, poly1d_fn(x), 'k--')
+    axes.text(
+        x=np.amin(reduction[:, 0]) * 1.01, y=np.amax(reduction[:, 1] * 100) * 0.95,
+        s=f'Average rate of improvement:\n{np.round(coef[0], 3)} fewer SRO estimations per new link in the WASN.'
+    )
+    axes.grid()
+    axes.set_xlabel('# of inter-node links in the WASN')
+    axes.set_ylabel('Reduction in # of SRO estimations [%]')
+    axes.set_title(f'{NWASNS} randomly generated WASNs composed of {NNODES} nodes')
+    plt.tight_layout()
+    fig.savefig(f'{OUTPUTFOLDER}/global.png')
+    fig.savefig(f'{OUTPUTFOLDER}/global.pdf')
     plt.show()
 
     stop = 1
@@ -62,7 +136,7 @@ def get_graph_colors(myG, adjdict, SNRs):
     edgecolors = [COLORDEFAULTLINK] * len(edges)
 
     # List leaf nodes
-    leaves =  np.array([ii for ii in nodes if len(adjdict[ii]) == 1])
+    leaves = np.array([ii for ii in nodes if len(adjdict[ii]) == 1])
 
     for k in nodes:
         edgeidx = np.array([h for h in range(len(edges)) if k in edges[h]])
@@ -81,9 +155,11 @@ def get_graph_colors(myG, adjdict, SNRs):
                 passiveEdgeIdx = edgeidx[np.arange(len(stemNeighs)) + len(edgeidx) // 2]
                 activeEdgeIdx = edgeidx[np.arange(len(stemNeighs))]
                 for ii in range(len(passiveEdgeIdx)):
-                    edgecolors[passiveEdgeIdx[ii]] = (0,0,0,0)
+                    if edgecolors[passiveEdgeIdx[ii]] == COLORDEFAULTLINK:
+                        edgecolors[passiveEdgeIdx[ii]] = (0,0,0,0)
                 for ii in range(len(activeEdgeIdx)):
-                    edgecolors[activeEdgeIdx[ii]] = COLORBESTSNRLINK
+                    if edgecolors[activeEdgeIdx[ii]] == COLORDEFAULTLINK:
+                        edgecolors[activeEdgeIdx[ii]] = COLORBESTSNRLINK
         # Leaf nodes
         else:
             for jj in range(len(edgeidx) // 2):
@@ -198,14 +274,14 @@ def plot_network(G, layout, edge_color=None):
         edge_color = ['k'] * len(G.edges())  # by default, all edges are black
 
     fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(3.5, 3.5)
+    fig.set_size_inches(5.5, 5.5)
     nx.draw(
         G,
         layout,
         with_labels=True,
         ax=axes,
         edge_color=edge_color,
-        width=2)
+        width=1.5)
     axes.grid()
     axes.set_axisbelow(True)
     # vvv counteract innerworkings of `nx.draw()`
@@ -220,9 +296,12 @@ def plot_network(G, layout, edge_color=None):
     )
     axes.set_xlabel('$x$ [m]')
     axes.set_ylabel('$y$ [m]')
+    axes.set_xlim([0, SQUAREROOMDIM])
+    axes.set_ylim([0, SQUAREROOMDIM])
+    ti = f'Red: computing SRO; Blue: infering SRO; Green: leaf node\n{sum(np.array(edge_color) == COLORBESTSNRLINK)} SRO estimations (vs. {len(edge_color)} links) -- {int((1 - sum(np.array(edge_color) == COLORBESTSNRLINK) / len(edge_color)) * 100)}% reduction.)'
+    axes.set_title(ti)
     
-
-    return axes
+    return fig, axes
 
 
 def _get_adjacency_dict(T):
@@ -238,6 +317,36 @@ def _get_layout_dict(pos):
     """Get layout dictionary (for use in `networkx.draw()` function)
     from node coordinates in `pos`."""
     return {ii : pos[ii, :] for ii in range(pos.shape[0])}
+
+
+def generate_points_with_min_distance(n, shape, min_dist):
+    """Generates a set of `n` points within a `shape x shape` room, 
+    with a minimum distance `min_dist` between each other."""
+    
+    coords = []
+    while len(coords) < n:
+        # Generate new random coordinates
+        randCoords = np.random.uniform(
+            0, shape - 2 * MINDISTTOWALLS, size=(2,)
+        ) + MINDISTTOWALLS
+        # Check distances
+        addit = True
+        for ii in range(len(coords)):
+            if len(coords) > 0:
+                if _dist(coords[ii], randCoords) < min_dist:
+                    addit = False
+                    break
+            else:
+                break
+        if addit:
+            coords.append(randCoords)
+
+    return np.array(coords)
+
+def _dist(x, y):
+    """Compute Euclidean distance."""
+    return np.sqrt(sum((x - y) ** 2))
+
 
 if __name__=='__main__':
     sys.exit(main())
