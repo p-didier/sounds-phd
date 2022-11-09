@@ -1,23 +1,28 @@
 import networkx as nx
 import numpy as np
-import sys
+import sys, copy
 import matplotlib.pyplot as plt
 from scipy.spatial import distance_matrix
 from pathlib import Path
 from dataclasses import dataclass
 
-NNODES = 20
+# NNODES = [10, 15, 20]
+NNODES = [15]
 MINNODEDIST = 0.75   # minimum distance between nodes
 MINDISTTOWALLS = 0.25   # minimum node-wall distance
+# CONNECTIONDIST = np.Inf  # maximum distance for two nodes to be able to communicate
 CONNECTIONDIST = 4  # maximum distance for two nodes to be able to communicate
+# ^^^ set to np.Inf for a fully connected WASN 
 SQUAREROOMDIM = 10
 SEED = 12335
-COLORDEFAULTLINK = 'k'
+COLORDEFAULTLINK = '#595959'
 COLORBESTSNRLINK = 'r'
 COLORINFERENCELINK = 'b'
 OUTPUTFOLDER = f'{Path(__file__).parent}/out/{NNODES}nodes'
 
-NWASNS = 50
+NWASNS = 1
+PLOTSTEPBYSTEP = True  # if True, plot formation of edge colors step by step
+SAVEINDIVWASNPLOTS = True
 
 np.random.seed(SEED)
 
@@ -51,74 +56,100 @@ class ASCWASN():
         self.wasn = nx.DiGraph(self.adjdict)
 
     def _get_graph_colors(self):
-        """Derive edge colors and directions"""
+        """Derive edge colors and directions (step-by-step while forming
+        the `edgecolors` object in `get_graph_colors()`."""
         self.edgecolors = get_graph_colors(self.wasn, self.adjdict, self.SNRs)
 
     def plotwasn(self):
-        fig, axes = plot_network(self.wasn, self.layout, self.edgecolors)
-        axes.scatter(
-            self.sourcePos[0, 0],
-            self.sourcePos[0, 1],
-            s=70,
-            c='m',
-            label='Source')
-        axes.legend()
-        plt.tight_layout()
-        return fig
+        figs = []
+        for ii in range(len(self.edgecolors)):  # plot step by step
+            fig, axes = plot_network(
+                self.wasn,
+                self.layout,
+                self.edgecolors[ii]
+            )
+            axes.scatter(
+                self.sourcePos[0, 0],
+                self.sourcePos[0, 1],
+                s=70,
+                c='m',
+                label='Source')
+            axes.legend()
+            plt.tight_layout()
+            figs.append(fig)
+        return figs
 
 
 def main():
     
-    reduction = []
-    for idxmain in range(NWASNS):
-        print(f"Computing network topology and SRO inference pattern {idxmain+1}/{NWASNS}...")
+    reduction = dict(
+        [(f'{NNODES[ii]}nodes', []) for ii in range(len(NNODES))]
+    )
+    for idxNodes in range(len(NNODES)):
+        for idxmain in range(NWASNS):
+            print(f"Computing network topology and SRO inference pattern {idxmain+1}/{NWASNS}...")
 
-        # Generate WASN
-        data = ASCWASN(
-            posNodes=generate_points_with_min_distance(
-                NNODES, SQUAREROOMDIM, MINNODEDIST
-            ),
-            sourcePos=np.random.uniform(0, SQUAREROOMDIM, size=(1, 2)),
-            dim=2
-        )
-        # Initialise WASN
-        data.init_wasn()
-        # Derive edge colors and directions
-        data._get_graph_colors()
+            # Generate WASN
+            data = ASCWASN(
+                posNodes=generate_points_with_min_distance(
+                    NNODES[idxNodes], SQUAREROOMDIM, MINNODEDIST
+                ),
+                sourcePos=np.random.uniform(0, SQUAREROOMDIM, size=(1, 2)),
+                dim=2
+            )
+            # Initialise WASN
+            data.init_wasn()
+            # Derive edge colors and directions
+            data._get_graph_colors()
 
-        # Compute reduction in computations
-        reduction.append([
-            len(data.edgecolors),
-            1 - sum(np.array(data.edgecolors, dtype=object)\
-                == COLORBESTSNRLINK) / len(data.edgecolors)
-        ])
+            # Compute reduction in computations
+            reduction[f'{NNODES[idxNodes]}nodes'].append([
+                len(data.edgecolors[-1]),
+                1 - sum(np.array(data.edgecolors[-1], dtype=object)\
+                    == COLORBESTSNRLINK) / len(data.edgecolors[-1])
+            ])
 
-        # Plot
-        fig = data.plotwasn()
-        if not Path(OUTPUTFOLDER).is_dir():
-            Path(OUTPUTFOLDER).mkdir()
-        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.png')
-        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.pdf')
-        plt.close(fig)
+            # Plot
+            if SAVEINDIVWASNPLOTS:
+                figs = data.plotwasn()
+                if not Path(OUTPUTFOLDER).is_dir():
+                    Path(OUTPUTFOLDER).mkdir()
+                if PLOTSTEPBYSTEP:
+                    for ii, fig in enumerate(figs):
+                        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_pass{ii}.png')
+                        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_pass{ii}.pdf')
+                        plt.close(fig)
+                else:
+                    figs[-1].savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.png')
+                    figs[-1].savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.pdf')
+                    plt.close(figs[-1])
         
     # Sort and plot reduction
-    reduction = np.sort(np.array(reduction, dtype=float), axis=0)
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(5.5, 3.5)
-    axes.scatter(reduction[:, 0], reduction[:, 1] * 100)
-    coef = np.polyfit(reduction[:, 0], reduction[:, 1] * 100, 1)
-    poly1d_fn = np.poly1d(coef) 
-    x = np.arange(np.amin(reduction[:, 0]), np.amax(reduction[:, 0]))
-    axes.plot(x, poly1d_fn(x), 'k--')
-    axes.text(
-        x=np.amin(reduction[:, 0]) * 1.01, y=np.amax(reduction[:, 1] * 100) * 0.95,
-        s=f'Average rate of improvement:\n{np.round(coef[0], 3)} fewer SRO estimations per new link in the WASN.'
-    )
+    for ii in range(len(NNODES)):
+        reducCurr = np.sort(
+            np.array(reduction[f'{NNODES[ii]}nodes'], dtype=float), axis=0
+        )
+        axes.scatter(
+            reducCurr[:, 0],
+            reducCurr[:, 1] * 100,
+            c=f'C{ii}',
+            label=f'{NNODES[ii]}-nodes WASNs'
+        )
+        coef = np.polyfit(reducCurr[:, 0], reducCurr[:, 1] * 100, 1)
+        poly1d_fn = np.poly1d(coef) 
+        x = np.arange(np.amin(reducCurr[:, 0]), np.amax(reducCurr[:, 0]))
+        axes.plot(x, poly1d_fn(x), f'C{ii}--')
     axes.grid()
+    axes.set_axisbelow(True)
     axes.set_xlabel('# of inter-node links in the WASN')
     axes.set_ylabel('Reduction in # of SRO estimations [%]')
-    axes.set_title(f'{NWASNS} randomly generated WASNs composed of {NNODES} nodes')
+    axes.set_title(f'{NWASNS} randomly generated WASNs per # of nodes')
+    axes.legend()
     plt.tight_layout()
+    if not Path(OUTPUTFOLDER).is_dir():
+        Path(OUTPUTFOLDER).mkdir()
     fig.savefig(f'{OUTPUTFOLDER}/global.png')
     fig.savefig(f'{OUTPUTFOLDER}/global.pdf')
     plt.show()
@@ -133,6 +164,7 @@ def get_graph_colors(myG, adjdict, SNRs):
     edges = np.array(myG.edges)
     nodes = list(myG.nodes)
     edgecolors = [COLORDEFAULTLINK] * len(edges)
+    edgecolors_stepbystep = [copy.copy(edgecolors)]
 
     for k in nodes:
         edgeidx = np.array([h for h in range(len(edges)) if k in edges[h]])
@@ -159,6 +191,7 @@ def get_graph_colors(myG, adjdict, SNRs):
     edgecolors = _non_best_snr_node(
         nodes, bestSNRnodes, adjdict, edges, edgecolors
     )
+    edgecolors_stepbystep.append(copy.copy(edgecolors))
 
     # Repeat process until entire network is covered
     while COLORDEFAULTLINK in edgecolors:
@@ -191,8 +224,9 @@ def get_graph_colors(myG, adjdict, SNRs):
         edgecolors = _non_best_snr_node(
             remainingNodes, bestSNRnodes, adjdict, edges, edgecolors
         )
+        edgecolors_stepbystep.append(copy.copy(edgecolors))
 
-    return edgecolors
+    return edgecolors_stepbystep
 
 def _non_best_snr_node(nodes, bestSNRnodes, adjdict, edges, edgecolors):
     """Update edge colors for non-best SNR nodes: two-nodes-to-one SRO
@@ -268,7 +302,10 @@ def plot_network(G, layout, edge_color=None):
         with_labels=True,
         ax=axes,
         edge_color=edge_color,
-        width=1.5)
+        width=1.5,
+        node_color='#e2e2e2',
+        edgecolors='k',
+        node_size=400)
     axes.grid()
     axes.set_axisbelow(True)
     # vvv counteract innerworkings of `nx.draw()`
@@ -285,7 +322,14 @@ def plot_network(G, layout, edge_color=None):
     axes.set_ylabel('$y$ [m]')
     axes.set_xlim([0, SQUAREROOMDIM])
     axes.set_ylim([0, SQUAREROOMDIM])
-    ti = f'Red: computes SRO (see arrow); Blue: infers SRO\n{sum(np.array(edge_color, dtype=object) == COLORBESTSNRLINK)} SRO estimations (vs. {len(edge_color)} links) -- {int((1 - sum(np.array(edge_color, dtype=object) == COLORBESTSNRLINK) / len(edge_color)) * 100)}% reduction.)'
+    nEdges = len(edge_color)
+    nEstimations = sum(np.array(edge_color, dtype=object)\
+        == COLORBESTSNRLINK) + sum(
+            np.array(edge_color, dtype=object)\
+            == COLORDEFAULTLINK
+        )
+    reduc = int((1 - nEstimations / nEdges) * 100)
+    ti = f"Red: computes SRO (see arrow); Blue: infers SRO\n{nEstimations} SRO estimations (vs. {nEdges} links) -- {reduc} % reduction."
     axes.set_title(ti)
     
     return fig, axes
