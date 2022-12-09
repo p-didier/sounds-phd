@@ -9,6 +9,7 @@ from pathlib import Path
 
 SEED = 12345  # random generators seed
 NNODES = np.arange(5, stop=21)
+NNODES = [20]
 NMC_PERNNODES = 50  # number of Monte-Carlo runs per number of nodes
 ALGOS = ['kruskal', 'prim', 'boruvka']  # MST formation algorithms to consider
 # NETTYPE = 'fullyconnected'
@@ -50,8 +51,11 @@ def main():
             MSTs, timings = get_msts(OGnx, ALGOS)
 
             # Plot
-            if 0:
-                plot_msts(OGnx, MSTs, pos, timings, nodeSize=100)
+            if 1:
+                fig = plot_mst(OGnx, MSTs[ALGOS[0]], pos, nodeSize=100)
+                if 0:
+                    fig.savefig(f'{Path(__file__).parent}/figs/MSTexample.pdf')
+                    fig.savefig(f'{Path(__file__).parent}/figs/MSTexample.png')
                 plt.show()
             
             # Aggregate timing results for current number of nodes
@@ -66,7 +70,7 @@ def main():
     # Show results
     fig = final_plot(allTimings)
     plt.show()
-    if 1:
+    if 0:
         fig.savefig(f'{Path(__file__).parent}/figs/timing_comp.png')
         fig.savefig(f'{Path(__file__).parent}/figs/timing_comp.pdf')
 
@@ -123,29 +127,25 @@ def get_msts(G, algos):
     return msts, timings
 
 
-def plot_msts(oggraph, msts: dict, pos, timings, nodeSize=100):
-    """Plot MST-formation algorithms' output."""
-
-    algos = list(msts.keys())
-    nAlgos = len(algos)
+def plot_mst(oggraph, mst: dict, pos, nodeSize=100):
+    """Plot MST-formation output."""
 
     # Generate figure
-    fig, axes = plt.subplots(1, nAlgos + 1)
-    fig.set_size_inches(9/4 * (nAlgos + 1), 3)
+    fig, axes = plt.subplots(1, 2)
+    fig.set_size_inches(9, 6)
     nx.draw(oggraph, pos=pos, ax=axes[0], node_size=nodeSize)
     axes[0].set_title(f'Original graph (type: "{NETTYPE}")')
-    for ii, algo in enumerate(algos):
-        nx.draw(
-            msts[algo],
-            pos=pos,
-            ax=axes[ii + 1],
-            edge_color='r',
-            width=2.0,
-            node_size=nodeSize
-        )
-        axes[ii + 1].set_title(
-            f"{algo}'s MST ({np.round(timings[algo], 4)} s)"
-        )
+    nx.draw(
+        mst,
+        pos=pos,
+        ax=axes[1],
+        edge_color='r',
+        width=2.0,
+        node_size=nodeSize
+    )
+    axes[1].set_title('MST')
+
+    return fig
 
 
 if __name__ == '__main__':
