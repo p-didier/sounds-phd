@@ -17,7 +17,6 @@ import random
 import pyroomacoustics as pra
 from danse.siggen.classes import *
 import danse.siggen.utils as sig_ut
-import danse.danse_toolbox.d_base as base
 import danse.danse_toolbox.d_core as core
 import danse.danse_toolbox.d_post as pp
 from danse.danse_toolbox.d_eval import DynamicMetricsParameters
@@ -26,7 +25,6 @@ from dataclasses import dataclass
 
 @dataclass
 class TestParameters:
-    # TODO: vvv self-noise
     selfnoiseSNR: int = -50 # [dB] microphone self-noise SNR
     wasn: WASNparameters = WASNparameters()
     danseParams: DANSEparameters = DANSEparameters()
@@ -45,13 +43,13 @@ class TestParameters:
 
 # DEFINE TEST PARAMETERS
 PARAMS = TestParameters(
-    selfnoiseSNR=-99,  # TODO:
+    selfnoiseSNR=-99,
     wasn=WASNparameters(
         rd=np.array([5, 5, 5]),
         fs=16000,
         t60=0.2,
         nNodes=2,
-        sigDur=5,
+        sigDur=15,
         nSensorPerNode=[1, 1],
         desiredSignalFile=[f'{SIGNALSPATH}/01_speech/{file}'\
             for file in [
