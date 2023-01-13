@@ -237,7 +237,10 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
 
     # Plot SRO data
     if settings.asynchronicity.plotResult:
-        fig = results.sroData.plotSROdata(xaxistype='time', firstUp=results.other.firstDANSEupRefSensor)
+        fig = results.sroData.plotSROdata(
+            xaxistype='time',
+            firstUp=results.other.firstDANSEupRefSensor
+        )
         plt.savefig(f'{pathToResults}/SROestcomp.png')
         plt.savefig(f'{pathToResults}/SROestcomp.pdf')
         if showPlots:
