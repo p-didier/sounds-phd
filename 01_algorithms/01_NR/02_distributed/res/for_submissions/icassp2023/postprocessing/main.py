@@ -24,7 +24,8 @@ class PostProcParams:
                                 # - 'group_per_node_vertical': same as previous, but vertical orientation
     savefigure : bool = False   # if True, export figure as PNG and PDF format
     savePath : str = ''         # path to folder where to save file (only used if `savefigure == True`)
-    includeCentralisedPerf : bool = False   # if True, include the centralised performance inside the graph
+    includeCentralisedPerf : bool = False   # if True, include the centralised performance in the graph
+    includeLocalPerf : bool = False   # if True, include the local performance in the graph
     firstMetric: str = 'eSTOI'       # first metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
     secondMetric: str = 'fwSNRseg'  # second metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
 
@@ -32,21 +33,24 @@ class PostProcParams:
 p = PostProcParams(
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffwn',  # w/ diffuse white noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_wn',  # w/ white noise
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',  # ?
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_ssn',   # w/ SSN
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffbab',   # w/ diffuse babble noise
-    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_bab',   # w/ babble noise
+    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_bab',   # w/ babble noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_10cmspacing',
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_SpS',
+    # pathToResults=f'{Path(__file__).parent.parent}/_archive/J4Mk[1_3_2_5]_Ns1_Nn2__week40_AS2',  # ?
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savePath=Path(__file__).parent.parent,
     includeCentralisedPerf=True,
+    includeLocalPerf=False,
     firstMetric='eSTOI',
     # firstMetric='SNR',
     # firstMetric='fwSNRseg',
     secondMetric='fwSNRseg',
     #
-    savefigure=True,
+    savefigure=False,
 )
 
 def main():
@@ -59,11 +63,14 @@ def main():
     plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
     plt.rcParams.update({'font.size': 12})
 
-    fig = plot(res, p.plottype, p.firstMetric, p.secondMetric)
+    fig = plot(res, p)
 
     if p.savefigure:
-        fig.savefig(f'{p.savePath}/myfig__{Path(p.pathToResults).stem}.png')
-        fig.savefig(f'{p.savePath}/myfig__{Path(p.pathToResults).stem}.pdf')
+        fname = f'myfig__{Path(p.pathToResults).stem}'
+        if p.includeLocalPerf:
+            fname += '_incLocal'
+        fig.savefig(f'{p.savePath}/{fname}.png')
+        fig.savefig(f'{p.savePath}/{fname}.pdf')
     plt.show()
 
 
@@ -148,12 +155,14 @@ def run(params: PostProcParams):
     return res
 
 
-def plot(res, plottype, metric1, metric2):
+def plot(res, p: PostProcParams):
 
-    if plottype == 'group_per_node':
-        fig = plot_grouppedpernode(res, metric1, metric2)
-    elif plottype == 'group_per_node_vertical':
-        fig = plot_grouppedpernode_vert(res, metric1, metric2)
+    if p.plottype == 'group_per_node':
+        fig = plot_grouppedpernode(res, p.firstMetric, p.secondMetric)
+    elif p.plottype == 'group_per_node_vertical':
+        fig = plot_grouppedpernode_vert(
+            res, p.firstMetric, p.secondMetric, p.includeLocalPerf
+        )
     
     return fig
 
@@ -189,7 +198,7 @@ def plot_grouppedpernode(res, metric1, metric2):
     return fig
 
 
-def plot_grouppedpernode_vert(res, metric1, metric2):
+def plot_grouppedpernode_vert(res, metric1, metric2, includeLocal=False):
 
     # vvv HARD-CODED but ok
     categories = [
@@ -200,16 +209,15 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
     # colors = ['C4', 'C2', 'C1']
     colors = [(19/255, 103/255, 159/255), (192/255, 0, 0), (0, 0, 0)]
     w = 1/4  # width parameter
+    if includeLocal:
+        w = 1/5
 
     # Booleans
     plotSecondMetric = False
     
     ylims1 = None
-    ylims2 = None
     if metric1 == 'eSTOI':
         ylims1 = [0,1]
-    if metric2 == 'eSTOI':
-        ylims2 = [0,1]
 
     if plotSecondMetric:
         fig, axes = plt.subplots(res[metric1].shape[0], 2)
@@ -244,8 +252,20 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
                 axes[ii, 1].hlines(y=res[f'{metric2}Centr'], xmin=np.amin(axes[ii].get_xlim()), xmax=np.amax(axes[ii].get_xlim()),
                     colors='k', linestyles='--')
         else:
-            subplot_fcn_2(axes[ii], res[metric1][ii, :, :], res[f'{metric1}Original'][ii, :, :],
-                w, ylims1, colors[ii], showLegend=True, centralised=res[f'{metric1}Centr'])
+            localData = None
+            if includeLocal:
+                localData = res[f'{metric1}Local'][ii, :, :]
+            subplot_fcn_2(
+                axes[ii],
+                res[metric1][ii, :, :],
+                res[f'{metric1}Original'][ii, :, :],
+                localData,
+                w,
+                ylims1,
+                colors[ii],
+                showLegend=True,
+                centralised=res[f'{metric1}Centr']
+            )
             if ii == 0:
                 axes[ii].set_title(metric1)
             if ii == res[metric1].shape[0] - 1:
@@ -260,7 +280,18 @@ def plot_grouppedpernode_vert(res, metric1, metric2):
     return fig
 
 
-def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=False, centralised=None):
+def subplot_fcn_2(
+    ax,
+    res,
+    resBeforeEnhancement,
+    resLocal,
+    w,
+    ylims,
+    mycolor,
+    showLegend=False,
+    centralised=None
+    ):
+    """Helper subplot function."""
 
     nNodes = res.shape[-1]
 
@@ -268,28 +299,71 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
     ax.set_axisbelow(True)
     if ylims is not None:
         ax.set_ylim(ylims)
-    # With compensation
-    handle1 = ax.bar(np.arange(nNodes) + w, res[1, :],
-        width=w, align='center', alpha=1,
-        color=lighten_color(mycolor, 1), edgecolor='k')
-    # Without compensation
-    handle2 = ax.bar(np.arange(nNodes), res[0, :],
-        width=w, align='center', alpha=1,
-        color=lighten_color(mycolor, 0.66), edgecolor='k')
-    # Without enhancement
-    handle3 = ax.bar(np.arange(nNodes) - w, resBeforeEnhancement[0, :],
-        width=w, align='center', alpha=1,
-        color=lighten_color(mycolor, 0.33), edgecolor='k')
-    handles = [handle1, handle2, handle3]   # handles for legend
-    leglabs = ['GEVD-DANSE + SRO comp.', 'GEVD-DANSE', 'Noisy sensor signal $\dot{y}_{{k,1}}$']    # labels for legend
+    if resLocal is not None:
+        # With compensation
+        handle1 = ax.bar(np.arange(nNodes) + 1.5*w, res[1, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 1), edgecolor='k')
+        # Without compensation
+        handle2 = ax.bar(np.arange(nNodes) + 0.5*w, res[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.75), edgecolor='k')
+        # Local estimate
+        handle3 = ax.bar(np.arange(nNodes) - 0.5*w, resLocal[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.5), edgecolor='k')
+        # Without enhancement
+        handle4 = ax.bar(np.arange(nNodes) - 1.5*w, resBeforeEnhancement[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.25), edgecolor='k')
+        handles = [handle1, handle2, handle3, handle4]   # handles for legend
+        leglabs = [
+            'GEVD-DANSE + SRO comp.',
+            'GEVD-DANSE',
+            'Local GEVD-MWF',
+            'Noisy sensor signal $\dot{y}_{{k,1}}$'
+        ]    # labels for legend
+    else:
+        # With compensation
+        handle1 = ax.bar(np.arange(nNodes) + w, res[1, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 1), edgecolor='k')
+        # Without compensation
+        handle2 = ax.bar(np.arange(nNodes), res[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.75), edgecolor='k')
+        # Without enhancement
+        handle4 = ax.bar(np.arange(nNodes) - w, resBeforeEnhancement[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.25), edgecolor='k')
+        handles = [handle1, handle2, handle4]   # handles for legend
+        leglabs = [
+            'GEVD-DANSE + SRO comp.',
+            'GEVD-DANSE',
+            'Noisy sensor signal $\dot{y}_{{k,1}}$'
+        ]    # labels for legend
+
     # Add grey vertical lines
-    ax.vlines(x=np.arange(nNodes-1) + 0.5, ymin=np.amin(ax.get_ylim()), ymax=np.amax(ax.get_ylim()),\
-        colors='tab:gray', linestyles='-')
+    ax.vlines(
+        x=np.arange(nNodes-1) + 0.5,
+        ymin=np.amin(ax.get_ylim()),
+        ymax=np.amax(ax.get_ylim()),
+        colors='tab:gray',
+        linestyles='-'
+    )
     # Centralised
     if centralised is not None:
         for k in range(nNodes):
-            tmp = ax.hlines(y=centralised[k], xmin=k-w*2, xmax=k+w*2,
-                colors='k', linestyles='--')
+            xlims = [k-w*2, k+w*2]
+            if resLocal is not None:
+                xlims = [k-w*2.5, k+w*2.5]
+            tmp = ax.hlines(
+                y=centralised[k],
+                xmin=xlims[0],
+                xmax=xlims[1],
+                colors='k',
+                linestyles='--'
+            )
         handles.append(tmp)
         leglabs.append('GEVD-MWF (no SRO)')
     ax.set_xticks(np.arange(nNodes))
@@ -297,9 +371,13 @@ def subplot_fcn_2(ax, res, resBeforeEnhancement, w, ylims, mycolor, showLegend=F
     ax.set_xticklabels(xtlabs)
     ax.set_xlim([-0.5, nNodes-0.5])  
     if showLegend:
-        ax.legend(handles=handles,
+        bboxtoa = (1, 0)
+        if resLocal is not None:
+            bboxtoa = (1, -.15)
+        ax.legend(
+            handles=handles,
             labels=leglabs,
-            bbox_to_anchor=(1, 0),
+            bbox_to_anchor=bboxtoa,
             loc="lower left"
         )
 
