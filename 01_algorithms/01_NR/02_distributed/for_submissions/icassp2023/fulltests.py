@@ -24,13 +24,14 @@ class TestsParams:
 
 
 ASCBASEPATH = '02_data/01_acoustic_scenarios/for_submissions/icassp2023'
-EXPORTPATH = '01_algorithms/01_NR/02_distributed/res/for_submissions/icassp2023'
+# EXPORTPATH = '01_algorithms/01_NR/02_distributed/res/for_submissions/icassp2023/'
+EXPORTPATH = '01_algorithms/01_NR/02_distributed/res/for_submissions/icassp2023/test_postReviews/'
 PARAMS = TestsParams(
     # vvv 20 cm mic. spacing vvv
     pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS18_RT150ms',
     # vvv 10 cm mic. spacing vvv
     # pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS37_RT150ms',
-    sigDur=5,
+    sigDur=15,
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
     deltaSROs=[20,50,200],
@@ -41,11 +42,11 @@ PARAMS = TestsParams(
         probVarPerSample=0.0001,
         transition='step'
     ),
-    # noiseType='white',      # white noise (localised)
+    noiseType='white',      # white noise (localised)
     # noiseType='white_diffuse',      # white noise (diffuse)
     # noiseType='ssn',        # speech-shaped noise (localised)
     # noiseType='ssn_diffuse',        # speech-shaped noise (diffuse)
-    noiseType='babble',     # babble noise (localised)
+    # noiseType='babble',     # babble noise (localised)
     # noiseType='babble_diffuse',     # babble noise (diffuse)
 )
 

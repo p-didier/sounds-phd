@@ -541,7 +541,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # Compensate SROs
             if s.asynchronicity.compensateSROs:
                 # Complete phase shift factors
-                phaseShiftFactors[k] += extraPhaseShiftFactor
+                # phaseShiftFactors[k] += extraPhaseShiftFactor  # FIXME: COMMENTED OUT FOR TESTING, 17.01.2023
                 if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
                 # Apply phase shift factors
@@ -628,10 +628,13 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         yyHuncomp=yyHuncomp[k],
                         avgProdRes=avgProdResiduals[k],
                         oracleSRO=s.asynchronicity.SROsppm[k],
-                        bufferFlagPos=np.sum(bufferFlags[k][:(i[k] + 1), :], axis=0)\
-                            * s.broadcastLength,
-                        bufferFlagPri=np.sum(bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :], axis=0)\
-                            * s.broadcastLength,
+                        bufferFlagPos=np.sum(
+                            bufferFlags[k][:(i[k] + 1), :],
+                            axis=0
+                            ) * s.broadcastLength,
+                        bufferFlagPri=np.sum(
+                            bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :],
+                            axis=0) * s.broadcastLength,
                         )
 
             if s.asynchronicity.estimateSROs == 'CohDrift':
