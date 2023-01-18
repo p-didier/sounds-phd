@@ -43,14 +43,18 @@ p = PostProcParams(
     #
     # vvv test on 17.01.2023 (see journal 2023 week03) vvv
     # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_FSDs_20230117/J4_withExtraPSF',  # with extra phase shift factor (same as done for ICASSP paper)
-    pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_FSDs_20230117/J4_withoutExtraPSF',  # withOUT extra phase shift factor (same as done for ICASSP paper)
+    # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_FSDs_20230117/J4_withoutExtraPSF',  # withOUT extra phase shift factor (same as done for ICASSP paper)
     # ^^^ test on 17.01.2023 (see journal 2023 week03) ^^^
+    #
+    # vvv test on 18.01.2023 (see journal 2023 week03) vvv
+    pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_nonstationnoise_20230118/J4Mk[1_3_2_5]_Ns1_Nn2',  # with non-stationary (speech) noise sources
+    # ^^^ test on 18.01.2023 (see journal 2023 week03) ^^^
     #
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savePath=Path(__file__).parent.parent,
     includeCentralisedPerf=True,
-    includeLocalPerf=True,
+    includeLocalPerf=False,
     firstMetric='eSTOI',
     # firstMetric='SNR',
     # firstMetric='fwSNRseg',

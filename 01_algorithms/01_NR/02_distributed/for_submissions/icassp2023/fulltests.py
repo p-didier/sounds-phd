@@ -32,9 +32,12 @@ PARAMS = TestsParams(
     # vvv 10 cm mic. spacing vvv
     # pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS37_RT150ms',
     sigDur=15,
+    # sigDur=5,
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
     deltaSROs=[20,50,200],
+    # deltaSROs=[200],
+    # deltaSROs=[20],
     exportBasePath=EXPORTPATH,
     timeVaryingSROs=SROsTimeVariation(
         timeVarying=False,
@@ -42,12 +45,13 @@ PARAMS = TestsParams(
         probVarPerSample=0.0001,
         transition='step'
     ),
-    noiseType='white',      # white noise (localised)
+    # noiseType='white',      # white noise (localised)
     # noiseType='white_diffuse',      # white noise (diffuse)
     # noiseType='ssn',        # speech-shaped noise (localised)
     # noiseType='ssn_diffuse',        # speech-shaped noise (diffuse)
     # noiseType='babble',     # babble noise (localised)
     # noiseType='babble_diffuse',     # babble noise (diffuse)
+    noiseType='nonstationaryspeech',      # non-stationary speech (localised)
 )
 
 
@@ -115,13 +119,18 @@ def run_simul(params, exportBasePath):
         noiseFiles = ['ssn/ssn_speech1.wav', 'ssn/ssn_speech2.wav']
     elif 'babble' in params['noiseType']:
         noiseFiles = [f'babble/babble{ii + 1}.wav' for ii in range(nNoiseS)]
+    elif 'nonstationaryspeech' in params['noiseType']:
+        p = Path(f'{pathToRoot}/02_data/00_raw_signals/02_noise/speech')\
+            .glob('**/*')  # https://stackoverflow.com/a/40216619
+        files = [x for x in p if x.is_file()]
+        noiseFiles = [f'speech/{files[ii].stem}.wav' for ii in range(nNoiseS)]
     # Make diffuse or not
     diffuseNoise = 'diffuse' in params['noiseType']
 
     # Generate test parameters
     danseTestingParams = sro_testing.DanseTestingParameters(
         # General hyperparameters
-        writeOver=False,    # if True, the script will overwrite existing data
+        writeOver=True,    # if True, the script will overwrite existing data
         #
         ascBasePath=f'{pathToRoot}/02_data/01_acoustic_scenarios/validations',
         signalsPath=f'{Path(__file__).parent}/validations/signals',
@@ -165,9 +174,11 @@ def run_simul(params, exportBasePath):
             plotResult=True,
             # vvvvvvvvvvvvvv
             compensateSROs=params['comp'],
+            # compensateSROs=True,  # FIXME: DEBUGGING 20230118
             estimateSROs='CohDrift',
             cohDriftMethod=CohDriftSROEstimationParameters(
-                loop='open'
+                loop='open',
+                startAfterNupdates=30  # FIXME: DEBUGGING 20230118
             ),
             # vvvvvvvvvvvvvv
             timeVaryingSROs=params['timeVaryingSROs']

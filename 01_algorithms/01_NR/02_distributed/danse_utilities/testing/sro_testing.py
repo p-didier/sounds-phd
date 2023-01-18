@@ -73,11 +73,11 @@ class DanseTestingParameters():
         if not isinstance(self.specificNoiseSignalFiles, list) and isinstance(self.specificNoiseSignalFiles, str):
             self.specificNoiseSignalFiles = [self.specificNoiseSignalFiles]
         # Warnings
-        if self.writeOver:
-            inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
-            if not inp in ['y', 'Y']:
-                print('Setting `danseParams.writeOver` to False. Not overwriting.')
-                self.writeOver = False
+        # if self.writeOver:
+        #     inp = input(f'`danseParams.writeOver` is True -- Do you confirm you want to write over existing exports? [y/[n]]  ')
+        #     if not inp in ['y', 'Y']:
+        #         print('Setting `danseParams.writeOver` to False. Not overwriting.')
+        #         self.writeOver = False
 
     def load(self, foldername: str, silent=False):
         return met.load(self, foldername, silent)

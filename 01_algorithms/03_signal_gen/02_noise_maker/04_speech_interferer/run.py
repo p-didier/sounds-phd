@@ -5,11 +5,20 @@
 import sys, os
 import copy
 import numpy as np
-from pathlib import Path
+from pathlib import Path, PurePath
 import soundfile as sf
 import matplotlib.pyplot as plt
 import simpleaudio as sa
 from scipy.io import wavfile
+
+# Find path to root folder
+rootFolder = 'sounds-phd'
+pathToRoot = Path(__file__)
+while PurePath(pathToRoot).name != rootFolder:
+    pathToRoot = pathToRoot.parent
+if not any("_general_fcts" in s for s in sys.path):
+    sys.path.append(f'{pathToRoot}/_general_fcts')
+from VAD import oracleVAD
 
 # Paths
 PATH_TO_LIBRI = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
@@ -23,13 +32,16 @@ PLOT_AND_LISTEN = False  # if True, shows plot of the signal and plays it back
 EXPORT_FILE = True
 ELIMINATE_INITIAL_SILENCE = True
 # ^^^ if True, ensure that the audio file starts on a speech segment
+ELIMINATE_ALL_SILENCES = True
+# ^^^ if True, ensures that the audio file is full of speech segments
 
 def main():
 
     # Get random generator
     rng = np.random.default_rng(seed=SEED)
 
-    for _ in range(N_FILES):
+    for ii in range(N_FILES):
+        print(f'Generating signal {ii + 1}/{N_FILES}...')
 
         # Select random folder
         folder, ref = select_random_folder(
@@ -45,7 +57,8 @@ def main():
             dir=folder,
             fs=fs,
             T=T,
-            elimInitialSilence=ELIMINATE_INITIAL_SILENCE
+            elimInitialSilence=ELIMINATE_INITIAL_SILENCE,
+            elimAllSilences=ELIMINATE_ALL_SILENCES
         )
 
         # Plot
@@ -87,7 +100,7 @@ def plot_and_hear_signal(sig, fs):
     return None
 
 
-def build_signal(dir, fs, T, elimInitialSilence=False):
+def build_signal(dir, fs, T, elimInitialSilence=False, elimAllSilences=False):
     """
     Builds speech signal of desired length `T` by concatenating fragments
     contained in folder `dir`. 
@@ -111,8 +124,18 @@ def build_signal(dir, fs, T, elimInitialSilence=False):
             # vvv find spot where the first 0 appears in `antiVAD`
             idxStart = list(np.diff(antiVAD)).index(-1)
             fragment = fragment[idxStart:]
+        if elimAllSilences:
+            # Eliminate all silences (all VAD=0)
+            # -- useful to get a minimum-power interfering signal
+            # (e.g., for DWACD-based SRO estimation)
+            # -- see ICASSP2023/OJSP rebuttal, reviewer #4.
+            thrsVAD = np.amax(fragment ** 2) / 4000
+            vad, _ = oracleVAD(fragment, tw=40e-3, thrs=thrsVAD, Fs=fs)
+            fragment = fragment[vad == 1]
         signal = np.concatenate((signal, np.array(fragment)))
         idx += 1
+        if idx >= len(files) - 1:
+            idx = 0  # loop back
 
     # Truncate extra samples
     if len(signal) > desiredLength:

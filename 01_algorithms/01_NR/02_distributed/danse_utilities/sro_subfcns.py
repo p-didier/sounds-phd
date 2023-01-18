@@ -335,6 +335,10 @@ def cohdrift_sro_estimation(
     res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) *\
         np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
 
+    # if abs(bufferFlagPos - bufferFlagPri) > 1:
+    #     print(f'bufferFlagPos - bufferFlagPri = {bufferFlagPos - bufferFlagPri}')
+    #     stop = 1
+
     # Update the average coherence product
     if flagFirstSROEstimate:
         # vvv 1st SRO estimation, no exponential averaging (initialization)

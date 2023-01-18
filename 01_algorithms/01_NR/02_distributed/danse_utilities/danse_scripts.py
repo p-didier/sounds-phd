@@ -541,7 +541,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # Compensate SROs
             if s.asynchronicity.compensateSROs:
                 # Complete phase shift factors
-                # phaseShiftFactors[k] += extraPhaseShiftFactor  # FIXME: COMMENTED OUT FOR TESTING, 17.01.2023
+                phaseShiftFactors[k] += extraPhaseShiftFactor
                 if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
                 # Apply phase shift factors
