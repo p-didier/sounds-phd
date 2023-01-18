@@ -11,24 +11,29 @@ import matplotlib.pyplot as plt
 import simpleaudio as sa
 from scipy.io import wavfile
 
-PATHTOLIBRI = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
+# Paths
+PATH_TO_LIBRI = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
+EXPORT_PATH = 'C:/Users/pdidier/Dropbox/PC/Documents/sounds-phd/02_data/00_raw_signals/02_noise/speech'
+# Numerical global variables
 SEED = 12345  # for random generators
 T = 30  # second(s)
-NFILES = 10    # number of files to generate
-PLOTANDLISTEN = False  # if True, shows a plot of the signal and plays it back
-EXPORTFILE = True
-EXPORTPATH = 'C:/Users/pdidier/Dropbox/PC/Documents/sounds-phd/02_data/00_raw_signals/02_noise/speech'
+N_FILES = 10    # number of files to generate
+# Booleans
+PLOT_AND_LISTEN = False  # if True, shows plot of the signal and plays it back
+EXPORT_FILE = True
+ELIMINATE_INITIAL_SILENCE = True
+# ^^^ if True, ensure that the audio file starts on a speech segment
 
 def main():
 
     # Get random generator
     rng = np.random.default_rng(seed=SEED)
 
-    for _ in range(NFILES):
+    for _ in range(N_FILES):
 
         # Select random folder
         folder, ref = select_random_folder(
-            dir=PATHTOLIBRI,
+            dir=PATH_TO_LIBRI,
             rng=rng,
         )
 
@@ -39,19 +44,20 @@ def main():
         signal = build_signal(
             dir=folder,
             fs=fs,
-            T=T
+            T=T,
+            elimInitialSilence=ELIMINATE_INITIAL_SILENCE
         )
 
         # Plot
-        if PLOTANDLISTEN:
+        if PLOT_AND_LISTEN:
             plot_and_hear_signal(signal, fs)
 
         # Save
-        if EXPORTFILE:
+        if EXPORT_FILE:
             amplitude = np.iinfo(np.int16).max
             nparrayNormalized = (amplitude * signal / np.amax(signal) * 0.5)\
                 .astype(np.int16)  # 0.5 to avoid clipping
-            wavfile.write(f'{EXPORTPATH}/speech_{ref}_{T}s.wav', fs, nparrayNormalized)
+            wavfile.write(f'{EXPORT_PATH}/speech_{ref}_{T}s.wav', fs, nparrayNormalized)
 
     return 0
 
@@ -81,7 +87,7 @@ def plot_and_hear_signal(sig, fs):
     return None
 
 
-def build_signal(dir, fs, T):
+def build_signal(dir, fs, T, elimInitialSilence=False):
     """
     Builds speech signal of desired length `T` by concatenating fragments
     contained in folder `dir`. 
@@ -99,6 +105,12 @@ def build_signal(dir, fs, T):
         while files[idx].name[-5:] != '.flac':
             idx += 1
         fragment, _ = sf.read(str(files[idx]))
+        # Eliminate initial silence
+        if len(signal) == 0 and elimInitialSilence:
+            antiVAD = np.array(fragment <= 0.5 * np.amax(fragment), dtype=int)
+            # vvv find spot where the first 0 appears in `antiVAD`
+            idxStart = list(np.diff(antiVAD)).index(-1)
+            fragment = fragment[idxStart:]
         signal = np.concatenate((signal, np.array(fragment)))
         idx += 1
 
