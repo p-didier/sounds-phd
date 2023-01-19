@@ -5,6 +5,7 @@ from . import classes
 from . import danse_subfcns as subs
 from pyinstrument import Profiler
 import copy
+import matplotlib.pyplot as plt
 
 """
 References:
@@ -738,6 +739,39 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
     fig = sroData.plotSROdata(xaxistype='both', fs=fs[0], Ns=s.Ns, firstUp=firstDANSEupdateRefSensor)
     # fig = sroData.plotSROdata(xaxistype='iterations', fs=fs[0], Ns=s.Ns)
     # plt.show(block=False)
-    stop = 1
+    # Show filter evolution
+    show_filter_convergence(
+        w=wTilde[0],
+        Ns=s.Ns,
+        fs=s.samplingFrequency,
+        firstUp=firstDANSEupdateRefSensor,
+        wCentr=wCentr[0]
+    )
 
     return d, dLocal, dCentr, sroData, tStartForMetrics, firstDANSEupdateRefSensor
+
+
+def show_filter_convergence(w: np.ndarray, Ns, fs, firstUp):
+    """
+    
+    Created on 19.01.2023 (as a result of OJSP reviewers' suggestions).
+    """
+
+    fig, axes = plt.subplots(1,1)
+    fig.set_size_inches(8.5, 3.5)
+    axes.plot(np.abs(w[:, :, 0].T))
+    axes.grid()
+    axes.set_ylabel('$|w_{{11,1}}[\\nu,i]|$')
+    # Make double x-axis (top and bottom)
+    axes2 = axes.twiny()
+    axes2.set_xlabel('DANSE updates (frame index $i$)', loc='left')
+    axes2.set_xticks(axes.get_xticks())
+    xticks = np.linspace(start=0, stop=w.shape[1], num=9)
+    axes.set_xticks(xticks)
+    axes.set_xticklabels(np.round(xticks * Ns / fs + firstUp, 2))
+    axes.set_xlabel('Time [s]', loc='left')
+    
+    plt.tight_layout()	
+    plt.show(block=False)
+
+    return None

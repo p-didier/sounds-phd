@@ -31,8 +31,8 @@ PARAMS = TestsParams(
     pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS18_RT150ms',
     # vvv 10 cm mic. spacing vvv
     # pathToASC=f'{ASCBASEPATH}/J4Mk[1_3_2_5]_Ns1_Nn2/AS37_RT150ms',
-    sigDur=15,
-    # sigDur=5,
+    # sigDur=15,
+    sigDur=5,
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
     deltaSROs=[20,50,200],
@@ -45,13 +45,13 @@ PARAMS = TestsParams(
         probVarPerSample=0.0001,
         transition='step'
     ),
-    # noiseType='white',      # white noise (localised)
+    noiseType='white',      # white noise (localised)
     # noiseType='white_diffuse',      # white noise (diffuse)
     # noiseType='ssn',        # speech-shaped noise (localised)
     # noiseType='ssn_diffuse',        # speech-shaped noise (diffuse)
     # noiseType='babble',     # babble noise (localised)
     # noiseType='babble_diffuse',     # babble noise (diffuse)
-    noiseType='nonstationaryspeech',      # non-stationary speech (localised)
+    # noiseType='nonstationaryspeech',      # non-stationary speech (localised)
 )
 
 
@@ -169,16 +169,16 @@ def run_simul(params, exportBasePath):
         computeLocalEstimate=True,
         # vvvvvvvvvvvvvv
         computeCentrEstimate=params['computeCentrEstimate'],
+        # computeCentrEstimate=True,    # BUG: DEBUGGING 20230119
         #
         asynchronicity=SamplingRateOffsets(
             plotResult=True,
             # vvvvvvvvvvvvvv
             compensateSROs=params['comp'],
-            # compensateSROs=True,  # FIXME: DEBUGGING 20230118
             estimateSROs='CohDrift',
             cohDriftMethod=CohDriftSROEstimationParameters(
                 loop='open',
-                startAfterNupdates=30  # FIXME: DEBUGGING 20230118
+                # startAfterNupdates=30  # BUG: DEBUGGING 20230118
             ),
             # vvvvvvvvvvvvvv
             timeVaryingSROs=params['timeVaryingSROs']
