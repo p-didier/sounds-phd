@@ -51,8 +51,10 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # DANSE
     print('Launching danse()...')
-    mySignals.desiredSigEst, mySignals.desiredSigEstLocal, mySignals.desiredSigEstCentralized,\
-        sroData, tStartForMetrics, firstDANSEupdateRefSensor = launch_danse(mySignals, asc, settings)
+    mySignals.desiredSigEst, mySignals.desiredSigEstLocal,\
+        mySignals.desiredSigEstCentralized, sroData, tStartForMetrics,\
+        firstDANSEupdateRefSensor, wTilde, wLocal, wCentr =\
+        launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -70,6 +72,9 @@ def run_experiment(settings: classes.ProgramSettings):
     results.other = classes.MiscellaneousData()
     results.other.metricsStartIdx = startIdx
     results.other.firstDANSEupRefSensor = firstDANSEupdateRefSensor
+    results.filtersEvolution.wTilde = wTilde
+    results.filtersEvolution.wLocal = wLocal
+    results.filtersEvolution.wCentr = wCentr
 
     return results
 
@@ -292,8 +297,11 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         raise ValueError('NOT YET IMPLEMENTED: conversion to time domain before output in sequential DANSE (see how it is done in `danse_simultaneous()`)')
         desiredSigEst_STFT = danse_scripts.danse_sequential(y, asc, settings, signals.VAD)
     elif settings.danseUpdating == 'simultaneous':
-        desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor = danse_scripts.danse_simultaneous(
-            y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx)
+        desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized,\
+        sroData, tStartForMetrics, firstDANSEupdateRefSensor,\
+        wTilde, wLocal, wCentr = danse_scripts.danse_simultaneous(
+            y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx
+        )
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -302,7 +310,7 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor
+    return desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor, wTilde, wLocal, wCentr
 
 
 def whiten(sig, vad=[]):

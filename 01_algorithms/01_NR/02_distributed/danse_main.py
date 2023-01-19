@@ -201,6 +201,9 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
         Maximal playback duration (only used if <listen> is True).
     """
 
+    # Plot convergence
+    # results.plot_convergence(settings)   # TODO: 20230119
+
     # Export as WAV
     wavFilenames = results.signals.export_wav(pathToResults)
 

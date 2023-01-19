@@ -888,6 +888,13 @@ def normalize_toint16(nparray):
 
 
 @dataclass
+class FiltersEvol:
+    """Class to contain the filter coefficients after a DANSE run."""
+    wTilde: list[np.ndarray] = field(default_factory=list)  # DANSE filters
+    wLocal: list[np.ndarray] = field(default_factory=list)  # local filters
+    wCentr: list[np.ndarray] = field(default_factory=list)  # centralised filters
+
+@dataclass
 class Results(object):
     """Class for storing simulation results"""
     signals: Signals = Signals()                                    # all signals involved in run
@@ -895,6 +902,7 @@ class Results(object):
     acousticScenario: AcousticScenario = AcousticScenario()         # acoustic scenario considered
     sroData: SROdata = SROdata()                                    # SRO estimation data
     other: MiscellaneousData = MiscellaneousData()                  # other data
+    filtersEvolution: FiltersEvol = FiltersEvol()                   # evolution of filter coefficients
 
     def load(self, foldername: str, silent=False):
         a: Results = met.load(self, foldername, silent)
@@ -914,6 +922,57 @@ class Results(object):
             met.save(mycls, foldername)
         else:
             met.save(self, foldername)
+
+    def plot_convergence(self, settings: ProgramSettings, nodeIdx=0):
+        """
+        Shows convergence of DANSE.
+        Created on 19.01.2023 (as a result of OJSP reviewers' suggestions).
+        """
+        
+        def _format_ax(ax, title):
+            """Helper function to format plot axes."""
+            ax.grid()
+            ax.set_title(title)
+            # Make double x-axis (top and bottom)
+            axes2 = ax.twiny()
+            axes2.set_xlabel('DANSE updates (frame index $i$)', loc='left')
+            axes2.set_xticks(ax.get_xticks())
+            xticks = np.linspace(
+                start=0,
+                stop=self.filtersEvolution.wTilde[nodeIdx].shape[1],
+                num=9
+            )
+            ax.set_xticks(xticks)
+            ax.set_xticklabels(
+                np.round(
+                    xticks * settings.Ns / self.signals.fs[0] +\
+                        self.other.firstDANSEupRefSensor
+                    , 2
+                )
+            )
+            ax.set_xlabel('Time [s]', loc='left')
+            ax.legend()
+        
+        diffFiltersReal = 20 * np.log10(np.mean(np.abs(
+            np.real(self.filtersEvolution.wTilde[nodeIdx][:, :, settings.referenceSensor].T) - \
+            np.real(self.filtersEvolution.wCentr[nodeIdx][:, :, settings.referenceSensor].T)
+        ), axis=1))
+        diffFiltersImag = 20 * np.log10(np.mean(np.abs(
+            np.imag(self.filtersEvolution.wTilde[nodeIdx][:, :, settings.referenceSensor].T) - \
+            np.imag(self.filtersEvolution.wCentr[nodeIdx][:, :, settings.referenceSensor].T)
+        ), axis=1))
+
+        fig, axes = plt.subplots(1,1)
+        fig.set_size_inches(5.5, 3.5)
+        axes.plot(diffFiltersReal, label=f'$20\\log_{{10}}(E_{{\\nu}}\\{{|Re(\\tilde{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i]) - Re(\\hat{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i])|\\}})$')
+        axes.plot(diffFiltersImag, label=f'$20\\log_{{10}}(E_{{\\nu}}\\{{|Im(\\tilde{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i]) - Im(\\hat{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i])|\\}})$')
+        _format_ax(axes, title='Convergence of DANSE towards centralised estimate')
+        plt.tight_layout()
+        plt.show(block=False)
+
+        stop = 1
+
+        return None
 
     def plot_enhancement_metrics(self, plotLocal=False):
         """Creates a visual representation of DANSE performance results.
