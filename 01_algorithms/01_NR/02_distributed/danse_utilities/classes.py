@@ -372,9 +372,10 @@ class ProgramSettings(object):
     randSeed: int = 12345                   # random generator(s) seed
     printouts: PrintoutsParameters = PrintoutsParameters()    # boolean parameters for printouts
     efficiency: EfficiencyParameters = EfficiencyParameters() # boolean parameters for computational efficiency
-    stftWinLength: int = 1024               # [samples] STFT frame length
+    stftWinLength: int = DFTsize               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
     stftWin: np.ndarray = np.array([])      # STFT window
+    computeNoiseFreeEstimate: bool = False  # if True, compute DANSE-filtered version of the noise-free sensor signals (for ICASSP/OJSP revision, Reviewer #3's last comment)
 
     def __post_init__(self) -> None:
         # Base attribute checks

@@ -62,7 +62,9 @@ def run_experiment(settings: classes.ProgramSettings):
 
     # --------------- Post-process ---------------
     # Compute speech enhancement evaluation metrics
-    enhancementEval, startIdx = evaluate_enhancement_outcome(mySignals, settings, tStartForMetrics)
+    enhancementEval, startIdx = evaluate_enhancement_outcome(
+        mySignals, settings, tStartForMetrics
+    )
     # Build output object
     results = classes.Results()
     results.signals = mySignals

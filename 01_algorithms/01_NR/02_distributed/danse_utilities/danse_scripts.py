@@ -521,7 +521,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                 if 'wholeChunk' not in s.broadcastDomain:
                     raise ValueError('NOT YET IMPLEMENTED FOR CENTRALIZED ESTIMATE')
                 yTildeCentr[k][:, i[k], :] = yCentrCurr
-                ytildeHatCentrCurr = 1 / winWOLAanalysis.sum() * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
+                ytildeHatCentrCurr = 1 / normFactWOLA * np.fft.fft(yCentrCurr * winWOLAanalysis[:, np.newaxis], s.DFTsize, axis=0)
                 ytildeHatCentr[k][:, i[k], :] = ytildeHatCentrCurr[:numFreqLines, :]
 
             # Account for buffer flags
@@ -712,6 +712,26 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                     dCentr[idxBegChunk:idxEndChunk, k] = tmp
                 elif s.desSigProcessingType == 'conv':
                     dCentr[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
+            if s.computeNoiseFreeEstimate:
+                # ----- Compute noise-free signal chunk estimate [DANSE, GLOBAL] -----
+                # TODO:  TODO:  TODO:  TODO:  TODO: 
+                pass
+                # dhatCentr[:, i[k], k], tmp = subs.get_desired_signal(
+                #     wCentr[k][:, i[k] + 1, :],
+                #     ytildeHatCentr[k][:, i[k], :],
+                #     winWOLAsynthesis,
+                #     dCentr[idxBegChunk:idxEndChunk, k],
+                #     normFactWOLA,
+                #     winShift=s.Ns,
+                #     desSigEstChunkLength=s.Ns,
+                #     processingType=s.desSigProcessingType,
+                #     yTD=yTildeCentr[k][:, i[k], :]
+                #     )
+                # if s.desSigProcessingType == 'wola':
+                #     dCentr[idxBegChunk:idxEndChunk, k] = tmp
+                # elif s.desSigProcessingType == 'conv':
+                #     dCentr[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
+                # TODO:  TODO:  TODO:  TODO:  TODO: 
             
             # Increment DANSE iteration index
             i[k] += 1

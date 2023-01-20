@@ -63,6 +63,8 @@ class DanseTestingParameters():
     #
     computeLocalEstimate: bool = False      # if True, compute also node-specific local estimate of desired signal
     computeCentrEstimate: bool = False      # if True, compute also centralised estimate of desired signal
+    # for ICASSP/OJSP paper revision
+    DFTsize: int = 1024 
 
     def __post_init__(self):
         # Check inputs variable type
@@ -243,6 +245,10 @@ def build_experiment_parameters(dp: DanseTestingParameters, exportBasePath=''):
                         timeVaryingSROs=dp.asynchronicity.timeVaryingSROs
                     ),
                     printouts=dp.printouts,
+                    #
+                    DFTsize=dp.DFTsize,
+                    Ns=dp.DFTsize // 2,
+                    stftWinLength=dp.DFTsize
                     )
             # Build export file path
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'
@@ -278,6 +284,7 @@ def go(danseParams: DanseTestingParameters, exportBasePath=''):
         t0 = time.perf_counter()
 
         if not Path(experiments[idxExp]['path']).is_dir() or danseParams.writeOver:
+
             danse_main.main(
                 experiments[idxExp]['settings'],
                 experiments[idxExp]['path'],

@@ -639,7 +639,7 @@ def process_incoming_signals_buffers(zBufferk, zPreviousk, neighs, ik, N, Ns, L,
             else:
                 raise ValueError(f'Unexpected buffer over-/under-flow in FD-broadcasting: {Bq} samples instead of {nExpectedFreqLines} expected.')
         
-        # Time-domain chunks broadcasting (naïve DANSE, simplest to visualize/implement, but inefficient)
+        # Time-domain chunks broadcasting
         elif broadcastDomain == 'wholeChunk_td':
             if ik == 0:
                 if Bq == Ns:

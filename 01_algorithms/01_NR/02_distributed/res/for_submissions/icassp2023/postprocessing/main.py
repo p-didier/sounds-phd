@@ -2,6 +2,7 @@
 import os
 import sys
 import numpy as np
+from scipy.io import wavfile
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -32,7 +33,7 @@ class PostProcParams:
 # Set post-processing parameters
 p = PostProcParams(
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffwn',  # w/ diffuse white noise
-    # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_wn',  # w/ white noise
+    pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_wn',  # w/ white noise
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2',  # ?
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_ssn',   # w/ SSN
     # pathToResults=f'{Path(__file__).parent.parent}/J4Mk[1_3_2_5]_Ns1_Nn2_diffbab',   # w/ diffuse babble noise
@@ -42,26 +43,36 @@ p = PostProcParams(
     # pathToResults=f'{Path(__file__).parent.parent}/_archive/J4Mk[1_3_2_5]_Ns1_Nn2__week40_AS2',  # ?
     #
     # vvv test on 17.01.2023 (see journal 2023 week03) vvv
+    # ====================================================
     # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_FSDs_20230117/J4_withExtraPSF',  # with extra phase shift factor (same as done for ICASSP paper)
     # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_FSDs_20230117/J4_withoutExtraPSF',  # withOUT extra phase shift factor (same as done for ICASSP paper)
-    # ^^^ test on 17.01.2023 (see journal 2023 week03) ^^^
     #
     # vvv test on 18.01.2023 (see journal 2023 week03) vvv
-    pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_nonstationnoise_20230118/J4Mk[1_3_2_5]_Ns1_Nn2',  # with non-stationary (speech) noise sources
-    # ^^^ test on 18.01.2023 (see journal 2023 week03) ^^^
+    # ====================================================
+    # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_nonstationnoise_20230118/J4Mk[1_3_2_5]_Ns1_Nn2',  # with non-stationary (speech) noise sources
+    #
+    # vvv test on 19.01.2023 (see journal 2023 week03) vvv
+    # ====================================================
+    # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_DFTsize_20230119/J4_N512',  # with DFTsize (N) = 512 samples
+    # pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_DFTsize_20230119/J4_N2048',  # with DFTsize (N) = 2048 samples
     #
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
     savePath=Path(__file__).parent.parent,
     includeCentralisedPerf=True,
     includeLocalPerf=False,
-    firstMetric='eSTOI',
+    # firstMetric='eSTOI',
     # firstMetric='SNR',
     # firstMetric='fwSNRseg',
+    firstMetric='siSDR',
     secondMetric='fwSNRseg',
     #
+    # savefigure=True,
     savefigure=False,
 )
+
+# Update save path
+# p.savePath = p.pathToResults
 
 def main():
     
@@ -76,7 +87,7 @@ def main():
     fig = plot(res, p)
 
     if p.savefigure:
-        fname = f'myfig__{Path(p.pathToResults).stem}'
+        fname = f'myfig__{Path(p.pathToResults).stem}_{p.firstMetric}'
         if p.includeLocalPerf:
             fname += '_incLocal'
         fig.savefig(f'{p.savePath}/{fname}.png')
@@ -95,14 +106,16 @@ def run(params: PostProcParams):
             centralisedDir = None
         else:
             centralisedDir = f'{params.pathToResults}/centralised'
-    dirs = [ii for ii in dirs if ii != 'centralised']  # do not include the centralised estimation yet
+    # vvv Do not include the centralised estimation yet
+    dirs = [ii for ii in dirs if ii != 'centralised']
     # Invert order of directories to process SROs from small to large
     dirs = np.flip(dirs)
 
     # Get number of nodes
     nNodes = int(Path(params.pathToResults).stem[1])
 
-    # Results arrays dimensions [type of SROs, comp/nocomp, acoustic scenario, nodes]
+    # Results arrays dimensions
+    # [type of SROs, comp/nocomp, acoustic scenario, nodes]
     dims = (len(dirs), 2, nNodes)
     # Initialize arrays
     stoi = np.zeros(dims)
@@ -114,6 +127,9 @@ def run(params: PostProcParams):
     fwSNRseg = np.zeros(dims)
     fwSNRsegLocal = np.zeros(dims)
     fwSNRsegOriginal = np.zeros(dims)
+    siSDR = np.zeros(dims)
+    siSDRLocal = np.zeros(dims)
+    siSDROriginal = np.zeros(dims)
 
     # Extract results
     for ii in range(len(dirs)):
@@ -132,20 +148,41 @@ def run(params: PostProcParams):
 
             # Get useful values
             for nn in range(nNodes):
-                stoi[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].after
-                stoiLocal[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].afterLocal
-                stoiOriginal[ii, idx, nn] = r.enhancementEval.stoi[f'Node{nn+1}'].before
-                snr[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].after
-                snrLocal[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].afterLocal
-                snrOriginal[ii, idx, nn] = r.enhancementEval.snr[f'Node{nn+1}'].before
-                fwSNRseg[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
-                fwSNRsegLocal[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterLocal
-                fwSNRsegOriginal[ii, idx, nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].before
+                stoi[ii, idx, nn] =\
+                    r.enhancementEval.stoi[f'Node{nn+1}'].after
+                stoiLocal[ii, idx, nn] =\
+                    r.enhancementEval.stoi[f'Node{nn+1}'].afterLocal
+                stoiOriginal[ii, idx, nn] =\
+                    r.enhancementEval.stoi[f'Node{nn+1}'].before
+                snr[ii, idx, nn] =\
+                    r.enhancementEval.snr[f'Node{nn+1}'].after
+                snrLocal[ii, idx, nn] =\
+                    r.enhancementEval.snr[f'Node{nn+1}'].afterLocal
+                snrOriginal[ii, idx, nn] =\
+                    r.enhancementEval.snr[f'Node{nn+1}'].before
+                fwSNRseg[ii, idx, nn] =\
+                    r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
+                fwSNRsegLocal[ii, idx, nn] =\
+                    r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterLocal
+                fwSNRsegOriginal[ii, idx, nn] =\
+                    r.enhancementEval.fwSNRseg[f'Node{nn+1}'].before
+                # For SDR
+                siSDR[ii, idx, nn] = get_SDR(
+                    currDirPath + '/wav', nn, type='DANSE'
+                )
+                siSDRLocal[ii, idx, nn] = get_SDR(
+                    currDirPath + '/wav', nn, type='local'
+                )
+                siSDROriginal[ii, idx, nn] = get_SDR(
+                    currDirPath + '/wav', nn, type='original'
+                )
+                
 
     # Get centralised data (if asked)
     stoiCentr = np.full(nNodes, fill_value=None)
     snrCentr = np.full(nNodes, fill_value=None)
     fwSNRsegCentr = np.full(nNodes, fill_value=None)
+    siSDRCentr = np.full(nNodes, fill_value=None)
     if params.includeCentralisedPerf:
         if centralisedDir is not None:
             r = Results()
@@ -153,16 +190,80 @@ def run(params: PostProcParams):
             for nn in range(nNodes):
                 stoiCentr[nn] = r.enhancementEval.stoi[f'Node{nn+1}'].after
                 snrCentr[nn] = r.enhancementEval.snr[f'Node{nn+1}'].after
-                fwSNRsegCentr[nn] = r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
+                fwSNRsegCentr[nn] =\
+                    r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
+                siSDRCentr[nn] = get_SDR(
+                    centralisedDir + '/wav', nn, type='DANSE'
+                )
 
     res = dict([
-        ('eSTOI', stoi), ('eSTOILocal', stoiLocal), ('eSTOIOriginal', stoiOriginal), ('eSTOICentr', stoiCentr),\
-        ('SNR', snr), ('SNRLocal', snrLocal), ('SNROriginal', snrOriginal), ('SNRCentr', snrCentr),\
-        ('fwSNRseg', fwSNRseg), ('fwSNRsegLocal', fwSNRsegLocal),\
-            ('fwSNRsegOriginal', fwSNRsegOriginal), ('fwSNRsegCentr', fwSNRsegCentr)
+        ('eSTOI', stoi),
+        ('eSTOILocal', stoiLocal),
+        ('eSTOIOriginal', stoiOriginal),
+        ('eSTOICentr', stoiCentr),
+        ('SNR', snr),
+        ('SNRLocal', snrLocal),
+        ('SNROriginal', snrOriginal),
+        ('SNRCentr', snrCentr),
+        ('fwSNRseg', fwSNRseg),
+        ('fwSNRsegLocal', fwSNRsegLocal),
+        ('fwSNRsegOriginal', fwSNRsegOriginal),
+        ('fwSNRsegCentr', fwSNRsegCentr),
+        ('siSDR', siSDR),
+        ('siSDRLocal', siSDRLocal),
+        ('siSDROriginal', siSDROriginal),
+        ('siSDRCentr', siSDRCentr)
     ])
 
     return res
+
+
+def get_SDR(path, k, type='DANSE'):
+    """
+    Computes SI-SDR according to [1] (Eq. (5)).
+
+    Parameters
+    ----------
+    path : str
+        Path to folder containing the audio files.
+    k : int
+        Index of node to consider.
+    type : str
+        If 'DANSE': compute SI-SDR w.r.t. the DANSE enhancement outcome.
+        If 'local': compute SI-SDR w.r.t. the local-sensors enhancement outcome.
+        If 'original': compute SI-SDR w.r.t. the unenhanced (original) signal.
+        If 'centralised': compute SI-SDR w.r.t. the MWF enhancement outcome.
+    
+    References
+    ----------
+    [1] Le Roux, J., Wisdom, S., Erdogan, H., & Hershey, J. R. (2019, May).
+    SDR - half-baked or well done?. In ICASSP 2019-2019 IEEE International
+    Conference on Acoustics, Speech and Signal Processing (ICASSP)
+    (pp. 626-630). IEEE.
+    """
+
+    # Get signals needed
+    if type == 'DANSE':
+        fs, dhat = wavfile.read(filename=f'{path}/enhanced_N{k+1}.wav')
+    elif type == 'local':
+        fs, dhat = wavfile.read(filename=f'{path}/enhancedLocal_N{k+1}.wav')
+    elif type == 'original':
+        fs, dhat = wavfile.read(filename=f'{path}/noisy_N{k+1}_Sref1.wav')
+    elif type == 'centralised':
+        fs, dhat = wavfile.read(filename=f'{path}/noisy_N{k+1}_Sref1.wav')
+    _, d = wavfile.read(filename=f'{path}/desired_N{k+1}_Sref1.wav')
+
+    siSDRfull = 10 * np.log10(
+        np.linalg.norm(
+            (np.dot(dhat, d) / np.linalg.norm(d)**2) * d
+        )**2 / np.abs(
+            (np.dot(dhat, d) / np.linalg.norm(d)**2) * d - dhat
+        )**2
+    )
+    # Compute single-value
+    siSDR = np.nanmean(np.ma.masked_invalid(siSDRfull), axis=0)
+
+    return siSDR
 
 
 def plot(res, p: PostProcParams):
