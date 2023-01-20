@@ -63,6 +63,7 @@ class DanseTestingParameters():
     #
     computeLocalEstimate: bool = False      # if True, compute also node-specific local estimate of desired signal
     computeCentrEstimate: bool = False      # if True, compute also centralised estimate of desired signal
+    computeNoiseFreeForSDR: bool = False    # compute noise-free outcome
     # for ICASSP/OJSP paper revision
     DFTsize: int = 1024 
 
@@ -233,6 +234,7 @@ def build_experiment_parameters(dp: DanseTestingParameters, exportBasePath=''):
                     broadcastLength=BClength,
                     computeLocalEstimate=dp.computeLocalEstimate,
                     computeCentralizedEstimate=dp.computeCentrEstimate,
+                    computeNoiseFreeEstimate=dp.computeNoiseFreeForSDR,
                     timeBtwExternalFiltUpdates=dp.timeBtwExternalFiltUpdates,
                     expAvg50PercentTime=2.,
                     #

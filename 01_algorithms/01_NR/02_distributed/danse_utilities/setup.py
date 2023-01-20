@@ -10,6 +10,7 @@ import resampy
 
 from . import classes           # <-- classes for DANSE
 from . import danse_scripts     # <-- scripts for DANSE
+from . import danse_subfcns
 from . import sro_subfcns
 if not any("_general_fcts" in s for s in sys.path):
     # Find path to root folder
@@ -63,7 +64,7 @@ def run_experiment(settings: classes.ProgramSettings):
     # --------------- Post-process ---------------
     # Compute speech enhancement evaluation metrics
     enhancementEval, startIdx = evaluate_enhancement_outcome(
-        mySignals, settings, tStartForMetrics
+        mySignals, settings, tStartForMetrics, wTilde, wLocal, wCentr
     )
     # Build output object
     results = classes.Results()
@@ -81,7 +82,14 @@ def run_experiment(settings: classes.ProgramSettings):
     return results
 
 
-def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.ProgramSettings, tStartForMetrics=1):
+def evaluate_enhancement_outcome(
+    sigs: classes.Signals,
+    settings: classes.ProgramSettings,
+    tStartForMetrics=1,
+    wTilde=np.array([]),
+    wLocal=np.array([]),
+    wCentr=np.array([])
+    ):
     """Wrapper for computing and storing evaluation metrics after signal enhancement.
 
     Parameters
@@ -93,6 +101,15 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     tStartForMetrics : [Nn x 1] np.ndarray (float)
         Start instants (per node) for the computation of speech enhancement metrics.
         --> Avoiding metric bias due to first DANSE iterations where the filters have not converged yet.
+    wTilde : [Nn x 1] list of [Nf x Ni x Nc] np.ndarrays (complex)
+        DANSE filter coefficients for each of the `Nn` nodes. 
+        `Nf`: number of frequency bins;
+        `Ni`: number of DANSE iterations;
+        `Nc`: number of channels in y_tilde.
+    wLocal : [Nn x 1] list of [Nf x Ni x NcLocal] np.ndarrays (complex)
+        Same as wTilde but for local processing.
+    wCentr : [Nf x Ni x NcCentr] np.ndarray (complex)
+        Same as wTilde but for centralised (MWF) processing.
     
     Returns
     -------
@@ -113,6 +130,7 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
     fwSNRseg = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Frequency-weighted segmental SNR
     stoi     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Short-Time Objective Intelligibility
     pesq     = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Perceptual Evaluation of Speech Quality
+    siSDR    = dict([(key, []) for key in [f'Node{n + 1}' for n in range(numNodes)]])  # Scale-Invariant Signal-to-Distortions Ratio
     tStart = time.perf_counter()    # time computation
     for idxNode in range(numNodes):
         trueIdxSensor = settings.referenceSensor + sum(numSensorsPerNode[:idxNode])
@@ -134,34 +152,211 @@ def evaluate_enhancement_outcome(sigs: classes.Signals, settings: classes.Progra
             centralizedSig = sigs.desiredSigEstCentralized[startIdx[idxNode]:, idxNode]
         else:
             centralizedSig = []
+
+        # Compute noise-free DANSE estimate for subsequent SDR computation
+        if settings.computeNoiseFreeEstimate:
+            _, dTDnoiseFree, _, dTDnoiseFreeLocal, _, dTDnoiseFreeCentr =\
+                computeNoiseFreeForSDR(
+                    wTilde,
+                    idxNode,
+                    sigs,
+                    settings,
+                    wLocal=wLocal,
+                    wCentr=wCentr
+                )
+
+            # # Listen
+            # if 1:        
+                # from scipy.io import wavfile
+                # wavfile.write('dTDnoiseFree.wav', 16000, dTDnoiseFree)
+                # wavfile.write('dTDnoiseFreeLocal.wav', 16000, dTDnoiseFreeLocal)
+                # wavfile.write('dTDnoiseFreeCentr.wav', 16000, dTDnoiseFreeCentr)
+
+            stop = 1
         
         print(f'Computing signal enhancement evaluation metrics for node {idxNode + 1}/{numNodes} (sensor {settings.referenceSensor + 1}/{numSensorsPerNode[idxNode]})...')
-        out0, out1, out2, out3 = eval_enhancement.get_metrics(
-                                    sigs.wetSpeech[startIdx[idxNode]:, trueIdxSensor],
-                                    sigs.sensorSignals[startIdx[idxNode]:, trueIdxSensor],
-                                    sigs.desiredSigEst[startIdx[idxNode]:, idxNode], 
-                                    sigs.fs[trueIdxSensor],
-                                    sigs.VAD[startIdx[idxNode]:],
-                                    settings.dynamicMetricsParams,  # dynamic metrics computation parameters
-                                    settings.gammafwSNRseg,
-                                    settings.frameLenfwSNRseg,
-                                    localSig,
-                                    centralizedSig
-                                    )
+        out0, out1, out2, out3, out4 = eval_enhancement.get_metrics(
+            sigs.wetSpeech[startIdx[idxNode]:, trueIdxSensor],
+            sigs.sensorSignals[startIdx[idxNode]:, trueIdxSensor],
+            sigs.desiredSigEst[startIdx[idxNode]:, idxNode], 
+            sigs.fs[trueIdxSensor],
+            sigs.VAD[startIdx[idxNode]:],
+            settings.dynamicMetricsParams,  # dynamic metrics parameters
+            settings.gammafwSNRseg,
+            settings.frameLenfwSNRseg,
+            localSig,
+            centralizedSig,
+            dTDnoiseFree[startIdx[idxNode]:],
+            dTDnoiseFreeLocal[startIdx[idxNode]:],
+            dTDnoiseFreeCentr[startIdx[idxNode]:]
+        )
 
         snr[f'Node{idxNode + 1}'] = out0
         fwSNRseg[f'Node{idxNode + 1}'] = out1
         stoi[f'Node{idxNode + 1}'] = out2
         pesq[f'Node{idxNode + 1}'] = out3
+        siSDR[f'Node{idxNode + 1}'] = out4
     print(f'All signal enhancement evaluation metrics computed in {np.round(time.perf_counter() - tStart, 3)} s.')
 
     # Group measures into EnhancementMeasures object
     measures = classes.EnhancementMeasures(fwSNRseg=fwSNRseg,
                                             stoi=stoi,
                                             pesq=pesq,
-                                            snr=snr)
+                                            snr=snr,
+                                            siSDR=siSDR)
 
     return measures, startIdx
+
+
+def computeNoiseFreeForSDR(
+    wTilde,
+    idxNode,
+    sigs: classes.Signals,
+    settings: classes.ProgramSettings,
+    plotit=False,
+    wLocal=None,
+    wCentr=None
+    ):
+    """
+    Compute noise-free DANSE estimate for subsequent SDR computation.
+
+    Parameters
+    ----------
+    wTilde : [Nf x Ni x Nc] np.ndarrays (complex)
+        DANSE filters.
+    idxNode : int
+        Node index.
+    sigs : classes.Signals instance
+        DANSE output/input signals.
+    settings : classes.ProgramSettings instance
+        DANSE settings.
+    plotit : bool
+        If True, waveforms are compared in a plot.
+    wLocal : [Nf x Ni x NcLocal] np.ndarrays (complex)
+        Local filters.
+    wCentr : [Nf x Ni x NcCentr] np.ndarray (complex)
+        Central (MWF) filters.
+
+    Returns
+    -------
+    d : [Nf x Ni] np.ndarray (complex)
+        STFT-domain estimate (noise-free) signals.
+    dTD : [Nt x 1] np.ndarray (float)
+        Time-domain version of `d`.
+    dLocal : [Nf x Ni] np.ndarray (complex)
+        STFT-domain estimate (noise-free) signals [LOCAL].
+    dTDLocal : [Nt x 1] np.ndarray (float)
+        Time-domain version of `dLocal`.
+    dCentr : [Nf x Ni] np.ndarray (complex)
+        STFT-domain estimate (noise-free) signals [MWF - CENTRALISED].
+    dTDCentr : [Nt x 1] np.ndarray (float)
+        Time-domain version of `dCentr`.
+    """
+
+    def back_to_TD(d_lv):
+        """Helper function to go from STFT- to time-domain."""
+        normFactWOLA = settings.stftWin.sum()
+        d_lv_TD = np.zeros(sigs.desiredSigEst.shape[0])
+        for ii in range(d_lv.shape[1]):
+            idxBegChunk = ii * settings.Ns
+            idxEndChunk = idxBegChunk + settings.DFTsize
+            dChunkCurr = normFactWOLA *\
+                danse_subfcns.back_to_time_domain(
+                    d_lv[:, ii],
+                    len(settings.stftWin)
+                )
+            dChunkCurr = np.real_if_close(dChunkCurr)
+            if idxEndChunk < len(d_lv_TD):
+                d_lv_TD[idxBegChunk:idxEndChunk] += dChunkCurr
+            else:
+                d_lv_TD[idxBegChunk:idxEndChunk] +=\
+                    dChunkCurr[:-(idxEndChunk - len(d_lv_TD))]
+
+        return d_lv_TD
+    
+    # Local signals
+    yk = sigs.wetSpeech_STFT[:, :, sigs.sensorToNodeTags == idxNode + 1]
+    # Other signals
+    allNodeIdx = np.arange(sigs.numNodes)
+    zmk = np.zeros(
+        (yk.shape[0], yk.shape[1], sigs.numNodes - 1),
+        dtype=complex
+    )
+    idxNeighbour = 0
+    for q in allNodeIdx:
+        if q != idxNode:
+            # Neighbour's local signals
+            yq = sigs.wetSpeech_STFT[:, :, sigs.sensorToNodeTags == q + 1]
+            # Compress using appropriate set of coefficients
+            wqq = wTilde[q][:, :-1, :sigs.nSensorPerNode[q]]
+            #                   ^^^ not last iteration to match dimension
+            zq = np.zeros((wqq.shape[0], wqq.shape[1]), dtype=complex)
+            for ii in range(wqq.shape[1]):
+                zq[:, ii] = np.einsum(  # dot product across sensors
+                    'ij,ij->i',
+                    wqq[:, ii, :].conj(),
+                    yq[:, ii, :]
+                )
+            zmk[:, :, idxNeighbour] = zq
+            idxNeighbour += 1
+    # Build full observation vector
+    ykTilde = np.concatenate((yk, zmk), axis=-1)
+    # Get desired signal estimate
+    d = np.zeros((ykTilde.shape[0], ykTilde.shape[1]), dtype=complex)
+    for ii in range(ykTilde.shape[1]):
+        d[:, ii] = np.einsum(  # dot product across sensors
+            'ij,ij->i',
+            wTilde[idxNode][:, ii, :].conj(),
+            ykTilde[:, ii, :]
+        )
+    # Transform back to time domain (WOLA processing)
+    dTD = back_to_TD(d)
+
+    # Compute noise-free estimates using the local filters
+    if settings.computeLocalEstimate and wLocal is not None:
+        dLocal = np.zeros((yk.shape[0], yk.shape[1]), dtype=complex)
+        for ii in range(yk.shape[1]):
+            dLocal[:, ii] = np.einsum(  # dot product across sensors
+                'ij,ij->i',
+                wLocal[idxNode][:, ii, :].conj(),
+                yk[:, ii, :]
+            )
+        # Transform back to time domain (WOLA processing)
+        dTDLocal = back_to_TD(dLocal)
+    else:
+        dLocal, dTDLocal = None, None
+    # Compute noise-free estimates using the centralised (MWF) filters
+    if settings.computeCentralizedEstimate and wCentr is not None:
+        y = sigs.wetSpeech_STFT
+        dCentr = np.zeros((y.shape[0], y.shape[1]), dtype=complex)
+        for ii in range(y.shape[1]):
+            dCentr[:, ii] = np.einsum(  # dot product across sensors
+                'ij,ij->i',
+                wCentr[idxNode][:, ii, :].conj(),
+                y[:, ii, :]
+            )
+        # Transform back to time domain (WOLA processing)
+        dTDCentr = back_to_TD(dCentr)
+    else:
+        dCentr, dTDCentr = None, None
+    
+    if plotit:
+        # Verification plot
+        fig, axes = plt.subplots(1,1)
+        fig.set_size_inches(8.5, 3.5)
+        refSig = sigs.wetSpeech[:, sigs.sensorToNodeTags == idxNode + 1]
+        refSig = refSig[:, 0]
+        axes.plot(refSig, label='Target signal $d_{{k}}$')
+        axes.plot(
+            dTD[settings.Ns:],
+            label='Noise-free estimate $\\hat{{d}}_{{k}}$'
+        )
+        axes.grid()
+        axes.legend()
+        plt.tight_layout()
+        plt.show()
+
+    return d, dTD, dLocal, dTDLocal, dCentr, dTDCentr
 
 
 def get_istft(X, fs, settings: classes.ProgramSettings):

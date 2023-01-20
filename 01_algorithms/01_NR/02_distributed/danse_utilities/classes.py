@@ -510,6 +510,7 @@ class EnhancementMeasures:
     fwSNRseg: dict = field(default_factory=dict)    # Frequency-weighted segmental SNR
     stoi: dict = field(default_factory=dict)        # Short-Time Objective Intelligibility
     pesq: dict = field(default_factory=dict)        # Perceptual Evaluation of Speech Quality
+    siSDR: dict = field(default_factory=dict)       # Scale-Invariant Signal-to-Distortions Ratio
 
 @dataclass
 class Signals(object):
