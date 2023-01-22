@@ -167,9 +167,16 @@ def danse_sequential(yin, asc, settings: classes.ProgramSettings, oVAD):
     return d
 
 
-def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSettings,
-        oVAD, timeInstants, masterClockNodeIdx,
-        referenceSpeechOnly=None):
+def danse_simultaneous(
+    yin,
+    asc: classes.AcousticScenario,
+    s: classes.ProgramSettings,
+    oVAD,
+    timeInstants,
+    masterClockNodeIdx,
+    referenceSpeechOnly=None,
+    noFSDcompensation=False
+    ):
     """Wrapper for Simultaneous-Node-Updating DANSE (rs-DANSE) [2].
 
     Parameters
@@ -186,6 +193,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
         Time instants corresponding to the samples of each of the Nn nodes in the network. 
     masterClockNodeIdx : int
         Index of node to be used as "master clock" (0 ppm SRO).
+    referenceSpeechOnly - TODO:
+    noFSDcompensation - TODO:
 
     Returns
     -------
@@ -542,7 +551,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # Compensate SROs
             if s.asynchronicity.compensateSROs:
                 # Complete phase shift factors
-                if not s.noFSDcompensation:
+                if not noFSDcompensation:
                     phaseShiftFactors[k] += extraPhaseShiftFactor
                 if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
@@ -553,11 +562,11 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓ Spatial covariance matrices updates ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
             Ryytilde[k], Rnntilde[k], yyH[k][i[k], :, :, :] = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :],
                                             Ryytilde[k], Rnntilde[k], s.expAvgBeta, oVADframes[i[k]])
-            if s.computeLocalEstimate:
+            if s.computeLocalEstimate and not noFSDcompensation:
                 # Local observations only
                 Ryylocal[k], Rnnlocal[k], _ = subs.spatial_covariance_matrix_update(ytildeHat[k][:, i[k], :dimYLocal[k]],
                                                 Ryylocal[k], Rnnlocal[k], s.expAvgBeta, oVADframes[i[k]])
-            if s.computeCentralizedEstimate:
+            if s.computeCentralizedEstimate and not noFSDcompensation:
                 # All observations
                 RyyCentr[k], RnnCentr[k], _ = subs.spatial_covariance_matrix_update(ytildeHatCentr[k][:, i[k], :],
                                                 RyyCentr[k], RnnCentr[k], s.expAvgBeta, oVADframes[i[k]])
@@ -574,16 +583,16 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                 # No `for`-loop versions 
                 if s.performGEVD:    # GEVD update
                     wTilde[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryytilde[k], Rnntilde[k], s.GEVDrank, s.referenceSensor)
-                    if s.computeLocalEstimate:
+                    if s.computeLocalEstimate and not noFSDcompensation:
                         wLocal[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(Ryylocal[k], Rnnlocal[k], s.GEVDrank, s.referenceSensor)
-                    if s.computeCentralizedEstimate:
+                    if s.computeCentralizedEstimate and not noFSDcompensation:
                         wCentr[k][:, i[k] + 1, :], _ = subs.perform_gevd_noforloop(RyyCentr[k], RnnCentr[k], s.GEVDrank, s.referenceSensor)
 
                 else:                       # regular update (no GEVD)
                     wTilde[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryytilde[k], Rnntilde[k], s.referenceSensor)
-                    if s.computeLocalEstimate:
+                    if s.computeLocalEstimate and not noFSDcompensation:
                         wLocal[k][:, i[k] + 1, :] = subs.perform_update_noforloop(Ryylocal[k], Rnnlocal[k], s.referenceSensor)
-                    if s.computeCentralizedEstimate:
+                    if s.computeCentralizedEstimate and not noFSDcompensation:
                         wCentr[k][:, i[k] + 1, :] = subs.perform_update_noforloop(RyyCentr[k], RnnCentr[k], s.referenceSensor)
                 # Count the number of internal filter updates
                 nInternalFilterUpdates[k] += 1  
@@ -599,9 +608,9 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             else:
                 # Do not update the filter coefficients
                 wTilde[k][:, i[k] + 1, :] = wTilde[k][:, i[k], :]
-                if s.computeLocalEstimate:
+                if s.computeLocalEstimate and not noFSDcompensation:
                     wLocal[k][:, i[k] + 1, :] = wLocal[k][:, i[k], :]
-                if s.computeCentralizedEstimate:
+                if s.computeCentralizedEstimate and not noFSDcompensation:
                     wCentr[k][:, i[k] + 1, :] = wCentr[k][:, i[k], :]
                 if skipUpdate:
                     print(f'Node {k+1}: {i[k] + 1}^th update skipped.')
@@ -637,7 +646,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         bufferFlagPri=np.sum(
                             bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :],
                             axis=0) * s.broadcastLength,
-                        bypassFSDcomp=s.noFSDcompensation
+                        bypassFSDcomp=noFSDcompensation
                         )
 
             if s.asynchronicity.estimateSROs == 'CohDrift':
@@ -680,7 +689,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                 d[idxBegChunk:idxEndChunk, k] = tmp
             elif s.desSigProcessingType == 'conv':
                 d[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
-            if s.computeLocalEstimate:
+            if s.computeLocalEstimate and not noFSDcompensation:
                 # ----- Compute desired signal chunk estimate [LOCAL] -----
                 dhatLocal[:, i[k], k], tmp = subs.get_desired_signal(
                     wLocal[k][:, i[k] + 1, :],
@@ -697,7 +706,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                     dLocal[idxBegChunk:idxEndChunk, k] = tmp
                 elif s.desSigProcessingType == 'conv':
                     dLocal[idxEndChunk - s.Ns:idxEndChunk, k] = tmp
-            if s.computeCentralizedEstimate:
+            if s.computeCentralizedEstimate and not noFSDcompensation:
                 # ----- Compute desired signal chunk estimate [CENTRALIZED] -----
                 dhatCentr[:, i[k], k], tmp = subs.get_desired_signal(
                     wCentr[k][:, i[k] + 1, :],

@@ -452,9 +452,9 @@ with a base SNR btw. dry signals of {self.baseSNR} dB.
 Microphone self-noise SNR: {self.selfnoiseSNR} dB.
 ------ DANSE settings ------
 Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
+------ Asynchronicities ------
+Compensate SROs: {self.asynchronicity.compensateSROs}.
 """
-        if self.performGEVD:
-            string += f'GEVD with R = {self.GEVDrank}.' 
         if (np.array(self.asynchronicity.SROsppm) != 0).any():
             string += f'\n------ SRO settings ------'
             for idxNode in range(len(self.asynchronicity.SROsppm)):
@@ -463,6 +463,8 @@ Exponential averaging 50% attenuation time: tau = {self.expAvg50PercentTime} s.
                     string += ' (base sampling freq.)'
         else:
             string += f'\nPerfectly synchronized network, no SROs'
+        if self.performGEVD:
+            string += f'GEVD with R = {self.GEVDrank}.'
         string += '\n'
         return string
 
@@ -536,6 +538,8 @@ class Signals(object):
     referenceSensor: int = 0                            # Index of the reference sensor at each node
     timeStampsSROs: np.ndarray = np.array([])           # Time stamps for each node in the presence of the SROs (see ProgramSettings for SRO values)
     masterClockNodeIdx: int = 0                         # Index of node to be used as "master clock" (0 ppm SRO)
+    #
+    desiredSigEst_noFSDcomp: np.ndarray = np.array([])  # Desired signal(s) estimates for each node, in time-domain -- using full-observations vectors (also data coming from neighbors) - NO FSD compensation
 
     def __post_init__(self):
         """Defines useful fields for Signals object"""
@@ -867,6 +871,11 @@ class Signals(object):
                 fname_enhanced.append(f'{folder}/wav/enhancedLocal_N{idxNode + 1}.wav')
                 data = normalize_toint16(self.desiredSigEstLocal[:, idxNode])
                 wavfile.write(fname_enhanced[-1], int(self.fs[idxSensor]), data)
+            #
+            if len(self.desiredSigEst_noFSDcomp) > 0:  # if no-FSD-compensation enhancement has been performed
+                fname_enhanced.append(f'{folder}/wav/enhancedNoFSDcomp_N{idxNode + 1}.wav')
+                data = normalize_toint16(self.desiredSigEst_noFSDcomp[:, idxNode])
+                wavfile.write(fname_enhanced[-1], int(self.fs[idxSensor]), data)
         print(f'Signals exported in folder ".../{folderShort}/wav".')
         # WAV files names dictionary
         fnames = dict([('Noisy', fname_noisy), ('Desired', fname_desired), ('Enhanced', fname_enhanced)])
@@ -904,6 +913,7 @@ class Results(object):
     enhancementEval: EnhancementMeasures = EnhancementMeasures()    # speech enhancement evaluation metrics
     acousticScenario: AcousticScenario = AcousticScenario()         # acoustic scenario considered
     sroData: SROdata = SROdata()                                    # SRO estimation data
+    sroData_noFSDcomp: SROdata = SROdata()                          # SRO estimation data without FSD compensation
     other: MiscellaneousData = MiscellaneousData()                  # other data
     filtersEvolution: FiltersEvol = FiltersEvol()                   # evolution of filter coefficients
 

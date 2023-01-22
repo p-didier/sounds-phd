@@ -33,6 +33,8 @@ class Metric:
     diffLocal: float = 0.       # difference between before and after local enhancement
     afterCentr: float = 0.      # metric value after _centralized_ enhancement (only all sensors in network)
     diffCentr: float = 0.       # difference between before and after centralized enhancement
+    afterNoFSDcomp: float = 0.      # metric value after enhancement _without FSD compensation_.
+    diffNoFSDcomp: float = 0.       # difference between before and after enhancement _without FSD compensation_.
     dynamicFlag: bool = False   # True if a dynamic version of the metric was computed
 
     def import_dynamic_metric(self, dynObject):
@@ -84,7 +86,8 @@ def get_metrics(
     enhancedSignalCentralized=[],
     noiseFreeEstimate=[],
     noiseFreeEstimateLocal=[],
-    noiseFreeEstimateCentr=[]
+    noiseFreeEstimateCentr=[],
+    noFSDcompensationEst=[]
     ):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
@@ -112,9 +115,11 @@ def get_metrics(
     noiseFreeEstimate : np.ndarray (float)
         Noise-free DANSE estimate (for SI-SDR).
     noiseFreeEstimateLocal : np.ndarray (float)
-        Noise-free DANSE estimate (for SI-SDR) [LOCAL estimate].
+        Noise-free local estimate (for SI-SDR).
     noiseFreeEstimateCentr : np.ndarray (float)
-        Noise-free DANSE estimate (for SI-SDR) [CENTRALISED (MWF) estimate].
+        Noise-free centralised (MWF) estimate (for SI-SDR).
+    noFSDcompensationEst : np.ndarray (float)
+        DANSE estimate obtained without FSD compensation.
 
     Returns
     -------
@@ -134,6 +139,8 @@ def get_metrics(
     flagLocal = enhancedSignalLocal != [] and enhancedSignalLocal.shape == enhancedSignal.shape
     # Flag to signal presence of a centralized signal estimate
     flagCentralized = enhancedSignalCentralized != [] and enhancedSignalCentralized.shape == enhancedSignal.shape
+    # Flag to signal presence of a no-FSD-compensation signal estimate
+    flagNoFSDcomp = noFSDcompensationEst != [] and noFSDcompensationEst.shape == enhancedSignal.shape
 
     # Init output arrays
     snr = Metric()
@@ -152,6 +159,10 @@ def get_metrics(
     if flagCentralized:
         snr.afterCentr = get_snr(enhancedSignalCentralized, VAD)
         snr.diffCentr = snr.afterCentr - snr.before
+    if flagNoFSDcomp:
+        snr.afterNoFSDcomp = get_snr(noFSDcompensationEst, VAD)
+        snr.diffNoFSDcomp = snr.afterNoFSDcomp - snr.before
+
     # Frequency-weight segmental SNR
     fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, noisySignal, fs, frameLen, gammafwSNRseg)
     fwSNRseg.before = np.mean(fwSNRseg_allFrames)
@@ -166,6 +177,11 @@ def get_metrics(
         fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, enhancedSignalCentralized, fs, frameLen, gammafwSNRseg)
         fwSNRseg.afterCentr = np.mean(fwSNRseg_allFrames)
         fwSNRseg.diffCentr = fwSNRseg.afterCentr - fwSNRseg.before
+    if flagNoFSDcomp:
+        fwSNRseg_allFrames = get_fwsnrseg(cleanSignal, noFSDcompensationEst, fs, frameLen, gammafwSNRseg)
+        fwSNRseg.afterNoFSDcomp = np.mean(fwSNRseg_allFrames)
+        fwSNRseg.diffNoFSDcomp = fwSNRseg.afterNoFSDcomp - fwSNRseg.before
+
     # Short-Time Objective Intelligibility (STOI)
     myStoi.before = stoi_fcn(cleanSignal, noisySignal, fs, extended=True)
     myStoi.after = stoi_fcn(cleanSignal, enhancedSignal, fs, extended=True)
@@ -176,13 +192,16 @@ def get_metrics(
     if flagCentralized:
         myStoi.afterCentr = stoi_fcn(cleanSignal, enhancedSignalCentralized, fs, extended=True)
         myStoi.diffCentr = myStoi.afterCentr - myStoi.before
+    if flagNoFSDcomp:
+        myStoi.afterNoFSDcomp = stoi_fcn(cleanSignal, noFSDcompensationEst, fs, extended=True)
+        myStoi.diffNoFSDcomp = myStoi.afterNoFSDcomp - myStoi.before
+    
     # Perceptual Evaluation of Speech Quality (PESQ)
     if fs in [8e3, 16e3]:
         if fs == 8e3:
             mode = 'nb'  # narrowband PESQ
         elif fs == 16e3:
             mode = 'wb'  # wideband PESQ
-            
         myPesq.before = pesq(fs, cleanSignal, noisySignal, mode)
         myPesq.after = pesq(fs, cleanSignal, enhancedSignal, mode)
         myPesq.diff = myPesq.after - myPesq.before
@@ -192,8 +211,12 @@ def get_metrics(
         if flagCentralized:
             myPesq.afterCentr = pesq(fs, cleanSignal, enhancedSignalCentralized, mode)
             myPesq.diffCentr = myPesq.afterCentr - myPesq.before
+        if flagNoFSDcomp:
+            myPesq.afterNoFSDcomp = pesq(fs, cleanSignal, noFSDcompensationEst, mode)
+            myPesq.diffNoFSDcomp = myPesq.afterNoFSDcomp - myPesq.before
     else:
         print(f'Cannot calculate PESQ for fs different from 16 or 8 kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
+    
     # Scale-Invariant Signal-to-Distortions Ratio (SI-SDR)
     siSDR.before = None  # meaningless to compute an SI-SDR before processing
     siSDR.after = compute_SDR(noiseFreeEstimate, cleanSignal)
@@ -204,6 +227,9 @@ def get_metrics(
     if flagCentralized and noiseFreeEstimateCentr is not None:
         siSDR.afterCentr = compute_SDR(noiseFreeEstimateCentr, cleanSignal)
         siSDR.diffCentr = None  # cf. `siSDR.before`
+    if flagNoFSDcomp:
+        print('SI-SDR calculation not yet implemented for no-FSD-compensation estimate.')
+        pass  # TODO:
 
     # Compute dynamic metrics
     if dynamic is not None:

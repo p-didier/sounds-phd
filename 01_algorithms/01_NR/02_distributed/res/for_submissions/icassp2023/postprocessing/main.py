@@ -29,6 +29,7 @@ class PostProcParams:
     includeLocalPerf : bool = False   # if True, include the local performance in the graph
     firstMetric: str = 'eSTOI'       # first metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
     secondMetric: str = 'fwSNRseg'  # second metric to plot ('eSTOI', 'SNR', or 'fwSNRseg')
+    plotNoFSDcompResults: bool = False  # if True, include an extra vertical bar for no-FSD-compensation results
 
 # Set post-processing parameters
 p = PostProcParams(
@@ -62,7 +63,7 @@ p = PostProcParams(
     #
     # vvv test on 22.01.2023 (see journal 2023 week03) vvv
     # ====================================================
-    pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_noFSDcomp_20230122/J4Mk[1_3_2_5]_Ns1_Nn2',  # no FSD compensation (ablation study)
+    pathToResults=f'{Path(__file__).parent.parent}/test_postReviews/test_noFSDcomp_20230122/J4_bothWithAndWithout',  # no FSD compensation (ablation study)
     #
     # plottype='group_per_node',
     plottype='group_per_node_vertical',
@@ -75,8 +76,10 @@ p = PostProcParams(
     # firstMetric='SI-SDR',
     secondMetric='fwSNRseg',
     #
-    # savefigure=True,
-    savefigure=False,
+    savefigure=True,
+    # savefigure=False,
+    #
+    plotNoFSDcompResults=True
 )
 
 # Update save path
@@ -129,12 +132,15 @@ def run(params: PostProcParams):
     stoi = np.zeros(dims)
     stoiLocal = np.zeros(dims)
     stoiOriginal = np.zeros(dims)
+    stoiNoFSDcomp = np.zeros(dims)
     snr = np.zeros(dims)
     snrLocal = np.zeros(dims)
     snrOriginal = np.zeros(dims)
+    snrNoFSDcomp = np.zeros(dims)
     fwSNRseg = np.zeros(dims)
     fwSNRsegLocal = np.zeros(dims)
     fwSNRsegOriginal = np.zeros(dims)
+    fwSNRsegNoFSDcomp = np.zeros(dims)
     siSDR = np.zeros(dims)
     siSDRLocal = np.zeros(dims)
     siSDROriginal = np.zeros(dims)
@@ -162,24 +168,35 @@ def run(params: PostProcParams):
                     r.enhancementEval.stoi[f'Node{nn+1}'].afterLocal
                 stoiOriginal[ii, idx, nn] =\
                     r.enhancementEval.stoi[f'Node{nn+1}'].before
+                if params.plotNoFSDcompResults:
+                    stoiNoFSDcomp[ii, idx, nn] =\
+                        r.enhancementEval.stoi[f'Node{nn+1}'].afterNoFSDcomp
                 snr[ii, idx, nn] =\
                     r.enhancementEval.snr[f'Node{nn+1}'].after
                 snrLocal[ii, idx, nn] =\
                     r.enhancementEval.snr[f'Node{nn+1}'].afterLocal
                 snrOriginal[ii, idx, nn] =\
                     r.enhancementEval.snr[f'Node{nn+1}'].before
+                if params.plotNoFSDcompResults:
+                    snrNoFSDcomp[ii, idx, nn] =\
+                        r.enhancementEval.snr[f'Node{nn+1}'].afterNoFSDcomp
                 fwSNRseg[ii, idx, nn] =\
                     r.enhancementEval.fwSNRseg[f'Node{nn+1}'].after
                 fwSNRsegLocal[ii, idx, nn] =\
                     r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterLocal
                 fwSNRsegOriginal[ii, idx, nn] =\
                     r.enhancementEval.fwSNRseg[f'Node{nn+1}'].before
+                if params.plotNoFSDcompResults:
+                    fwSNRsegNoFSDcomp[ii, idx, nn] =\
+                        r.enhancementEval.fwSNRseg[f'Node{nn+1}'].afterNoFSDcomp
                 # For SDR
                 siSDR[ii, idx, nn] =\
                     r.enhancementEval.siSDR[f'Node{nn+1}'].after
                 siSDRLocal[ii, idx, nn] =\
                     r.enhancementEval.siSDR[f'Node{nn+1}'].afterLocal
                 siSDROriginal[ii, idx, nn] = None
+                # TODO: include the no-FSD-comp results
+            stop = 1
                 
 
     # Get centralised data (if asked)
@@ -204,14 +221,17 @@ def run(params: PostProcParams):
         ('eSTOILocal', stoiLocal),
         ('eSTOIOriginal', stoiOriginal),
         ('eSTOICentr', stoiCentr),
+        ('eSTOInoFSDcomp', stoiNoFSDcomp),
         ('SNR', snr),
         ('SNRLocal', snrLocal),
         ('SNROriginal', snrOriginal),
         ('SNRCentr', snrCentr),
+        ('SNRnoFSDcomp', snrNoFSDcomp),
         ('fwSNRseg', fwSNRseg),
         ('fwSNRsegLocal', fwSNRsegLocal),
         ('fwSNRsegOriginal', fwSNRsegOriginal),
         ('fwSNRsegCentr', fwSNRsegCentr),
+        ('fwSNRsegnoFSDcomp', fwSNRsegNoFSDcomp),
         ('SI-SDR', siSDR),
         ('SI-SDRLocal', siSDRLocal),
         ('SI-SDROriginal', siSDROriginal),
@@ -275,7 +295,11 @@ def plot(res, p: PostProcParams):
         fig = plot_grouppedpernode(res, p.firstMetric, p.secondMetric)
     elif p.plottype == 'group_per_node_vertical':
         fig = plot_grouppedpernode_vert(
-            res, p.firstMetric, p.secondMetric, p.includeLocalPerf
+            res,
+            p.firstMetric,
+            p.secondMetric,
+            p.includeLocalPerf,
+            p.plotNoFSDcompResults
         )
     
     return fig
@@ -312,7 +336,14 @@ def plot_grouppedpernode(res, metric1, metric2):
     return fig
 
 
-def plot_grouppedpernode_vert(res, metric1, metric2, includeLocal=False):
+def plot_grouppedpernode_vert(
+    res,
+    metric1,
+    metric2,
+    includeLocal=False,
+    includeNoFSDcomp=False
+    ):
+    """Plotting function."""
 
     # vvv HARD-CODED but ok
     categories = [
@@ -323,7 +354,7 @@ def plot_grouppedpernode_vert(res, metric1, metric2, includeLocal=False):
     # colors = ['C4', 'C2', 'C1']
     colors = [(19/255, 103/255, 159/255), (192/255, 0, 0), (0, 0, 0)]
     w = 1/4  # width parameter
-    if includeLocal:
+    if includeLocal or includeNoFSDcomp:
         w = 1/5
 
     # Booleans
@@ -378,7 +409,8 @@ def plot_grouppedpernode_vert(res, metric1, metric2, includeLocal=False):
                 ylims1,
                 colors[ii],
                 showLegend=True,
-                centralised=res[f'{metric1}Centr']
+                centralised=res[f'{metric1}Centr'],
+                noFSDdata=res[f'{metric1}noFSDcomp'][ii, :, :],
             )
             if ii == 0:
                 axes[ii].set_title(metric1)
@@ -403,7 +435,8 @@ def subplot_fcn_2(
     ylims,
     mycolor,
     showLegend=False,
-    centralised=None
+    centralised=None,
+    noFSDdata=None
     ):
     """Helper subplot function."""
 
@@ -413,7 +446,7 @@ def subplot_fcn_2(
     ax.set_axisbelow(True)
     if ylims is not None:
         ax.set_ylim(ylims)
-    if resLocal is not None:
+    if resLocal is not None and noFSDdata is None:
         # With compensation
         handle1 = ax.bar(np.arange(nNodes) + 1.5*w, res[1, :],
             width=w, align='center', alpha=1,
@@ -435,6 +468,32 @@ def subplot_fcn_2(
             'GEVD-DANSE + SRO comp.',
             'GEVD-DANSE',
             'Local GEVD-MWF',
+            'Noisy sensor signal $\dot{y}_{{k,1}}$'
+        ]    # labels for legend
+    elif resLocal is not None and noFSDdata is not None:
+        raise ValueError('[NOT YET IMPLEMENTED] Cannot yet include both local estimated and no-FSD-compensation estimates on plot.')
+    elif resLocal is None and noFSDdata is not None:
+        # With compensation
+        handle1 = ax.bar(np.arange(nNodes) + 1.5*w, res[1, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 1), edgecolor='k')
+        # With compensation but not FSD compensation
+        handle2 = ax.bar(np.arange(nNodes) + 0.5*w, noFSDdata[1, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.75), edgecolor='k')
+        # Without compensation
+        handle3 = ax.bar(np.arange(nNodes) - 0.5*w, res[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.5), edgecolor='k')
+        # Without enhancement
+        handle4 = ax.bar(np.arange(nNodes) - 1.5*w, resBeforeEnhancement[0, :],
+            width=w, align='center', alpha=1,
+            color=lighten_color(mycolor, 0.25), edgecolor='k')
+        handles = [handle1, handle2, handle3, handle4]   # handles for legend
+        leglabs = [
+            'DANSE + SRO comp.',
+            'DANSE + SRO comp. (no FSDs)',
+            'DANSE',
             'Noisy sensor signal $\dot{y}_{{k,1}}$'
         ]    # labels for legend
     else:
@@ -469,7 +528,7 @@ def subplot_fcn_2(
     if centralised is not None:
         for k in range(nNodes):
             xlims = [k-w*2, k+w*2]
-            if resLocal is not None:
+            if resLocal is not None or noFSDdata is not None:
                 xlims = [k-w*2.5, k+w*2.5]
             tmp = ax.hlines(
                 y=centralised[k],
@@ -486,7 +545,7 @@ def subplot_fcn_2(
     ax.set_xlim([-0.5, nNodes-0.5])  
     if showLegend:
         bboxtoa = (1, 0)
-        if resLocal is not None:
+        if resLocal is not None or noFSDdata is not None:
             bboxtoa = (1, -.15)
         ax.legend(
             handles=handles,

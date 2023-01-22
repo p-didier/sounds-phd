@@ -46,6 +46,9 @@ def run_experiment(settings: classes.ProgramSettings):
         The experiment results.
     """
 
+    if not settings.noFSDcompensation:
+        stop = 1
+
     print('\nGenerating simulation signals...')
     # Generate base signals (and extract acoustic scenario)
     mySignals, asc = generate_signals(settings)
@@ -54,8 +57,9 @@ def run_experiment(settings: classes.ProgramSettings):
     print('Launching danse()...')
     mySignals.desiredSigEst, mySignals.desiredSigEstLocal,\
         mySignals.desiredSigEstCentralized, sroData, tStartForMetrics,\
-        firstDANSEupdateRefSensor, wTilde, wLocal, wCentr =\
-        launch_danse(mySignals, asc, settings)
+        firstDANSEupdateRefSensor, wTilde, wLocal, wCentr,\
+        mySignals.desiredSigEst_noFSDcomp, sroData_noFSDcomp, wTilde_noFSDcomp\
+        = launch_danse(mySignals, asc, settings)
 
     print('Computing STFTs...')
     # Convert all DANSE input signals to the STFT domain
@@ -64,7 +68,10 @@ def run_experiment(settings: classes.ProgramSettings):
     # --------------- Post-process ---------------
     # Compute speech enhancement evaluation metrics
     enhancementEval, startIdx = evaluate_enhancement_outcome(
-        mySignals, settings, tStartForMetrics, wTilde, wLocal, wCentr
+        mySignals,
+        settings,
+        tStartForMetrics,
+        wTilde, wLocal, wCentr, wTilde_noFSDcomp
     )
     # Build output object
     results = classes.Results()
@@ -72,6 +79,7 @@ def run_experiment(settings: classes.ProgramSettings):
     results.enhancementEval = enhancementEval
     results.acousticScenario = asc
     results.sroData = sroData
+    results.sroData_noFSDcomp = sroData_noFSDcomp
     results.other = classes.MiscellaneousData()
     results.other.metricsStartIdx = startIdx
     results.other.firstDANSEupRefSensor = firstDANSEupdateRefSensor
@@ -88,7 +96,8 @@ def evaluate_enhancement_outcome(
     tStartForMetrics=1,
     wTilde=np.array([]),
     wLocal=np.array([]),
-    wCentr=np.array([])
+    wCentr=np.array([]),
+    wTilde_noFSDcomp=np.array([])
     ):
     """Wrapper for computing and storing evaluation metrics after signal enhancement.
 
@@ -110,6 +119,8 @@ def evaluate_enhancement_outcome(
         Same as wTilde but for local processing.
     wCentr : [Nf x Ni x NcCentr] np.ndarray (complex)
         Same as wTilde but for centralised (MWF) processing.
+    wTilde_noFSDcomp : [Nn x 1] list of [Nf x Ni x Nc] np.ndarrays (complex)
+        Same as wTilde but without compensating for FSDs.
     
     Returns
     -------
@@ -162,7 +173,7 @@ def evaluate_enhancement_outcome(
                     sigs,
                     settings,
                     wLocal=wLocal,
-                    wCentr=wCentr
+                    wCentr=wCentr  # TODO: add option to compute SI-SDR with the no-FSD-compensation desired signal estimate
                 )
             # Truncate
             dTDnoiseFree = dTDnoiseFree[startIdx[idxNode]:]
@@ -194,7 +205,8 @@ def evaluate_enhancement_outcome(
             centralizedSig,
             dTDnoiseFree,
             dTDnoiseFreeLocal,
-            dTDnoiseFreeCentr
+            dTDnoiseFreeCentr,
+            sigs.desiredSigEst_noFSDcomp[startIdx[idxNode]:, idxNode]
         )
 
         snr[f'Node{idxNode + 1}'] = out0
@@ -543,8 +555,36 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
         desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized,\
         sroData, tStartForMetrics, firstDANSEupdateRefSensor,\
         wTilde, wLocal, wCentr = danse_scripts.danse_simultaneous(
-            y, asc, settings, signals.VAD, t, signals.masterClockNodeIdx
+            y,
+            asc,
+            settings,
+            signals.VAD,
+            t,
+            signals.masterClockNodeIdx,
+            noFSDcompensation=False
         )
+        if settings.noFSDcompensation:
+            # Re-run without FSD compensation
+            print('============================')
+            print('Computing version without FSD compensation...')
+            print('============================')
+            desiredSigEst_noFSDcomp, _, _, sroData_noFSDcomp,\
+            _, _, wTilde_noFSDcomp, _, _ = danse_scripts.danse_simultaneous(
+                y,
+                asc,
+                settings,
+                signals.VAD,
+                t,
+                signals.masterClockNodeIdx,
+                noFSDcompensation=True
+            )
+
+            if list(desiredSigEst_noFSDcomp[:, 0]) == list(desiredSigEst[:, 0]):
+                stop = 1
+        else:
+            desiredSigEst_noFSDcomp = None
+            sroData_noFSDcomp = None
+            wTilde_noFSDcomp = None
     else:
         raise ValueError(f'`danseUpdating` setting unknown value: "{settings.danseUpdating}". Accepted values: {{"sequential", "simultaneous"}}.')
 
@@ -552,9 +592,13 @@ def launch_danse(signals: classes.Signals, asc: classes.AcousticScenario, settin
     desiredSigEst = desiredSigEst[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstLocal = desiredSigEstLocal[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     desiredSigEstCentralized = desiredSigEstCentralized[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
+    if settings.noFSDcompensation:
+        desiredSigEst_noFSDcomp = desiredSigEst_noFSDcomp[settings.stftWinLength // 2:-(settings.stftWinLength // 2 + nadd)]
     
-    return desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized, sroData, tStartForMetrics, firstDANSEupdateRefSensor, wTilde, wLocal, wCentr
-
+    return desiredSigEst, desiredSigEstLocal, desiredSigEstCentralized,\
+        sroData, tStartForMetrics, firstDANSEupdateRefSensor,\
+        wTilde, wLocal, wCentr,\
+        desiredSigEst_noFSDcomp, sroData_noFSDcomp, wTilde_noFSDcomp
 
 def whiten(sig, vad=[]):
     """

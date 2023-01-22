@@ -241,11 +241,24 @@ chunks, {int(settings.dynamicMetricsParams.chunkOverlap * 100)}% overlap] ($\\be
 
     # Plot SRO data
     if settings.asynchronicity.plotResult:
-        fig = results.sroData.plotSROdata(xaxistype='time', firstUp=results.other.firstDANSEupRefSensor)
+        fig = results.sroData.plotSROdata(
+            xaxistype='time',
+            firstUp=results.other.firstDANSEupRefSensor
+        )
         plt.savefig(f'{pathToResults}/SROestcomp.png')
         plt.savefig(f'{pathToResults}/SROestcomp.pdf')
         if showPlots:
             plt.draw()
+        if settings.noFSDcompensation:
+            fig = results.sroData_noFSDcomp.plotSROdata(
+                xaxistype='time',
+                firstUp=results.other.firstDANSEupRefSensor
+            )
+            plt.savefig(f'{pathToResults}/SROestcomp_noFSDcomp.png')
+            plt.savefig(f'{pathToResults}/SROestcomp_noFSDcomp.pdf')
+            if showPlots:
+                plt.draw()
+
 
     # Plot best performance node (in terms of STOI)
     if flagMetrics:
