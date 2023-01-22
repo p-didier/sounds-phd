@@ -542,7 +542,8 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
             # Compensate SROs
             if s.asynchronicity.compensateSROs:
                 # Complete phase shift factors
-                phaseShiftFactors[k] += extraPhaseShiftFactor
+                if not s.noFSDcompensation:
+                    phaseShiftFactors[k] += extraPhaseShiftFactor
                 if k == 0:  # Save for plotting
                     phaseShiftFactorThroughTime[i[k]:] = phaseShiftFactors[k][yLocalCurr.shape[-1] + q]
                 # Apply phase shift factors
@@ -636,6 +637,7 @@ def danse_simultaneous(yin, asc: classes.AcousticScenario, s: classes.ProgramSet
                         bufferFlagPri=np.sum(
                             bufferFlags[k][:(i[k] - s.asynchronicity.cohDriftMethod.segLength + 1), :],
                             axis=0) * s.broadcastLength,
+                        bypassFSDcomp=s.noFSDcompensation
                         )
 
             if s.asynchronicity.estimateSROs == 'CohDrift':

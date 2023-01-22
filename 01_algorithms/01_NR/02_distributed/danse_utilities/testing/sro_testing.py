@@ -66,6 +66,7 @@ class DanseTestingParameters():
     computeNoiseFreeForSDR: bool = False    # compute noise-free outcome
     # for ICASSP/OJSP paper revision
     DFTsize: int = 1024 
+    noFSDcompensation: bool = False
 
     def __post_init__(self):
         # Check inputs variable type
@@ -250,7 +251,9 @@ def build_experiment_parameters(dp: DanseTestingParameters, exportBasePath=''):
                     #
                     DFTsize=dp.DFTsize,
                     Ns=dp.DFTsize // 2,
-                    stftWinLength=dp.DFTsize
+                    stftWinLength=dp.DFTsize,
+                    #
+                    noFSDcompensation=dp.noFSDcompensation
                     )
             # Build export file path
             exportPath = f'{exportBasePath}/{acousticScenarios[ii].parent.name}/{acousticScenarios[ii].name}_SROs{sros[ii][jj]}'

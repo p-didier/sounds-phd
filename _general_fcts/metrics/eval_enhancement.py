@@ -196,13 +196,13 @@ def get_metrics(
         print(f'Cannot calculate PESQ for fs different from 16 or 8 kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
     # Scale-Invariant Signal-to-Distortions Ratio (SI-SDR)
     siSDR.before = None  # meaningless to compute an SI-SDR before processing
-    siSDR.after = compute_SDR(cleanSignal, noiseFreeEstimate)
+    siSDR.after = compute_SDR(noiseFreeEstimate, cleanSignal)
     siSDR.diff = None    # cf. `siSDR.before`
     if flagLocal and noiseFreeEstimateLocal is not None:
-        siSDR.afterLocal = compute_SDR(cleanSignal, noiseFreeEstimateLocal)
+        siSDR.afterLocal = compute_SDR(noiseFreeEstimateLocal, cleanSignal)
         siSDR.diffLocal = None  # cf. `siSDR.before`
     if flagCentralized and noiseFreeEstimateCentr is not None:
-        siSDR.afterCentr = compute_SDR(cleanSignal, noiseFreeEstimateCentr)
+        siSDR.afterCentr = compute_SDR(noiseFreeEstimateCentr, cleanSignal)
         siSDR.diffCentr = None  # cf. `siSDR.before`
 
     # Compute dynamic metrics
@@ -248,7 +248,10 @@ def compute_SDR(dhat, d):
 
     Parameters
     ----------
-    TODO:
+    dhat : np.ndarray (float)
+        Estimated (distorted) signal.
+    d : np.ndarray (float)
+        Target (undistorted) signal.
     
     References
     ----------
@@ -261,7 +264,8 @@ def compute_SDR(dhat, d):
     siSDRfull = 10 * np.log10(
         np.linalg.norm(
             (np.dot(dhat, d) / np.linalg.norm(d)**2) * d
-        )**2 / np.abs(
+        )**2 /\
+        np.linalg.norm(
             (np.dot(dhat, d) / np.linalg.norm(d)**2) * d - dhat
         )**2
     )

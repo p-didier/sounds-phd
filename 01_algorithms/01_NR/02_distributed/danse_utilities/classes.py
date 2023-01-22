@@ -375,7 +375,8 @@ class ProgramSettings(object):
     stftWinLength: int = DFTsize               # [samples] STFT frame length
     stftFrameOvlp: float = 0.5              # [/100%] STFT frame overlap
     stftWin: np.ndarray = np.array([])      # STFT window
-    computeNoiseFreeEstimate: bool = False  # if True, compute DANSE-filtered version of the noise-free sensor signals (for ICASSP/OJSP revision, Reviewer #3's last comment)
+    computeNoiseFreeEstimate: bool = False  # if True, compute DANSE-filtered version of the noise-free sensor signals (for OJSP Reviewer #3's last comment)
+    noFSDcompensation: bool = False         # if True, do not compensate for FSDs (OJSP Reviewer #3's last comment)
 
     def __post_init__(self) -> None:
         # Base attribute checks

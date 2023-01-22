@@ -279,7 +279,8 @@ def cohdrift_sro_estimation(
     method='gs',
     flagFirstSROEstimate=False,
     bufferFlagPos=0,
-    bufferFlagPri=0
+    bufferFlagPri=0,
+    bypassFSDcomp=False
     ):
     """Estimates residual SRO using a coherence drift technique.
     
@@ -311,6 +312,8 @@ def cohdrift_sro_estimation(
     bufferFlagPri : int
         Cumulate buffer flags from initialization to
         "current iteration - `ld`", for current node pair.
+    bypassFSDcomp : bool
+        If True, do not compensate for FSDs (OJSP Reviewer #3's last comment).
 
     Returns
     -------
@@ -331,9 +334,11 @@ def cohdrift_sro_estimation(
             np.conj(res_prod)[::-1][:-1]],
         -1
     )
-    # Account for potential buffer flags (extra / missing sample)
-    res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) *\
-        np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
+    # Account for potential buffer flags (extra / missing sample)'
+
+    if not bypassFSDcomp:
+        res_prod *= np.exp(1j * 2 * np.pi / len(res_prod) *\
+            np.arange(len(res_prod)) * (bufferFlagPos - bufferFlagPri))
 
     # if abs(bufferFlagPos - bufferFlagPri) > 1:
     #     print(f'bufferFlagPos - bufferFlagPri = {bufferFlagPos - bufferFlagPri}')
@@ -565,7 +570,8 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                         avgProdRes,
                         oracleSRO,
                         bufferFlagPos,
-                        bufferFlagPri):
+                        bufferFlagPri,
+                        bypassFSDcomp):
     """
     Update SRO estimates.
 
@@ -620,7 +626,8 @@ def update_sro_estimates(settings: ProgramSettings, iter,
                                     alpha=settings.asynchronicity.cohDriftMethod.alpha,
                                     flagFirstSROEstimate=flagFirstSROEstimate,
                                     bufferFlagPri=bufferFlagPri[q],
-                                    bufferFlagPos=bufferFlagPos[q]
+                                    bufferFlagPos=bufferFlagPos[q],
+                                    bypassFSDcomp=bypassFSDcomp
                                     )
             
                 sroOut[q] = sroRes

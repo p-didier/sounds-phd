@@ -25,6 +25,8 @@ class TestsParams:
     computeSDR: bool = False   
         # ^^^ if True, compute the noise-free DANSE filtering outcome to
         # compute the SI-SDR.
+    noFSDcompensation: bool = False    # if True, do not compensate for FSDs
+        # ^^^ done in response to OJSP Reviewer #3's last comment (#18).
 
 
 ASCBASEPATH = '02_data/01_acoustic_scenarios/for_submissions/icassp2023'
@@ -40,7 +42,7 @@ PARAMS = TestsParams(
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
     deltaSROs=[20,50,200],
-    # deltaSROs=[200],
+    # deltaSROs=[50],
     # deltaSROs=[20],
     # deltaSROs=[],  # uncomment this to only compute the centralised case
     exportBasePath=EXPORTPATH,
@@ -58,9 +60,12 @@ PARAMS = TestsParams(
     # noiseType='babble_diffuse',     # babble noise (diffuse)
     # noiseType='nonstationaryspeech',      # non-stationary speech (localised)
     # DFTsize=512,    # DFT size (number of bins)
-    DFTsize=2048,    # DFT size (number of bins)
+    DFTsize=1024,    # DFT size (number of bins)
+    # DFTsize=2048,    # DFT size (number of bins)
     #
-    computeSDR = True   # compute SI-SDR
+    computeSDR=True,   # compute SI-SDR
+    #
+    noFSDcompensation=True  # ablation study 20230122
 )
 
 
@@ -112,6 +117,7 @@ def main():
         params['baseSNR'] = PARAMS.baseSNR
         params['DFTsize'] = PARAMS.DFTsize
         params['computeNoiseFreeForSDR'] = PARAMS.computeSDR
+        params['noFSDcompensation'] = PARAMS.noFSDcompensation
 
         run_simul(params, PARAMS.exportBasePath)
 
@@ -199,7 +205,9 @@ def run_simul(params, exportBasePath):
             progressPrintingInterval=0.5
         ),
         #
-        DFTsize=params['DFTsize']
+        DFTsize=params['DFTsize'],
+        #
+        noFSDcompensation=params['noFSDcompensation']
     )
 
     # Run test

@@ -164,13 +164,19 @@ def evaluate_enhancement_outcome(
                     wLocal=wLocal,
                     wCentr=wCentr
                 )
+            # Truncate
+            dTDnoiseFree = dTDnoiseFree[startIdx[idxNode]:]
+            if settings.computeLocalEstimate:
+                dTDnoiseFreeLocal = dTDnoiseFreeLocal[startIdx[idxNode]:]
+            if settings.computeCentralizedEstimate:
+                dTDnoiseFreeCentr = dTDnoiseFreeCentr[startIdx[idxNode]:]
 
-            # # Listen
+            # Listen
             # if 1:        
-                # from scipy.io import wavfile
-                # wavfile.write('dTDnoiseFree.wav', 16000, dTDnoiseFree)
-                # wavfile.write('dTDnoiseFreeLocal.wav', 16000, dTDnoiseFreeLocal)
-                # wavfile.write('dTDnoiseFreeCentr.wav', 16000, dTDnoiseFreeCentr)
+            #     from scipy.io import wavfile
+            #     wavfile.write('dTDnoiseFree.wav', 16000, dTDnoiseFree)
+            #     wavfile.write('dTDnoiseFreeLocal.wav', 16000, dTDnoiseFreeLocal)
+            #     wavfile.write('dTDnoiseFreeCentr.wav', 16000, dTDnoiseFreeCentr)
 
             stop = 1
         
@@ -186,9 +192,9 @@ def evaluate_enhancement_outcome(
             settings.frameLenfwSNRseg,
             localSig,
             centralizedSig,
-            dTDnoiseFree[startIdx[idxNode]:],
-            dTDnoiseFreeLocal[startIdx[idxNode]:],
-            dTDnoiseFreeCentr[startIdx[idxNode]:]
+            dTDnoiseFree,
+            dTDnoiseFreeLocal,
+            dTDnoiseFreeCentr
         )
 
         snr[f'Node{idxNode + 1}'] = out0
@@ -253,14 +259,15 @@ def computeNoiseFreeForSDR(
         Time-domain version of `dCentr`.
     """
 
+    normFactWOLA = settings.stftWin.sum()
+
     def back_to_TD(d_lv):
         """Helper function to go from STFT- to time-domain."""
-        normFactWOLA = settings.stftWin.sum()
         d_lv_TD = np.zeros(sigs.desiredSigEst.shape[0])
         for ii in range(d_lv.shape[1]):
             idxBegChunk = ii * settings.Ns
             idxEndChunk = idxBegChunk + settings.DFTsize
-            dChunkCurr = normFactWOLA *\
+            dChunkCurr = normFactWOLA * settings.stftWin *\
                 danse_subfcns.back_to_time_domain(
                     d_lv[:, ii],
                     len(settings.stftWin)
@@ -271,11 +278,34 @@ def computeNoiseFreeForSDR(
             else:
                 d_lv_TD[idxBegChunk:idxEndChunk] +=\
                     dChunkCurr[:-(idxEndChunk - len(d_lv_TD))]
+        # Shift backwards by Ns
+        d_lv_TD = np.concatenate(
+            (d_lv_TD[settings.Ns:], np.zeros(settings.Ns))
+        )
 
         return d_lv_TD
     
     # Local signals
-    yk = sigs.wetSpeech_STFT[:, :, sigs.sensorToNodeTags == idxNode + 1]
+    yk_TD = sigs.wetSpeech[:, sigs.sensorToNodeTags == idxNode + 1]
+    shaper = wTilde[idxNode][:, :-1, :sigs.nSensorPerNode[idxNode]]  # used for fast array dimensioning
+    yk = np.zeros_like(shaper, dtype=complex)
+    for ii in range(shaper.shape[1]):
+        idxBeg = ii * settings.Ns
+        idxEnd = idxBeg + settings.DFTsize
+        if idxEnd <= yk_TD.shape[0] - 1:
+            yk_TDCurr = yk_TD[idxBeg:idxEnd,:]
+        else:
+            yk_TDCurr = np.concatenate((
+                yk_TD[idxBeg:, :],
+                np.zeros((idxEnd - yk_TD.shape[0], yk_TD.shape[1]))
+            ))
+            break
+        ykCurr = 1 / normFactWOLA * np.fft.fft(
+            yk_TDCurr * settings.stftWin[:, np.newaxis],
+            settings.DFTsize,
+            axis=0
+        )
+        yk[:, ii, :] = ykCurr[:int(np.round(settings.DFTsize // 2) + 1), :]
     # Other signals
     allNodeIdx = np.arange(sigs.numNodes)
     zmk = np.zeros(
@@ -286,16 +316,32 @@ def computeNoiseFreeForSDR(
     for q in allNodeIdx:
         if q != idxNode:
             # Neighbour's local signals
-            yq = sigs.wetSpeech_STFT[:, :, sigs.sensorToNodeTags == q + 1]
+            yq_TD = sigs.wetSpeech[:, sigs.sensorToNodeTags == q + 1]
             # Compress using appropriate set of coefficients
             wqq = wTilde[q][:, :-1, :sigs.nSensorPerNode[q]]
             #                   ^^^ not last iteration to match dimension
             zq = np.zeros((wqq.shape[0], wqq.shape[1]), dtype=complex)
             for ii in range(wqq.shape[1]):
+                idxBeg = ii * settings.Ns
+                idxEnd = idxBeg + settings.DFTsize
+                if idxEnd <= yq_TD.shape[0] - 1:
+                    yq_TDCurr = yq_TD[idxBeg:idxEnd,:]
+                else:
+                    yq_TDCurr = np.concatenate((
+                        yq_TD[idxBeg:, :],
+                        np.zeros((idxEnd - yq_TD.shape[0], yq_TD.shape[1]))
+                    ))
+                    break
+                yq = 1 / normFactWOLA * np.fft.fft(
+                    yq_TDCurr * settings.stftWin[:, np.newaxis],
+                    settings.DFTsize,
+                    axis=0
+                )
+                yq = yq[:int(np.round(settings.DFTsize // 2) + 1), :]
                 zq[:, ii] = np.einsum(  # dot product across sensors
                     'ij,ij->i',
                     wqq[:, ii, :].conj(),
-                    yq[:, ii, :]
+                    yq
                 )
             zmk[:, :, idxNeighbour] = zq
             idxNeighbour += 1
