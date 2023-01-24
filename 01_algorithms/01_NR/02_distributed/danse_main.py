@@ -202,7 +202,9 @@ def get_figures_and_sound(results: Results, pathToResults, settings: ProgramSett
     """
 
     # Plot convergence
-    # results.plot_convergence(settings)   # TODO: 20230119
+    fig = results.plot_convergence(settings)
+    fig.savefig({f'{pathToResults}/convergence.png'})
+    fig.savefig({f'{pathToResults}/convergence.pdf'})
 
     # Export as WAV
     wavFilenames = results.signals.export_wav(pathToResults)

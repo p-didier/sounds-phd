@@ -975,6 +975,7 @@ class Results(object):
             np.imag(self.filtersEvolution.wCentr[nodeIdx][:, :, settings.referenceSensor].T)
         ), axis=1))
 
+        plt.close()  # close any residual figure
         fig, axes = plt.subplots(1,1)
         fig.set_size_inches(5.5, 3.5)
         axes.plot(diffFiltersReal, label=f'$20\\log_{{10}}(E_{{\\nu}}\\{{|Re(\\tilde{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i]) - Re(\\hat{{w}}_{{{nodeIdx+1}{nodeIdx+1},{settings.referenceSensor+1}}}[\\nu,i])|\\}})$')
@@ -985,7 +986,7 @@ class Results(object):
 
         stop = 1
 
-        return None
+        return fig
 
     def plot_enhancement_metrics(self, plotLocal=False):
         """Creates a visual representation of DANSE performance results.

@@ -41,8 +41,8 @@ PARAMS = TestsParams(
     # sigDur=5,
     baseSNR=-3,  # <-- = -3 (dB) in ICASSP2023 submission
     computeCentralised=True,
-    deltaSROs=[20,50,200],
-    # deltaSROs=[50],
+    # deltaSROs=[20,50,200],
+    deltaSROs=[50],
     # deltaSROs=[20],
     # deltaSROs=[],  # uncomment this to only compute the centralised case
     exportBasePath=EXPORTPATH,
@@ -185,8 +185,8 @@ def run_simul(params, exportBasePath):
         #
         computeLocalEstimate=True,
         # vvvvvvvvvvvvvv
-        computeCentrEstimate=params['computeCentrEstimate'],
-        # computeCentrEstimate=True,    # BUG: DEBUGGING 20230119
+        # computeCentrEstimate=params['computeCentrEstimate'],
+        computeCentrEstimate=True,    # BUG: DEBUGGING 20230119
         computeNoiseFreeForSDR=params['computeNoiseFreeForSDR'],
         #
         asynchronicity=SamplingRateOffsets(
