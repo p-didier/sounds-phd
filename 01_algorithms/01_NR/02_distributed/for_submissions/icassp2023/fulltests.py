@@ -185,8 +185,8 @@ def run_simul(params, exportBasePath):
         #
         computeLocalEstimate=True,
         # vvvvvvvvvvvvvv
-        # computeCentrEstimate=params['computeCentrEstimate'],
-        computeCentrEstimate=True,    # BUG: DEBUGGING 20230119
+        computeCentrEstimate=params['computeCentrEstimate'],
+        # computeCentrEstimate=True,    # BUG: DEBUGGING 20230119
         computeNoiseFreeForSDR=params['computeNoiseFreeForSDR'],
         #
         asynchronicity=SamplingRateOffsets(
