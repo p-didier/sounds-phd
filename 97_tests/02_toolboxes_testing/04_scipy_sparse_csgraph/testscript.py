@@ -9,7 +9,7 @@ from pathlib import Path
 
 SEED = 12345  # random generators seed
 NNODES = np.arange(5, stop=21)
-NNODES = [20]
+# NNODES = [20]
 NMC_PERNNODES = 50  # number of Monte-Carlo runs per number of nodes
 ALGOS = ['kruskal', 'prim', 'boruvka']  # MST formation algorithms to consider
 # NETTYPE = 'fullyconnected'
@@ -25,6 +25,8 @@ def main():
             (algo, [None, None]) for algo in ALGOS
         ])) for n in NNODES
     ])
+
+    rng = np.random.default_rng(SEED)
     for idxNnodes in range(len(NNODES)):
         nNodes = NNODES[idxNnodes]
         timingsCurrNnodes = dict([(algo, []) for algo in ALGOS])
@@ -35,7 +37,11 @@ def main():
             if NETTYPE == 'fullyconnected':
                 OGnx = nx.complete_graph(nNodes)
             elif NETTYPE == 'adhoc':
-                OGnx = nx.random_geometric_graph(nNodes, radius=0.5, seed=SEED)
+                OGnx = nx.random_geometric_graph(
+                    nNodes,
+                    radius=0.5,
+                    seed=int(rng.random(size=(1,)) * 99999)
+                )
             else:
                 raise ValueError(f'Network type "{NETTYPE}" not understood.')
             # Generate node positions
@@ -51,12 +57,11 @@ def main():
             MSTs, timings = get_msts(OGnx, ALGOS)
 
             # Plot
-            if 1:
+            if 0:
                 fig = plot_mst(OGnx, MSTs[ALGOS[0]], pos, nodeSize=100)
-                if 0:
-                    fig.savefig(f'{Path(__file__).parent}/figs/MSTexample.pdf')
-                    fig.savefig(f'{Path(__file__).parent}/figs/MSTexample.png')
-                plt.show()
+                fig.savefig(f'{Path(__file__).parent}/figs/MSTexample{idxMC+1}_{nNodes}nodes.pdf')
+                fig.savefig(f'{Path(__file__).parent}/figs/MSTexample{idxMC+1}_{nNodes}nodes.png')
+                plt.show(block=False)
             
             # Aggregate timing results for current number of nodes
             for algo in ALGOS:
@@ -70,7 +75,7 @@ def main():
     # Show results
     fig = final_plot(allTimings)
     plt.show()
-    if 0:
+    if 1:
         fig.savefig(f'{Path(__file__).parent}/figs/timing_comp.png')
         fig.savefig(f'{Path(__file__).parent}/figs/timing_comp.pdf')
 
