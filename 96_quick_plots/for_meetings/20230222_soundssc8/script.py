@@ -10,18 +10,15 @@ from dataclasses import dataclass
 NNODES = [10]
 MINNODEDIST = 0.75   # minimum distance between nodes
 MINDISTTOWALLS = 0.25   # minimum node-wall distance
-# CONNECTIONDIST = np.Inf  # maximum distance for two nodes to be able to communicate
-CONNECTIONDIST = 4  # maximum distance for two nodes to be able to communicate
-# ^^^ set to np.Inf for a fully connected WASN 
 SQUAREROOMDIM = 10
 SEED = 12335
+CONNECDIST = 4
 COLORDEFAULTLINK = '#595959'
 COLORBESTSNRLINK = 'r'
 COLORINFERENCELINK = 'b'
 OUTPUTFOLDER = f'{Path(__file__).parent}/out/{NNODES}nodes'
 
-NWASNS = 1
-PLOTSTEPBYSTEP = True  # if True, plot formation of edge colors step by step
+NWASNS = 10
 SAVEINDIVWASNPLOTS = True
 
 np.random.seed(SEED)
@@ -40,12 +37,12 @@ class ASCWASN():
         # Layout
         self.layout = _get_layout_dict(self.posNodes)
         
-    def init_wasn(self):
+    def init_wasn(self, connecDist):
         # Inter-node distance matrix
         distNodes = distance_matrix(self.posNodes, self.posNodes)
         # Generate connections matrix
         connMat = np.zeros_like(distNodes)
-        connMat[distNodes <= CONNECTIONDIST] = 1
+        connMat[distNodes <= connecDist] = 1
         # Make symmetric (https://stackoverflow.com/a/28904854)
         # and fill diagonal with 1's
         connMat = np.maximum(connMat, connMat.T)
@@ -53,7 +50,26 @@ class ASCWASN():
         # Create adjacency dictionary
         self.adjdict = _get_adjacency_dict(connMat)
         # Generate directed graph
-        self.wasn = nx.DiGraph(self.adjdict)
+        self.wasn = nx.Graph(self.adjdict)
+
+    def get_mst(self):
+        """Compute minimum spanning tree (MST)."""
+        # Get node positions 
+        nodesPos = dict(
+            [(k, self.posNodes[k, :]) for k in range(self.posNodes.shape[0])]
+        )
+        
+        # Add edge weights based on inter-node distance # TODO: is that a correct approach? TODO:
+        for e in self.wasn.edges():
+            weight = np.linalg.norm(nodesPos[e[0]] - nodesPos[e[1]])
+            self.wasn[e[0]][e[1]]['weight'] = weight
+        
+        # Convert to minimum spanning tree
+        self.wasn = nx.minimum_spanning_tree(
+            self.wasn,
+            weight='weight'
+        )
+
 
     def _get_graph_colors(self):
         """Derive edge colors and directions (step-by-step while forming
@@ -61,30 +77,17 @@ class ASCWASN():
         self.edgecolors = get_graph_colors(self.wasn, self.adjdict, self.SNRs)
 
     def plotwasn(self):
-        figs = []
-        for ii in range(len(self.edgecolors)):  # plot step by step
-            fig, axes = plot_network(
-                self.wasn,
-                self.layout,
-                self.edgecolors[ii]
-            )
-            axes.scatter(
-                self.sourcePos[0, 0],
-                self.sourcePos[0, 1],
-                s=70,
-                c='m',
-                label='Source')
-            axes.legend()
-            plt.tight_layout()
-            figs.append(fig)
-        return figs
+        fig, _ = plot_network(
+            self.wasn,
+            self.layout
+        )
+        plt.tight_layout()
+        return fig
 
 
 def main():
-    
-    reduction = dict(
-        [(f'{NNODES[ii]}nodes', []) for ii in range(len(NNODES))]
-    )
+    """MAIN"""
+
     for idxNodes in range(len(NNODES)):
         for idxmain in range(NWASNS):
             print(f"Computing network topology and SRO inference pattern {idxmain+1}/{NWASNS}...")
@@ -98,63 +101,31 @@ def main():
                 dim=2
             )
             # Initialise WASN
-            data.init_wasn()
-            # Derive edge colors and directions
-            data._get_graph_colors()
-
-            # Compute reduction in computations
-            reduction[f'{NNODES[idxNodes]}nodes'].append([
-                len(data.edgecolors[-1]),
-                1 - sum(np.array(data.edgecolors[-1], dtype=object)\
-                    == COLORBESTSNRLINK) / len(data.edgecolors[-1])
-            ])
-
+            data.init_wasn(connecDist=CONNECDIST)
             # Plot
-            if SAVEINDIVWASNPLOTS:
-                figs = data.plotwasn()
-                if not Path(OUTPUTFOLDER).is_dir():
-                    Path(OUTPUTFOLDER).mkdir()
-                if PLOTSTEPBYSTEP:
-                    for ii, fig in enumerate(figs):
-                        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_pass{ii}.png')
-                        fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_pass{ii}.pdf')
-                        plt.close(fig)
-                else:
-                    figs[-1].savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.png')
-                    figs[-1].savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}.pdf')
-                    plt.close(figs[-1])
-        
-    # Sort and plot reduction
-    fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(5.5, 3.5)
-    for ii in range(len(NNODES)):
-        reducCurr = np.sort(
-            np.array(reduction[f'{NNODES[ii]}nodes'], dtype=float), axis=0
-        )
-        axes.scatter(
-            reducCurr[:, 0],
-            reducCurr[:, 1] * 100,
-            c=f'C{ii}',
-            label=f'{NNODES[ii]}-nodes WASNs'
-        )
-        coef = np.polyfit(reducCurr[:, 0], reducCurr[:, 1] * 100, 1)
-        poly1d_fn = np.poly1d(coef) 
-        x = np.arange(np.amin(reducCurr[:, 0]), np.amax(reducCurr[:, 0]))
-        axes.plot(x, poly1d_fn(x), f'C{ii}--')
-    axes.grid()
-    axes.set_axisbelow(True)
-    axes.set_xlabel('# of inter-node links in the WASN')
-    axes.set_ylabel('Reduction in # of SRO estimations [%]')
-    axes.set_title(f'{NWASNS} randomly generated WASNs per # of nodes')
-    axes.legend()
-    plt.tight_layout()
-    if not Path(OUTPUTFOLDER).is_dir():
-        Path(OUTPUTFOLDER).mkdir()
-    fig.savefig(f'{OUTPUTFOLDER}/global.png')
-    fig.savefig(f'{OUTPUTFOLDER}/global.pdf')
-    plt.show()
+            fig = data.plotwasn()
+            if not Path(OUTPUTFOLDER).is_dir():
+                Path(OUTPUTFOLDER).mkdir()
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_adhoc.png')
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_adhoc.pdf')
+            plt.close(fig)
 
-    stop = 1
+            # Initialise fully connected WASN
+            data.init_wasn(connecDist=np.Inf)
+            # Plot
+            fig = data.plotwasn()
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_fc.png')
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_fc.pdf')
+            plt.close(fig)
+
+            # Get minimum spanning tree
+            data.init_wasn(connecDist=CONNECDIST)
+            data.get_mst()
+            # Plot
+            fig = data.plotwasn()
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_mst.png')
+            fig.savefig(f'{OUTPUTFOLDER}/WASN{idxmain + 1}_mst.pdf')
+            plt.close(fig)
 
 
 def get_graph_colors(myG, adjdict, SNRs):
@@ -306,7 +277,7 @@ def plot_network(G, layout, edge_color=None):
         node_color='#e2e2e2',
         edgecolors='k',
         node_size=400)
-    axes.grid()
+    # axes.grid()
     axes.set_axisbelow(True)
     # vvv counteract innerworkings of `nx.draw()`
     axes.set_axis_on()
@@ -318,19 +289,10 @@ def plot_network(G, layout, edge_color=None):
         labelbottom=True,
         labelleft=True,
     )
-    axes.set_xlabel('$x$ [m]')
-    axes.set_ylabel('$y$ [m]')
+    # axes.set_xticklabels(['' for _ in range(len(axes.get_xticklabels()))])
+    # axes.set_yticklabels(['' for _ in range(len(axes.get_yticklabels()))])
     axes.set_xlim([0, SQUAREROOMDIM])
     axes.set_ylim([0, SQUAREROOMDIM])
-    nEdges = len(edge_color)
-    nEstimations = sum(np.array(edge_color, dtype=object)\
-        == COLORBESTSNRLINK) + sum(
-            np.array(edge_color, dtype=object)\
-            == COLORDEFAULTLINK
-        )
-    reduc = int((1 - nEstimations / nEdges) * 100)
-    ti = f"Red: computes SRO (see arrow); Blue: infers SRO\n{nEstimations} SRO estimations (vs. {nEdges} links) -- {reduc} % reduction."
-    axes.set_title(ti)
     
     return fig, axes
 

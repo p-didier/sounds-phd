@@ -71,8 +71,21 @@ class DynamicMetric:
         self.timeStamps = np.zeros(nChunks)     # [s] true time stamps associated to each chunk 
 
 
-def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters=None, gammafwSNRseg=0.2, frameLen=0.03,
-                enhancedSignalLocal=[], enhancedSignalCentralized=[]):
+def get_metrics(
+    cleanSignal,
+    noisySignal,
+    enhancedSignal,
+    fs,
+    VAD,
+    dynamic: DynamicMetricsParameters=None,
+    gammafwSNRseg=0.2,
+    frameLen=0.03,
+    enhancedSignalLocal=[],
+    enhancedSignalCentralized=[],
+    noiseFreeEstimate=[],
+    noiseFreeEstimateLocal=[],
+    noiseFreeEstimateCentr=[]
+    ):
     """Compute evaluation metrics for signal enhancement given a single-channel signal.
     Parameters
     ----------
@@ -96,17 +109,25 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
         Local estimate of desired signal (only using local node info, i.e., no network info).
     enhancedSignalCentralized : np.ndarray (float)
         Centralized estimate of desired signal.
+    noiseFreeEstimate : np.ndarray (float)
+        Noise-free DANSE estimate (for SI-SDR).
+    noiseFreeEstimateLocal : np.ndarray (float)
+        Noise-free DANSE estimate (for SI-SDR) [LOCAL estimate].
+    noiseFreeEstimateCentr : np.ndarray (float)
+        Noise-free DANSE estimate (for SI-SDR) [CENTRALISED (MWF) estimate].
 
     Returns
     -------
     snr : Metric object
-        Unweighted signal-to-noise ratio (SNR).
+        Unweighted signal-to-noise ratio.
     fwSNRseg : Metric object
         Frequency-weighted segmental SNR.
     myStoi : Metric object
         Short-Time Objective Intelligibility.
     myPesq : Metric object
         Perceptual Evaluation of Speech Quality.
+    siSDR : Metric object
+        Scale-Invariant Signal-to-Distortions Ratio.
     """
     
     # Flag to signal presence of a local signal estimate
@@ -119,6 +140,7 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
     fwSNRseg = Metric()
     myStoi = Metric()
     myPesq = Metric()
+    siSDR = Metric()
     
     # Unweighted SNR
     snr.before = get_snr(noisySignal, VAD)
@@ -172,6 +194,16 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
             myPesq.diffCentr = myPesq.afterCentr - myPesq.before
     else:
         print(f'Cannot calculate PESQ for fs different from 16 or 8 kHz (current value: {fs/1e3} kHz). Keeping `myPesq` attributes at 0.')
+    # Scale-Invariant Signal-to-Distortions Ratio (SI-SDR)
+    siSDR.before = None  # meaningless to compute an SI-SDR before processing
+    siSDR.after = compute_SDR(noiseFreeEstimate, cleanSignal)
+    siSDR.diff = None    # cf. `siSDR.before`
+    if flagLocal and noiseFreeEstimateLocal is not None:
+        siSDR.afterLocal = compute_SDR(noiseFreeEstimateLocal, cleanSignal)
+        siSDR.diffLocal = None  # cf. `siSDR.before`
+    if flagCentralized and noiseFreeEstimateCentr is not None:
+        siSDR.afterCentr = compute_SDR(noiseFreeEstimateCentr, cleanSignal)
+        siSDR.diffCentr = None  # cf. `siSDR.before`
 
     # Compute dynamic metrics
     if dynamic is not None:
@@ -207,7 +239,36 @@ def get_metrics(cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: Dyna
             elif 'pesq' in key:
                 myPesq.import_dynamic_metric(value)
 
-    return snr, fwSNRseg, myStoi, myPesq
+    return snr, fwSNRseg, myStoi, myPesq, siSDR
+
+
+def compute_SDR(dhat, d):
+    """
+    Computes SI-SDR according to [1] (Eq. (5)).
+
+    Parameters
+    ----------
+    TODO:
+    
+    References
+    ----------
+    [1] Le Roux, J., Wisdom, S., Erdogan, H., & Hershey, J. R. (2019, May).
+    SDR - half-baked or well done?. In ICASSP 2019-2019 IEEE International
+    Conference on Acoustics, Speech and Signal Processing (ICASSP)
+    (pp. 626-630). IEEE.
+    """
+
+    siSDRfull = 10 * np.log10(
+        np.linalg.norm(
+            (np.dot(dhat, d) / np.linalg.norm(d)**2) * d
+        )**2 / np.abs(
+            (np.dot(dhat, d) / np.linalg.norm(d)**2) * d - dhat
+        )**2
+    )
+    # Compute single-value
+    siSDR = np.nanmean(np.ma.masked_invalid(siSDRfull), axis=0)
+
+    return siSDR
 
 
 def get_dynamic_metric(fcns, cleanSignal, noisySignal, enhancedSignal, fs, VAD, dynamic: DynamicMetricsParameters, gammafwSNRseg=0.2, frameLen=0.03,
@@ -543,6 +604,3 @@ def get_fwsnrseg(cleanSig, enhancedSig, fs, frameLen=0.03, overlap=0.75, gamma=0
 # ------------------------------------------
 # ------------------------------------------
 # ------------------------------------------
-
-
-
