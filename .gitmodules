@@ -1,3 +1,6 @@
 [submodule "danse"]
 	path = danse
 	url = https://github.com/p-didier/danse
+[submodule "01_algorithms/03_signal_gen/01_acoustic_scenes/rimpy"]
+	path = 01_algorithms/03_signal_gen/01_acoustic_scenes/rimpy
+	url = https://github.com/p-didier/rimpy
