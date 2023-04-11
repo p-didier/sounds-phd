@@ -212,13 +212,28 @@ def dump_to_yaml_template(myDataclass, path=None):
     if path is None:
         path = f'{type(myDataclass).__name__}__template.yaml'
 
-    with open(path, 'w') as f:
-        # # Account for numpy arrays in all sub-dataclasses
-        # for key in myDataclass.__annotations__:
-        #     if myDataclass.__annotations__[key] is np.ndarray:
-        #         setattr(myDataclass, key, getattr(myDataclass, key).tolist())
+    def _convert_to_dict(cls):
+        """
+        Recursively converts a dataclass (and its nested dataclasses)
+        to a dictionary.
+        Difference with `dcw.asdict` is that this function does 
+        not alter the capitalization of the field names, and keeps
+        underscores in the field names.
+        """
+        outDict = {}
+        for key in fields(cls):
+            if is_dataclass(getattr(cls, key.name)):
+                outDict[key.name] = _convert_to_dict(getattr(cls, key.name))
+            elif type(getattr(cls, key.name)) is np.ndarray:
+                # Convert numpy arrays to lists before dumping to YAML
+                outDict[key.name] = getattr(cls, key.name).tolist()
+            else:
+                outDict[key.name] = getattr(cls, key.name)
+        return outDict
 
-        yaml.dump(dcw.asdict(myDataclass), f, default_flow_style=False)
+    with open(path, 'w') as f:
+        myDataclassAsDict = _convert_to_dict(myDataclass)
+        yaml.dump(myDataclassAsDict, f, default_flow_style=False)
     
     print(f'YAML template for dataclass "{type(myDataclass).__name__}" dumped to "{path}".')
 
@@ -287,3 +302,21 @@ def load_from_yaml(path, myDataclass):
     myDataclass = _load_into_dataclass(d, myDataclass)
 
     return myDataclass
+
+
+def dataclasses_equal(d1, d2):
+    """
+    Assesses whether two dataclasses (and their nested dataclasses) are equal.
+    """
+    for k, v in d1.__dict__.items():
+        if is_dataclass(v):
+            if not dataclasses_equal(v, getattr(d2, k)):
+                return False
+        elif isinstance(d2.__dict__[k], np.ndarray):
+            if not d2.__dict__[k].shape == v.shape:
+                return False
+            if not np.allclose(d2.__dict__[k], v):
+                return False
+        elif d2.__dict__[k] != v:
+            return False
+    return True
