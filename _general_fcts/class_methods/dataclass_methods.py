@@ -1,12 +1,13 @@
-from copy import copy
-import pickle, gzip
-from pathlib import Path
-from dataclasses import fields, replace, make_dataclass, is_dataclass
-from pathlib import PurePath
-import json, os
-import dataclass_wizard as dcw
-import numpy as np
 
+import yaml
+import json, os
+import numpy as np
+import pickle, gzip
+from copy import copy
+from pathlib import Path
+from pathlib import PurePath
+import dataclass_wizard as dcw
+from dataclasses import fields, replace, make_dataclass, is_dataclass
 
 def save(self, foldername: str, exportType='pkl'):
     """
@@ -194,3 +195,95 @@ def shorten_path(file_path, length=3):
     -- from: https://stackoverflow.com/a/49758154
     """
     return Path(*Path(file_path).parts[-length:])
+
+
+def dump_to_yaml_template(myDataclass, path=None):
+    """Dumps a YAML template for a dataclass.
+    
+    Parameters
+    ----------
+    myDataclass : instance of a dataclass
+        The dataclass to dump a template for.
+    path : str
+        The path to the YAML file to be created.
+        If not provided, the file will be created in the current directory.
+    """
+
+    if path is None:
+        path = f'{type(myDataclass).__name__}__template.yaml'
+
+    with open(path, 'w') as f:
+        # # Account for numpy arrays in all sub-dataclasses
+        # for key in myDataclass.__annotations__:
+        #     if myDataclass.__annotations__[key] is np.ndarray:
+        #         setattr(myDataclass, key, getattr(myDataclass, key).tolist())
+
+        yaml.dump(dcw.asdict(myDataclass), f, default_flow_style=False)
+    
+    print(f'YAML template for dataclass "{type(myDataclass).__name__}" dumped to "{path}".')
+
+
+def load_from_yaml(path, myDataclass):
+    """Loads data from a YAML file into a dataclass.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the YAML file to be loaded.
+    myDataclass : instance of a dataclass
+        The dataclass to load the data into.
+
+    Returns
+    -------
+    myDataclass : instance of a dataclass
+        The dataclass with the data loaded into it.
+    """
+
+    with open(path, 'r') as f:
+        d = yaml.load(f, Loader=yaml.FullLoader)
+
+    def _interpret_lists(d):
+        """Interprets lists in the YAML file as lists of floats, not strings"""
+        for key in d:
+            if type(d[key]) is str:
+                if d[key][0] == '[' and d[key][-1] == ']':
+                    d[key] = d[key][1:-1].split('\n ')
+                    for ii in range(len(d[key])):
+                        d[key][ii] = [float(k) for k in d[key][ii][1:-1].split(' ')]
+            elif type(d[key]) is dict:
+                d[key] = _interpret_lists(d[key])
+        return d
+
+    # Detect lists
+    d = _interpret_lists(d)
+
+    def _deal_with_arrays(d):
+        """Transforms lists that should be numpy arrays into numpy arrays"""
+        for key in d:
+            if type(d[key]) is list:
+                if myDataclass.__annotations__[key] is np.ndarray:
+                    d[key] = np.array(d[key])
+            elif type(d[key]) is dict:
+                d[key] = _deal_with_arrays(d[key])
+        return d
+
+    # Deal with expected numpy arrays
+    d = _deal_with_arrays(d)
+
+    def _load_into_dataclass(d, myDataclass):
+        """Loads data from a dict into a dataclass"""
+        for key in d:
+            if type(d[key]) is dict:
+                setattr(
+                    myDataclass,
+                    key,
+                    _load_into_dataclass(d[key], getattr(myDataclass, key))
+                )
+            else:
+                setattr(myDataclass, key, d[key])
+        return myDataclass
+
+    # myDataclass = dcw.fromdict(myDataclass, d)
+    myDataclass = _load_into_dataclass(d, myDataclass)
+
+    return myDataclass
