@@ -1,4 +1,5 @@
 
+import ast
 import yaml
 import json, os
 import numpy as np
@@ -225,8 +226,12 @@ def dump_to_yaml_template(myDataclass, path=None):
             if is_dataclass(getattr(cls, key.name)):
                 outDict[key.name] = _convert_to_dict(getattr(cls, key.name))
             elif type(getattr(cls, key.name)) is np.ndarray:
-                # Convert numpy arrays to lists before dumping to YAML
-                outDict[key.name] = getattr(cls, key.name).tolist()
+                # Convert numpy arrays to lists, then strings
+                # before dumping to YAML.
+                outDict[key.name] = str(getattr(cls, key.name).tolist())
+            elif type(getattr(cls, key.name)) is list:
+                # Convert lists to strings before dumping to YAML
+                outDict[key.name] = str(getattr(cls, key.name))
             else:
                 outDict[key.name] = getattr(cls, key.name)
         return outDict
@@ -260,11 +265,10 @@ def load_from_yaml(path, myDataclass):
     def _interpret_lists(d):
         """Interprets lists in the YAML file as lists of floats, not strings"""
         for key in d:
-            if type(d[key]) is str:
+            if type(d[key]) is str and len(d[key]) >= 2:
                 if d[key][0] == '[' and d[key][-1] == ']':
-                    d[key] = d[key][1:-1].split('\n ')
-                    for ii in range(len(d[key])):
-                        d[key][ii] = [float(k) for k in d[key][ii][1:-1].split(' ')]
+                    d[key] = ast.literal_eval(d[key])  # Convert string to list
+                    # Use of `literal_eval` hinted at by https://stackoverflow.com/a/1894296
             elif type(d[key]) is dict:
                 d[key] = _interpret_lists(d[key])
         return d

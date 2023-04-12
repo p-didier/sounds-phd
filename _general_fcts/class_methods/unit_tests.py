@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 # FUNCTION_TO_TEST = 'save'
 # FUNCTION_TO_TEST = 'dump_to_yaml_template'
 FUNCTION_TO_TEST = 'load_from_yaml'
-FUNCTION_TO_TEST = 'dataclasses_equal'
+# FUNCTION_TO_TEST = 'dataclasses_equal'
 EXPORT_PATH_YAML = f'{Path(__file__).parent}/testing_out/test.yaml'
 
 def main():
