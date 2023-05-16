@@ -8,9 +8,13 @@ import sys
 import shutil
 from pathlib import Path, WindowsPath
 
-PATH_TO_RESULTS_FOLDER = 'danse/out/20230508_tests/tigevddanse'
-DESTINATION_FOLDER = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/08_secondments/UOL/01_meetings/20230516_update_chinaev_enzner_withoutsimon/tex/graphics/tidanse'
+PATH_TO_RESULTS_FOLDER = 'danse/out/20230512_tests/tigevddanse_battery'
+DESTINATION_FOLDER = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/08_secondments/UOL/01_meetings/20230516_update_chinaev_enzner_withoutsimon/tex/graphics/tigevddanse'
 FIGNAME = 'metrics.pdf'  # name of the figure to transfer
+
+FOLDERS_TO_IGNORE = [  # folders to ignore when searching for figures
+    '_backup'
+]
 
 def main(
         destinationPath=DESTINATION_FOLDER,
@@ -21,7 +25,12 @@ def main(
     
     # Check that the destination folder exists
     if not Path(destinationPath).exists():
-        raise ValueError(f'Destination folder "{destinationPath}" does not exist.')
+        inp = input(f'Destination folder "{destinationPath}" does not exist. Create it? [y/n]  ')
+        if inp.lower() == 'y':
+            Path(destinationPath).mkdir(parents=True, exist_ok=True)
+        else:
+            print('Aborting.')
+            return
     
     # Check that the results folder exists
     if not Path(resultsPath).exists():
@@ -29,13 +38,12 @@ def main(
     
     # Check for subfolders in the results folder
     subfolders = [x for x in Path(resultsPath).iterdir() if x.is_dir()]
-    if len(subfolders) == 0:
+    # Recursively check for subfolders
+    for subfolder in subfolders:
+        if subfolder.name in FOLDERS_TO_IGNORE:
+            continue
         copy_fig(resultsPath, destinationPath, figname)
-    else:
-        # Recursively check for subfolders
-        for subfolder in subfolders:
-            copy_fig(resultsPath, destinationPath, figname)
-            main(destinationPath, subfolder, figname)
+        main(destinationPath, subfolder, figname)
 
 
 def copy_fig(path: WindowsPath, destinationPath, figname):
@@ -52,6 +60,7 @@ def copy_fig(path: WindowsPath, destinationPath, figname):
                 f'{Path(figname).stem}_from_{path.name}{Path(figname).suffix}'
             )
         )
+
 
 if __name__ == '__main__':
     sys.exit(main())
