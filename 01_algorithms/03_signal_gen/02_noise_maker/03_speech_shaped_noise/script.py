@@ -10,7 +10,7 @@ from pathlib import Path
 # FILEPATH = '02_data/00_raw_signals/01_speech/speech2.wav'
 FILEPATH = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
 EXPORTFOLDER = '02_data/00_raw_signals/02_noise/ssn'
-SEED = 12345  # only used if `FILEPATH` is a folder
+SEED = 12346  # only used if `FILEPATH` is a folder
 NOISE_DURATION = 60*3  # [s]
 
 def main(filePath=FILEPATH, noiseDuration=NOISE_DURATION):
