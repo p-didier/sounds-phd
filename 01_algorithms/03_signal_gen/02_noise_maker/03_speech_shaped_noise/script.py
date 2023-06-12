@@ -7,19 +7,50 @@ import sys
 from pathlib import Path
 
 # Globals
-# FILEPATH = 'C:/Users/pdidier/Dropbox/PC/Documents/sounds-phd/02_data/00_raw_signals/01_speech/speech1.wav'
-FILEPATH = 'C:/Users/pdidier/Dropbox/PC/Documents/sounds-phd/02_data/00_raw_signals/01_speech/speech2.wav'
-EXPORTFOLDER = 'C:/Users/pdidier/Dropbox/PC/Documents/sounds-phd/02_data/00_raw_signals/02_noise/ssn'
+# FILEPATH = '02_data/00_raw_signals/01_speech/speech2.wav'
+FILEPATH = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
+EXPORTFOLDER = '02_data/00_raw_signals/02_noise/ssn'
+SEED = 12345  # only used if `FILEPATH` is a folder
+NOISE_DURATION = 60*3  # [s]
 
-def main():
+def main(filePath=FILEPATH, noiseDuration=NOISE_DURATION):
 
+    np.random.seed(SEED)  # Set random seed
+
+    # Case where the filepath is a directory
+    if Path(filePath).is_dir():
+        flagStop = False
+        while not flagStop:
+            # Check if folder contains sound files (wav or flac)
+            soundFiles = list(Path(filePath).glob('**/*.wav')) +\
+                list(Path(filePath).glob('**/*.flac'))
+            if len(soundFiles) > 0:
+                # If so select a random file
+                filePath = soundFiles[
+                    int(np.random.randint(0, len(soundFiles)))
+                ]
+                print(f'Randomly selected file: {filePath}')
+                flagStop = True
+            else:
+                # If not, check for immediate subfolders
+                subfolders = list(Path(filePath).glob('**/*'))
+                subfolders = [x for x in subfolders if x.is_dir()]
+                if len(subfolders) > 0:
+                    filePath = subfolders[
+                        int(np.random.randint(0, len(subfolders)))
+                    ]
+                else:
+                    print(f'The folder {filePath} is empty.')
+                    raise ValueError
+    
     speech, fs = sf.read(
-        file=FILEPATH
+        file=filePath
     )
 
     noise = _noise_from_signal(
         x=speech,
-        fs=fs
+        fs=fs,
+        dur=noiseDuration
     )
 
     # Look at spectra
@@ -34,7 +65,7 @@ def main():
     # Export files
     if 1:
         sf.write(
-            file=f'{EXPORTFOLDER}/ssn_{Path(FILEPATH).stem}.wav',
+            file=f'{EXPORTFOLDER}/ssn_{Path(filePath).stem}.wav',
             data=noise,
             samplerate=fs
         )
@@ -49,7 +80,7 @@ def next_pow_2(x):
 
 
 # From: https://github.com/timmahrt/pyAcoustics/blob/main/pyacoustics/speech_filters/speech_shaped_noise.py 
-def _noise_from_signal(x, fs=40000, keep_env=False):
+def _noise_from_signal(x, fs=40000, dur=1, keep_env=False):
     """Create a noise with same spectrum as the input signal.
     Parameters
     ----------
@@ -57,6 +88,8 @@ def _noise_from_signal(x, fs=40000, keep_env=False):
         Input signal.
     fs : int
         Sampling frequency of the input signal. (Default value = 40000)
+    dur : float
+        Duration of output noise file [s]
     keep_env : bool
         Apply the envelope of the original signal to the noise. (Default
         value = False)
@@ -66,12 +99,13 @@ def _noise_from_signal(x, fs=40000, keep_env=False):
         Noise signal.
     """
     x = np.asarray(x)
-    n_x = x.shape[-1]
+    n_x = int(dur * fs)
+    # n_x = x.shape[-1]
     n_fft = next_pow_2(n_x)
-    X = fft.rfft(x, next_pow_2(n_fft))
+    Xfft = fft.rfft(x, next_pow_2(n_fft))
     # Randomize phase.
-    noise_mag = np.abs(X) * np.exp(
-        2 * np.pi * 1j * np.random.random(X.shape[-1]))
+    noise_mag = np.abs(Xfft) * np.exp(
+        2 * np.pi * 1j * np.random.random(Xfft.shape[-1]))
     noise = np.real(fft.irfft(noise_mag, n_fft))
     out = noise[:n_x]
 
