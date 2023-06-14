@@ -1,76 +1,83 @@
+
+import sys
+import copy
 import numpy as np
 from numpy import fft
-from scipy import signal
 import soundfile as sf
-import matplotlib.pyplot as plt
-import sys
 from pathlib import Path
+import scipy.signal as sig
+import matplotlib.pyplot as plt
 
 # Globals
 # FILEPATH = '02_data/00_raw_signals/01_speech/speech2.wav'
 FILEPATH = 'C:/Users/pdidier/Dropbox/_BELGIUM/KUL/SOUNDS_PhD/02_research/03_simulations/99_datasets/01_signals/01_LibriSpeech_ASR/test-clean'
 EXPORTFOLDER = '02_data/00_raw_signals/02_noise/ssn'
-SEED = 12346  # only used if `FILEPATH` is a folder
-NOISE_DURATION = 60*3  # [s]
+SEED = 12348  # only used if `FILEPATH` is a folder
+NOISE_DURATION = 60*60  # [s]
+
+N_SSN_TO_GENERATE = 1
 
 def main(filePath=FILEPATH, noiseDuration=NOISE_DURATION):
 
     np.random.seed(SEED)  # Set random seed
 
-    # Case where the filepath is a directory
-    if Path(filePath).is_dir():
-        flagStop = False
-        while not flagStop:
-            # Check if folder contains sound files (wav or flac)
-            soundFiles = list(Path(filePath).glob('**/*.wav')) +\
-                list(Path(filePath).glob('**/*.flac'))
-            if len(soundFiles) > 0:
-                # If so select a random file
-                filePath = soundFiles[
-                    int(np.random.randint(0, len(soundFiles)))
-                ]
-                print(f'Randomly selected file: {filePath}')
-                flagStop = True
-            else:
-                # If not, check for immediate subfolders
-                subfolders = list(Path(filePath).glob('**/*'))
-                subfolders = [x for x in subfolders if x.is_dir()]
-                if len(subfolders) > 0:
-                    filePath = subfolders[
-                        int(np.random.randint(0, len(subfolders)))
+    for _ in range(N_SSN_TO_GENERATE):
+        # At every iteration, reset the filepath
+        currFilePath = copy.deepcopy(filePath)
+        # Case where the filepath is a directory
+        if Path(currFilePath).is_dir():
+            flagStop = False
+            while not flagStop:
+                # Check if folder contains sound files (wav or flac)
+                soundFiles = list(Path(currFilePath).glob('**/*.wav')) +\
+                    list(Path(currFilePath).glob('**/*.flac'))
+                if len(soundFiles) > 0:
+                    # If so select a random file
+                    currFilePath = soundFiles[
+                        int(np.random.randint(0, len(soundFiles)))
                     ]
+                    print(f'Randomly selected file: {currFilePath}')
+                    flagStop = True
                 else:
-                    print(f'The folder {filePath} is empty.')
-                    raise ValueError
-    
-    speech, fs = sf.read(
-        file=filePath
-    )
+                    # If not, check for immediate subfolders
+                    subfolders = list(Path(currFilePath).glob('**/*'))
+                    subfolders = [x for x in subfolders if x.is_dir()]
+                    if len(subfolders) > 0:
+                        currFilePath = subfolders[
+                            int(np.random.randint(0, len(subfolders)))
+                        ]
+                    else:
+                        print(f'The folder {currFilePath} is empty.')
+                        raise ValueError
+        
+        print(f'Generating SSN from {currFilePath}...')
 
-    noise = _noise_from_signal(
-        x=speech,
-        fs=fs,
-        dur=noiseDuration
-    )
-
-    # Look at spectra
-    fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(8.5, 3.5)
-    axes.plot(20 * np.log10(np.abs(np.fft.fft(speech))))
-    axes.plot(20 * np.log10(np.abs(np.fft.fft(noise))))
-    axes.grid()
-    plt.tight_layout()	
-    plt.show()
-
-    # Export files
-    if 1:
-        sf.write(
-            file=f'{EXPORTFOLDER}/ssn_{Path(filePath).stem}.wav',
-            data=noise,
-            samplerate=fs
+        speech, fs = sf.read(
+            file=currFilePath
         )
 
-    stop = 1
+        noise = _noise_from_signal(
+            x=speech,
+            fs=fs,
+            dur=noiseDuration
+        )
+
+        # Look at spectra
+        fig, axes = plt.subplots(1,1)
+        fig.set_size_inches(8.5, 3.5)
+        axes.plot(20 * np.log10(np.abs(np.fft.fft(speech))))
+        axes.plot(20 * np.log10(np.abs(np.fft.fft(noise))))
+        axes.grid()
+        plt.tight_layout()	
+        # plt.show()
+
+        # Export files
+        if 1:
+            sf.write(
+                file=f'{EXPORTFOLDER}/ssn_{Path(currFilePath).stem}.wav',
+                data=noise,
+                samplerate=fs
+            )
 
 
 # From: https://github.com/timmahrt/pyAcoustics/blob/main/pyacoustics/speech_filters/speech_shaped_noise.py 
@@ -110,9 +117,9 @@ def _noise_from_signal(x, fs=40000, dur=1, keep_env=False):
     out = noise[:n_x]
 
     if keep_env:
-        env = np.abs(signal.hilbert(x))
-        [bb, aa] = signal.butter(6, 50 / (fs / 2))  # 50 Hz LP filter
-        env = signal.filtfilt(bb, aa, env)
+        env = np.abs(sig.hilbert(x))
+        [bb, aa] = sig.butter(6, 50 / (fs / 2))  # 50 Hz LP filter
+        env = sig.filtfilt(bb, aa, env)
         out *= env
 
     return out
