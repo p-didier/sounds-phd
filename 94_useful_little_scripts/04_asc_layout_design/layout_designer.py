@@ -16,18 +16,18 @@ from mpl_toolkits.mplot3d import Axes3D
 BASE_EXPORT_PATH = '94_useful_little_scripts/04_asc_layout_design/layouts'
 PARAMS = {
     'rd': [5, 5, 5],
-    'Mk': [6, 6, 6, 6],  # number of sensors per node
+    'Mk': [3, 3],  # number of sensors per node
     'node_arrangement': 'polygon',
-    'node_spacing': 1.0,  # [m]
+    'node_spacing': 1.5,  # [m]
     'sensor_arrangement': 'within_sphere',  # 'linear', 'circular', 'within_sphere'
     'sensor_spacing': 0.2,  # [m]
     'N_targets': 1,
-    'N_interferers': 8, # number of interferers
+    'N_interferers': 2, # number of interferers
     'interferer_arrangement': 'circular',  # 'linear', 'circular', 'within_sphere'
     'interferer_spacing': 2,  # [m]
     'same_height': True,  # if True, all elements are at the same height
     #
-    'export_file_name': f'{BASE_EXPORT_PATH}/asc1.yaml'
+    'export_file_name': f'{BASE_EXPORT_PATH}/ascsmall1.yaml'
 }
 
 def main(p=PARAMS):
@@ -35,10 +35,10 @@ def main(p=PARAMS):
     room = build_room(p)
 
     # # Plot room
-    # plot_room(room, p)
 
     # Export coordinates as YAML
     export_yaml(room, p)
+    plot_room(room, p, export=True)
 
     # # Try and re-import YAML
     # room2 = import_yaml(p['export_file_name'])
@@ -100,7 +100,7 @@ def export_yaml(room, p):
             f.write('  - [%.2f, %.2f, %.2f]\n' % (interferer_position[0], interferer_position[1], interferer_position[2]))
 
 
-def plot_room(room, p):
+def plot_room(room, p, export=False):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
@@ -133,7 +133,11 @@ def plot_room(room, p):
 
     # add legend
     ax.legend(['sensors', 'targets', 'interferers'])
-    plt.show()
+    
+    if export:
+        fig.savefig(p['export_file_name'].replace('.yaml', '.png'), dpi=300)
+    else:
+        plt.show()
 
 
 def build_room(p):
