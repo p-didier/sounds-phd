@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 10
-SELFNOISE_FACTOR = 0.5
+SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 50)
 # DURATIONS = [20]
 FS = 16e3
@@ -28,7 +28,7 @@ def main(
         durations=DURATIONS,
         fs=FS,
         nMC=N_MC,
-        selfNoiseFactor=SELFNOISE_FACTOR,
+        selfNoisePower=SELFNOISE_POWER,
         seed=SEED
     ):
     """Main function (called by default when running script)."""
@@ -37,25 +37,28 @@ def main(
     np.random.seed(seed)
 
     diff = np.zeros((nMC, len(durations)))
-    # scalings = np.random.uniform(low=50, high=100, size=M)
-    scalings = np.random.uniform(low=0.5, high=1, size=M)
+    scalings = np.random.uniform(low=50, high=100, size=M)
+    # scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
-    nSamples = int(np.amax(durations) * fs)
+    nSamplesMax = int(np.amax(durations) * fs)
     cleanSigs, latentSignal = get_clean_signals(M, np.amax(durations), scalings, fs)
-    sigma_sr = np.sqrt(np.mean(latentSignal ** 2))
+    sigma_sr = np.sqrt(np.mean(cleanSigs ** 2, axis=0))
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
 
         # Generate noise signals
-        noiseSignals = np.zeros((nSamples, M))
+        noiseSignals = np.zeros((nSamplesMax, M))
         sigma_nr = np.zeros(M)
         for n in range(M):
-            noiseSignals[:, n] = selfNoiseFactor * np.random.uniform(
-                low=-1,
-                high=1,
-                size=nSamples
-            )
+            # Generate random sequence with unit power
+            randSequence = np.random.normal(size=nSamplesMax)
+            randSequence = randSequence / np.sqrt(np.mean(randSequence ** 2))
+            # Scale to desired power
+            noiseSignals[:, n] = randSequence * np.sqrt(selfNoisePower)
+            # Check power
             sigma_nr[n] = np.sqrt(np.mean(noiseSignals[:, n] ** 2))
+            if np.abs(sigma_nr[n] ** 2 - selfNoisePower) > 1e-6:
+                raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {selfNoisePower}')
             
         # Loop over durations
         for ii in range(len(durations)):
@@ -76,23 +79,24 @@ def main(
             diffsPerSensor = np.zeros(M)
             for n in range(M):
                 rtf = scalings / scalings[n]
-                hs = np.sum(rtf ** 2) * sigma_sr ** 2
+                hs = np.sum(rtf ** 2) * sigma_sr[n] ** 2
                 spf = hs / (hs + sigma_nr[n] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
             diff[idxMC, ii] = np.mean(diffsPerSensor)
 
         # Plots
-        if 1:
+        if 0:
             filteredSignals = np.zeros((nSamples, M))
             filteredSignal_RTFs = np.zeros((nSamples, M))
             for n in range(M):
                 filteredSignals[:, n] = noisySignals @ filter[:, n]
+                # Compute filtered signal using RTFs
                 h = scalings / scalings[n]
-                hs = np.sum(h ** 2) * sigma_sr ** 2
+                h2 = np.sum(h ** 2)
+                hs = h2 * sigma_sr[n] ** 2
                 spf = hs / (hs + sigma_nr[n] ** 2)
-                filteredSignal_RTFs[:, n] = noisySignals @\
-                    h / (h.T @ h) * spf
+                filteredSignal_RTFs[:, n] = noisySignals @ h / h2 * spf
             # plot_results(
             #     cleanSigs[:nSamples, :],
             #     noisySignals,
@@ -122,7 +126,7 @@ def plot_filter(filter, scalings, sigma_sr, sigma_nr):
         axs.plot(filter[:, n], f'C{n}.-', label=f'MWF weights sensor {n}')
         # axs.plot(filter[:, n] / np.amax(np.abs(filter[:, n])), '.-', label=f'MWF weights sensor {n}')
         h = scalings / scalings[n]
-        hs = np.sum(h ** 2) * sigma_sr ** 2
+        hs = np.sum(h ** 2) * sigma_sr[n] ** 2
         spectralPostFilter = hs / (hs + sigma_nr[n] ** 2)
         if n == 0:
             axs.plot(h / np.sum(h ** 2) * spectralPostFilter, f'C{n}.--', label='Matched BF and spectral post-filter')
