@@ -16,10 +16,8 @@ SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 50)
 # DURATIONS = [20]
 FS = 16e3
-N_MC = 10
-
-# FILTER_TYPE = 'mwf'  # 'mwf' or 'gevdmwf'
-FILTER_TYPE = 'gevdmwf'  # 'mwf' or 'gevdmwf'
+N_MC = 20
+EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
 
 SEED = 0
 
@@ -37,6 +35,7 @@ def main(
     np.random.seed(seed)
 
     diff = np.zeros((nMC, len(durations)))
+    diffGEVD = np.zeros((nMC, len(durations)))
     scalings = np.random.uniform(low=50, high=100, size=M)
     # scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
@@ -71,19 +70,28 @@ def main(
                 noisySignals,
                 cleanSigs[:nSamples, :],
                 noiseSignals[:nSamples, :],
-                type=FILTER_TYPE
+                type='mwf'
+            )
+            filterGEVD = compute_filter(
+                noisySignals,
+                cleanSigs[:nSamples, :],
+                noiseSignals[:nSamples, :],
+                type='gevdmwf'
             )
 
             # Compute difference between normalized estimated filters
             # and normalized expected filters
             diffsPerSensor = np.zeros(M)
+            diffsPerSensorGEVD = np.zeros(M)
             for n in range(M):
                 rtf = scalings / scalings[n]
                 hs = np.sum(rtf ** 2) * sigma_sr[n] ** 2
                 spf = hs / (hs + sigma_nr[n] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
+                diffsPerSensorGEVD[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
             diff[idxMC, ii] = np.mean(diffsPerSensor)
+            diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
 
         # Plots
         if 0:
@@ -107,14 +115,21 @@ def main(
             stop = 1
 
     # Plot difference
-    plt.figure()
-    plt.loglog(durations, diff.T, '-', color='0.75')
-    plt.loglog(durations, np.mean(diff, axis=0), '.-', color='k')
+    fig, axes = plt.subplots(1,1)
+    fig.set_size_inches(8.5, 3.5)
+    plt.loglog(durations, diffGEVD.T, '-', color='r', alpha=0.5)
+    plt.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF')
+    plt.loglog(durations, diff.T, '--', color='0.75')
+    plt.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF')
     plt.grid(which='both')
+    plt.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
-    plt.ylabel(f'Abs. diff. bw. estimated and expected filter ({nMC} MC runs)')
+    plt.ylabel(f'Abs. diff. bw. MWF and FAS + SPF ({nMC} MC runs)')
+    fig.tight_layout()
     plt.show(block=False)
 
+    if 1:
+        fig.savefig(f'{EXPORT_FOLDER}/diff.png', dpi=300, bbox_inches='tight')
 
     stop = 1
 
