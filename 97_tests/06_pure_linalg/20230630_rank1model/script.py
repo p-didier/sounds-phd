@@ -11,7 +11,8 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 10
+N_SENSORS = 6
+N_NODES = 3
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
 # DURATIONS = [20]
@@ -29,6 +30,7 @@ SEED = 0
 
 def main(
         M=N_SENSORS,
+        K=N_NODES,
         durations=DURATIONS,
         fs=FS,
         nMC=N_MC,
@@ -40,8 +42,14 @@ def main(
     # Set random seed
     np.random.seed(seed)
 
+    # For DANSE: randomly assign sensors to nodes
+    channelToNodeMap = np.random.randint(0, K, M)
+    # Sort
+    channelToNodeMap = np.sort(channelToNodeMap)
+
     diff = np.zeros((nMC, len(durations)))
     diffGEVD = np.zeros((nMC, len(durations)))
+    diffDANSE = np.zeros((nMC, len(durations)))
     # scalings = np.random.uniform(low=50, high=100, size=M)
     scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
@@ -88,24 +96,28 @@ def main(
             nSamples = int(durations[ii] * fs)
             noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
 
+            kwargs = {
+                'noisySignals': noisySignals,
+                'cleanSigs': cleanSigs[:nSamples, :],
+                'noiseOnlySigs': noiseSignals[:nSamples, :],
+            }
+
             # MWF
-            filter = compute_filter(
-                noisySignals,
-                cleanSigs[:nSamples, :],
-                noiseSignals[:nSamples, :],
-                type='mwf'
-            )
-            filterGEVD = compute_filter(
-                noisySignals,
-                cleanSigs[:nSamples, :],
-                noiseSignals[:nSamples, :],
-                type='gevdmwf'
+            filter = compute_filter(type='mwf', **kwargs)
+            filterGEVD = compute_filter(type='gevdmwf', **kwargs)
+
+            # Run DANSE
+            filterDANSE = compute_filter(
+                type='danse',
+                channelToNodeMap=channelToNodeMap,
+                **kwargs
             )
 
             # Compute difference between normalized estimated filters
             # and normalized expected filters
             diffsPerSensor = np.zeros(M)
             diffsPerSensorGEVD = np.zeros(M)
+            diffsPerSensorDANSE = np.zeros(M)
             for n in range(M):
                 rtf = scalings / scalings[n]
                 hs = np.sum(rtf ** 2) * sigma_sr[n] ** 2
@@ -113,8 +125,10 @@ def main(
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
                 diffsPerSensorGEVD[n] = np.mean(np.abs(filterGEVD[:, n] - fasAndSPF))
+                diffsPerSensorDANSE[n] = np.mean(np.abs(filterDANSE[:, n] - fasAndSPF))
             diff[idxMC, ii] = np.mean(diffsPerSensor)
             diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
+            diffDANSE[idxMC, ii] = np.mean(diffsPerSensorDANSE)
 
         # Plots
         if 0:
@@ -211,7 +225,8 @@ def compute_filter(
         cleanSigs: np.ndarray,
         noiseOnlySigs: np.ndarray,
         type='mwf',
-        rank=1
+        rank=1,
+        channelToNodeMap=None  # only used for DANSE
     ):
     """
     [1] Santiago Ruiz, Toon van Waterschoot and Marc Moonen, "Distributed
@@ -240,6 +255,192 @@ def compute_filter(
         Dmat = np.zeros((nSensors, nSensors))
         Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
         w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
+    elif type == 'danse':
+        w = run_danse(cleanSigs, noiseOnlySigs, channelToNodeMap)
+    return w
+
+
+def run_danse(
+        x,
+        n,
+        channelToNodeMap,      
+        filterType='regular',  # 'regular' or 'gevd'
+        rank=1,
+        nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
+    ):
+
+    maxIter = 100
+    tol = 1e-8
+    # Get noisy signal
+    y = x + n
+    # Get number of nodes
+    nNodes = np.amax(channelToNodeMap) + 1
+    # Determine data type (complex or real)
+    myDtype = np.complex128 if np.iscomplex(x).any() else np.float64
+    # Initialize
+    w = []
+    for k in range(nNodes):
+        nSensorsPerNode = np.sum(channelToNodeMap == k)
+        wCurr = np.zeros((nSensorsPerNode + nNodes - 1, maxIter), dtype=myDtype)
+        wCurr[0, :] = 1
+        w.append(wCurr)
+    idxNodes = np.arange(nNodes)
+    idxUpdatingNode = 0
+    wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
+    # Run DANSE
+    for iter in range(maxIter):
+        print(f'Iteration {iter+1}/{maxIter}')
+        # Compute fused signals from all sensors
+        fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
+        for q in range(nNodes):
+            yq = y[:, channelToNodeMap == q]
+            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter]
+            
+        for k in range(nNodes):
+            # Get y tilde
+            yTilde = np.concatenate((
+                y[:, channelToNodeMap == k],
+                fusedSignals[:, idxNodes != k]
+            ), axis=1)
+
+            # Compute covariance matrices
+            Ryy = yTilde.T.conj() @ yTilde
+            d = x[:, channelToNodeMap == k]
+            d = d[:, 0]
+            Ryd = yTilde.T.conj() @ d
+            
+            if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
+                updateFilter = True
+            else:
+                updateFilter = False
+
+            if updateFilter:
+                # Compute filter
+                if filterType == 'regular':
+                    w[k][:, iter + 1] = np.linalg.inv(Ryy) @ Ryd
+                elif filterType == 'gevd':
+                    Rnn = n.T.conj() @ n
+                    sigma, Xmat = la.eigh(Ryy, Rnn)
+                    idx = np.flip(np.argsort(sigma))
+                    sigma = sigma[idx]
+                    Xmat = Xmat[:, idx]
+                    Qmat = np.linalg.inv(Xmat.T.conj())
+                    Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
+                    Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
+                    w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj()
+            else:
+                w[k][: , iter + 1] = w[k][: , iter]  # keep old filter
+            
+        # Update node index
+        if nodeUpdatingStrategy == 'sequential':
+            idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
+
+        # Compute network-wide filters
+        for k in range(nNodes):
+            channelCount = np.zeros(nNodes, dtype=int)
+            neighborCount = 0
+            for m in range(x.shape[1]):
+                # Node index corresponding to channel `m`
+                currNode = channelToNodeMap[m]
+
+                # Count channel index within node
+                c = channelCount[currNode]
+
+                if currNode == k:
+                    wNet[m, iter, k] = w[k][c, iter + 1]  # use local filter coefficient
+                else:
+                    nChannels_k = np.sum(channelToNodeMap == k)
+                    gkq = w[k][nChannels_k + neighborCount, iter + 1]
+                    wNet[m, iter, k] = w[currNode][c, iter] * gkq
+                channelCount[currNode] += 1
+
+                if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
+                    neighborCount += 1
+        
+        # Check convergence
+        if iter > 0:
+            diff = 0
+            for k in range(nNodes):
+                diff += np.mean(np.abs(w[k][:, iter + 1] - w[k][:, iter]))
+            if diff < tol:
+                print(f'Convergence reached after {iter+1} iterations')
+                break
+
+    # Plot filter evolution
+    if 1:
+        fig, axs = plt.subplots(nNodes, 1, sharex=True)
+        for k in range(nNodes):
+            # axs[k].plot(np.abs(w[k][:, :(iter + 1)].T), '.-')
+            axs[k].plot(np.abs(wNet[:, :(iter + 1), k].T), '.-')
+            axs[k].set_title(f'Node {k + 1}')
+            # Build and show legend
+            legendEntries = []
+            for n in range(wNet.shape[0]):
+                if channelToNodeMap[n] == k:
+                    entr = f'$w_{{{k}{k},{n+1}}}^{{i}}$'
+                else:
+                    q = channelToNodeMap[n]
+                    entr = f'$w_{{{q},{q},m}}^{{i-1}} g_{{{k},{q}}}^{{i}}$'
+                legendEntries.append(entr)
+            axs[k].legend(legendEntries)
+        plt.xlabel('Iteration')
+        fig.tight_layout()
+        plt.show(block=False)
+    stop = 1
+
+    return wNet
+
+
+def danse_iteration(
+        x: np.ndarray,
+        n: np.ndarray,
+        w: list[np.ndarray],
+        k: int,
+        channelToNodeMap: np.ndarray,
+        iter: int,
+        filterType='regular',  # 'regular' or 'gevd'
+        rank=1
+    ):
+
+    # Determine data type (complex or real)
+    myDtype = np.complex128 if np.iscomplex(x).any() else np.float64
+    # Get noisy signal
+    y = x + n
+    # Get number of nodes
+    nNodes = np.amax(channelToNodeMap) + 1
+    
+    # Compute fused signals from all sensors except sensor k
+    fusedSignals = np.zeros((x.shape[0], nNodes - 1), dtype=myDtype)
+    neighbourCount = 0
+    for q in range(nNodes):
+        if q != k:
+            yq = y[:, channelToNodeMap == q]
+            fusedSignals[:, neighbourCount] = yq @ w[q][:yq.shape[1], iter]
+            neighbourCount += 1
+    
+    # Get y tilde
+    yTilde = np.concatenate((y[:, channelToNodeMap == k], fusedSignals), axis=1)
+
+    # Compute covariance matrices
+    Ryy = yTilde.T.conj() @ yTilde
+    d = x[:, channelToNodeMap == k]
+    d = d[:, 0]
+    Ryd = yTilde.T.conj() @ d
+    
+    # Compute filter
+    if filterType == 'regular':
+        w[k][:, iter + 1] = np.linalg.inv(Ryy) @ Ryd
+    elif filterType == 'gevd':
+        Rnn = n.T.conj() @ n
+        sigma, Xmat = la.eigh(Ryy, Rnn)
+        idx = np.flip(np.argsort(sigma))
+        sigma = sigma[idx]
+        Xmat = Xmat[:, idx]
+        Qmat = np.linalg.inv(Xmat.T.conj())
+        Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
+        Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
+        w = Xmat @ Dmat @ Qmat.T.conj()
+
     return w
 
 
