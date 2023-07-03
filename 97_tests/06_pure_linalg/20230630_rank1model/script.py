@@ -13,10 +13,10 @@ import matplotlib.pyplot as plt
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 10
 SELFNOISE_POWER = 1
-DURATIONS = np.logspace(np.log10(1), np.log10(30), 50)
+DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
 # DURATIONS = [20]
 FS = 16e3
-N_MC = 20
+N_MC = 10
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
 RANDOM_DELAYS = False
 
@@ -42,8 +42,8 @@ def main(
 
     diff = np.zeros((nMC, len(durations)))
     diffGEVD = np.zeros((nMC, len(durations)))
-    scalings = np.random.uniform(low=50, high=100, size=M)
-    # scalings = np.random.uniform(low=0.5, high=1, size=M)
+    # scalings = np.random.uniform(low=50, high=100, size=M)
+    scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
     nSamplesMax = int(np.amax(durations) * fs)
     cleanSigs, _ = get_clean_signals(
@@ -55,12 +55,15 @@ def main(
         randomDelays=RANDOM_DELAYS,
         maxDelay=0.1
     )
-    sigma_sr = np.sqrt(np.mean(cleanSigs ** 2, axis=0))
+    sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
 
         # Generate noise signals
-        noiseSignals = np.zeros((nSamplesMax, M), dtype=np.complex128)
+        if np.iscomplex(cleanSigs).any():
+            noiseSignals = np.zeros((nSamplesMax, M), dtype=np.complex128)
+        else:
+            noiseSignals = np.zeros((nSamplesMax, M))
         sigma_nr = np.zeros(M)
         for n in range(M):
             # Generate random sequence with unit power
@@ -137,14 +140,15 @@ def main(
     # Plot difference
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(8.5, 3.5)
-    axes.loglog(durations, diffGEVD.T, '-', color='r', alpha=0.5)
-    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF')
+    axes.loglog(durations, diffGEVD.T, '-', color='#FFCACA')
     axes.loglog(durations, diff.T, '--', color='0.75')
-    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF')
+    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF (mean)')
+    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF (mean)')
     plt.grid(which='both')
     axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
-    plt.ylabel(f'Abs. diff. bw. MWF and FAS + SPF ({nMC} MC runs)')
+    plt.ylabel('Abs. diff. bw. MWF and FAS + SPF')
+    axes.set_title(f'{nMC} MC runs - $M$ = {M} sensors - target signal: "{SIGNAL_TYPE}"')
     fig.tight_layout()
     plt.show(block=False)
 
@@ -233,10 +237,7 @@ def compute_filter(
         sigma = sigma[idx]
         Xmat = Xmat[:, idx]
         Qmat = np.linalg.inv(Xmat.T.conj())
-        if np.iscomplex(cleanSigs).any():
-            Dmat = np.zeros((nSensors, nSensors), dtype=np.complex128)
-        else:
-            Dmat = np.zeros((nSensors, nSensors))
+        Dmat = np.zeros((nSensors, nSensors))
         Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
         w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
     return w
