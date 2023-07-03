@@ -18,6 +18,12 @@ DURATIONS = np.logspace(np.log10(1), np.log10(30), 50)
 FS = 16e3
 N_MC = 20
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
+RANDOM_DELAYS = False
+
+# Type of signal
+# SIGNAL_TYPE = 'speech'
+# SIGNAL_TYPE = 'noise_real'
+SIGNAL_TYPE = 'noise_complex'
 
 SEED = 0
 
@@ -40,22 +46,36 @@ def main(
     # scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
     nSamplesMax = int(np.amax(durations) * fs)
-    cleanSigs, latentSignal = get_clean_signals(M, np.amax(durations), scalings, fs)
+    cleanSigs, _ = get_clean_signals(
+        M,
+        np.amax(durations),
+        scalings,
+        fs,
+        sigType=SIGNAL_TYPE,
+        randomDelays=RANDOM_DELAYS,
+        maxDelay=0.1
+    )
     sigma_sr = np.sqrt(np.mean(cleanSigs ** 2, axis=0))
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
 
         # Generate noise signals
-        noiseSignals = np.zeros((nSamplesMax, M))
+        noiseSignals = np.zeros((nSamplesMax, M), dtype=np.complex128)
         sigma_nr = np.zeros(M)
         for n in range(M):
             # Generate random sequence with unit power
-            randSequence = np.random.normal(size=nSamplesMax)
-            randSequence = randSequence / np.sqrt(np.mean(randSequence ** 2))
+            if np.iscomplex(cleanSigs).any():
+                randSequence = np.random.normal(size=nSamplesMax) +\
+                    1j * np.random.normal(size=nSamplesMax)
+                
+            else:
+                randSequence = np.random.normal(size=nSamplesMax)
+            # Make unit power
+            randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
             # Scale to desired power
             noiseSignals[:, n] = randSequence * np.sqrt(selfNoisePower)
             # Check power
-            sigma_nr[n] = np.sqrt(np.mean(noiseSignals[:, n] ** 2))
+            sigma_nr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
             if np.abs(sigma_nr[n] ** 2 - selfNoisePower) > 1e-6:
                 raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {selfNoisePower}')
             
@@ -89,7 +109,7 @@ def main(
                 spf = hs / (hs + sigma_nr[n] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
-                diffsPerSensorGEVD[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
+                diffsPerSensorGEVD[n] = np.mean(np.abs(filterGEVD[:, n] - fasAndSPF))
             diff[idxMC, ii] = np.mean(diffsPerSensor)
             diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
 
@@ -117,19 +137,22 @@ def main(
     # Plot difference
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(8.5, 3.5)
-    plt.loglog(durations, diffGEVD.T, '-', color='r', alpha=0.5)
-    plt.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF')
-    plt.loglog(durations, diff.T, '--', color='0.75')
-    plt.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF')
+    axes.loglog(durations, diffGEVD.T, '-', color='r', alpha=0.5)
+    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF')
+    axes.loglog(durations, diff.T, '--', color='0.75')
+    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF')
     plt.grid(which='both')
-    plt.legend(loc='lower left')
+    axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
     plt.ylabel(f'Abs. diff. bw. MWF and FAS + SPF ({nMC} MC runs)')
     fig.tight_layout()
     plt.show(block=False)
 
     if 1:
-        fig.savefig(f'{EXPORT_FOLDER}/diff.png', dpi=300, bbox_inches='tight')
+        fname = f'{EXPORT_FOLDER}/diff'
+        if RANDOM_DELAYS:
+            fname += '_randomDelays'
+        fig.savefig(f'{fname}_{SIGNAL_TYPE}.png', dpi=300, bbox_inches='tight')
 
     stop = 1
 
@@ -193,47 +216,72 @@ def compute_filter(
     """
 
     nSensors = cleanSigs.shape[1]
-    Ryy = noisySignals.T @ noisySignals
+    Ryy = noisySignals.T.conj() @ noisySignals
     if type == 'mwf':
         RyyInv = np.linalg.inv(Ryy)
-        w = np.zeros((nSensors, nSensors))
+        if np.iscomplex(cleanSigs).any():
+            w = np.zeros((nSensors, nSensors), dtype=np.complex128)
+        else:
+            w = np.zeros((nSensors, nSensors))
         for n in range(nSensors):
-            Ryd = noisySignals.T @ cleanSigs[:, n]
+            Ryd = noisySignals.T.conj() @ cleanSigs[:, n]
             w[:, n] = RyyInv @ Ryd
     elif type == 'gevdmwf':
-        Rnn = noiseOnlySigs.T @ noiseOnlySigs
+        Rnn = noiseOnlySigs.T.conj() @ noiseOnlySigs
         sigma, Xmat = la.eigh(Ryy, Rnn)
         idx = np.flip(np.argsort(sigma))
         sigma = sigma[idx]
         Xmat = Xmat[:, idx]
-        Qmat = np.linalg.inv(Xmat.conj().T)
-        Dmat = np.zeros((nSensors, nSensors))
+        Qmat = np.linalg.inv(Xmat.T.conj())
+        if np.iscomplex(cleanSigs).any():
+            Dmat = np.zeros((nSensors, nSensors), dtype=np.complex128)
+        else:
+            Dmat = np.zeros((nSensors, nSensors))
         Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
         w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
     return w
 
 
-def get_clean_signals(M, dur, scalings, fsTarget):
+def get_clean_signals(
+        M,
+        dur,
+        scalings,
+        fsTarget,
+        sigType='speech',
+        randomDelays=False,
+        maxDelay=0.1
+    ):
     # Load target signal
-    latentSignal, fs = sf.read(TARGET_SIGNAL)
-    if fs != fsTarget:
-        # Resample
-        latentSignal = resampy.resample(
-            latentSignal,
-            fs,
-            fsTarget
-        )
-    # Truncate
-    latentSignal = latentSignal[:int(dur * fsTarget)]
-    # Normalize
-    # latentSignal = latentSignal / np.max(np.abs(latentSignal))
+    if sigType == 'speech':
+        latentSignal, fs = sf.read(TARGET_SIGNAL)
+        if fs != fsTarget:
+            # Resample
+            latentSignal = resampy.resample(
+                latentSignal,
+                fs,
+                fsTarget
+            )
+        # Truncate
+        latentSignal = latentSignal[:int(dur * fsTarget)]
+    elif sigType == 'noise_real':
+        # Generate noise signal (real-valued)
+        latentSignal = np.random.normal(size=int(dur * fsTarget))
+    elif sigType == 'noise_complex':
+        # Generate noise signal (complex-valued)
+        latentSignal = np.random.normal(size=int(dur * fsTarget)) +\
+            1j * np.random.normal(size=int(dur * fsTarget))
     # Normalize power
-    latentSignal = latentSignal / np.sqrt(np.mean(latentSignal ** 2))
+    latentSignal /= np.sqrt(np.mean(np.abs(latentSignal) ** 2))
     
     # Generate clean signals
     mat = np.tile(latentSignal, (M, 1)).T
     # Random scalings
     cleanSigs = mat @ np.diag(scalings)  # rank-1 matrix (scalings only)
+    # Random delays
+    if randomDelays:
+        for n in range(M):
+            delay = np.random.randint(0, int(maxDelay * fsTarget))
+            cleanSigs[:, n] = np.roll(cleanSigs[:, n], delay)
 
     return cleanSigs, latentSignal
 
