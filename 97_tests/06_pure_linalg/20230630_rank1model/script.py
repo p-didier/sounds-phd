@@ -11,11 +11,11 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 5
+N_SENSORS = 10
 N_NODES = 3
 SELFNOISE_POWER = 1
-# DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
-DURATIONS = [20]
+DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
+# DURATIONS = [5]
 FS = 16e3
 N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
@@ -118,65 +118,17 @@ def main(
             )
 
             # Plot DANSE evolution
-            if 1:
-                for k in range(K):
-                    fig, ax = plt.subplots(1,1)
-                    fig.set_size_inches(8.5, 3.5)
-                    # Determine reference sensor index
-                    nodeChannels = np.where(channelToNodeMap == k)[0]
-                    idxRef = nodeChannels[0]  # first sensor of node k
-                    # Compute FAS + SPF
-                    rtf = scalings / scalings[idxRef]
-                    hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
-                    spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
-                    fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
-                    # Plot DANSE evolution
-                    for m in range(M):
-                        lab = f'$[\\mathbf{{w}}_k^i]_{m+1}$'
-                        if m in nodeChannels:
-                            lab += f' (local)'
-                        if m == idxRef:
-                            lab += ' (reference)'
-                        ax.plot(
-                            np.abs(filterDANSE[m, :, k].T),
-                            f'C{m}.-',
-                            label=lab
-                        )
-                        if m == 0:
-                            ax.hlines(
-                                np.abs(fasAndSPF[m]),
-                                0,
-                                filterDANSE.shape[1] - 1,
-                                color=f'C{m}',
-                                linestyle='--',
-                                label=f'$[\\mathbf{{w}}_{{\\mathrm{{FAS}},k}}]_{m+1}$'
-                            )
-                        else:
-                            ax.hlines(
-                                np.abs(fasAndSPF[m]),
-                                0,
-                                filterDANSE.shape[1] - 1,
-                                color=f'C{m}',
-                                linestyle='--'
-                            )
-                    ax.set_title(f'Node $k=${k + 1}, channels {nodeChannels + 1}')
-                    # # Build and show legend
-                    # legendEntries = []
-                    # for n in range(filterDANSE.shape[0]):
-                    #     if channelToNodeMap[n] == k:
-                    #         entr = f'$w_{{{k}{k},{n+1}}}^{{i}}$'
-                    #     else:
-                    #         q = channelToNodeMap[n]
-                    #         entr = f'$w_{{{q},{q},m}}^{{i-1}} g_{{{k},{q}}}^{{i}}$'
-                    #     legendEntries.append(entr)
-                    ax.legend()
-                    ax.grid(which='both')
-                    plt.xlabel('Iteration index $i$')
-                    fig.tight_layout()
-                    if 1:
-                        fig.savefig(f'{EXPORT_FOLDER}/danse_evol_n{k+1}_dur{int(durations[ii] * 1e3)}ms.png', dpi=300, bbox_inches='tight')
-                    plt.show(block=False)
-
+            if 0:
+                plot_danse_evol(
+                    K,
+                    channelToNodeMap,
+                    durations[ii],
+                    filterDANSE,
+                    scalings,
+                    sigma_sr,
+                    sigma_nr,
+                    savefigs=True
+                )
 
             # Compute difference between normalized estimated filters
             # and normalized expected filters
@@ -199,7 +151,7 @@ def main(
                 hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
                 spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
-                diffsPerNodeDANSE[k] = np.mean(np.abs(filterDANSE[:, k] - fasAndSPF))
+                diffsPerNodeDANSE[k] = np.mean(np.abs(filterDANSE[:, -1, k] - fasAndSPF))
 
             diff[idxMC, ii] = np.mean(diffsPerSensor)
             diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
@@ -231,6 +183,7 @@ def main(
     fig.set_size_inches(8.5, 3.5)
     axes.loglog(durations, diffGEVD.T, '-', color='#FFCACA')
     axes.loglog(durations, diff.T, '--', color='0.75')
+    axes.loglog(durations, diffDANSE.T, ':', color='#CECAFF')
     axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label=f'GEVD-MWF (mean over $M$={M} sensors)')
     axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label=f'MWF (mean over $M$={M} sensors)')
     axes.loglog(durations, np.mean(diffDANSE, axis=0), '.:', color='b', label=f'DANSE (mean over $K$={K} nodes)')
@@ -242,13 +195,75 @@ def main(
     fig.tight_layout()
     plt.show(block=False)
 
-    if 1:
+    if 0:
         fname = f'{EXPORT_FOLDER}/diff'
         if RANDOM_DELAYS:
             fname += '_randomDelays'
         fig.savefig(f'{fname}_{SIGNAL_TYPE}.png', dpi=300, bbox_inches='tight')
 
     stop = 1
+
+
+def plot_danse_evol(
+        K,
+        channelToNodeMap,
+        dur,
+        filterDANSE,
+        scalings,
+        sigma_sr,
+        sigma_nr,
+        savefigs=False
+    ):
+    """ Plot DANSE evolution. """
+    nSensors = filterDANSE.shape[0]
+    for k in range(K):
+        fig, ax = plt.subplots(1,1)
+        fig.set_size_inches(8.5, .5)
+        # Determine reference sensor index
+        nodeChannels = np.where(channelToNodeMap == k)[0]
+        idxRef = nodeChannels[0]  # first sensor of node k
+        # Compute FAS + SPF
+        rtf = scalings / scalings[idxRef]
+        hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
+        spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
+        fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+        # Plot DANSE evolution
+        for m in range(nSensors):
+            lab = f'$[\\mathbf{{w}}_k^i]_{m+1}$'
+            if m in nodeChannels:
+                lab += f' (local)'
+            if m == idxRef:
+                lab += ' (reference)'
+            ax.plot(
+                np.abs(filterDANSE[m, :, k].T),
+                f'C{m}.-',
+                label=lab
+            )
+            if m == 0:
+                ax.hlines(
+                    np.abs(fasAndSPF[m]),
+                    0,
+                    filterDANSE.shape[1] - 1,
+                    color=f'C{m}',
+                    linestyle='--',
+                    label=f'$[\\mathbf{{w}}_{{\\mathrm{{FAS}},k}}]_{m+1}$'
+                )
+            else:
+                ax.hlines(
+                    np.abs(fasAndSPF[m]),
+                    0,
+                    filterDANSE.shape[1] - 1,
+                    color=f'C{m}',
+                    linestyle='--'
+                )
+        ax.set_title(f'Node $k=${k + 1}, channels {nodeChannels + 1}')
+        ax.legend()
+        ax.grid(which='both')
+        plt.xlabel('Iteration index $i$')
+        fig.tight_layout()
+        if savefigs:
+            fig.savefig(f'{EXPORT_FOLDER}/danse_evol_n{k+1}_dur{int(dur * 1e3)}ms.png', dpi=300, bbox_inches='tight')
+        plt.show(block=False)
 
 
 def plot_filter(filter, scalings, sigma_sr, sigma_nr):
@@ -346,7 +361,7 @@ def run_danse(
     ):
 
     maxIter = 100
-    tol = 1e-8
+    tol = 1e-9
     # Get noisy signal
     y = x + n
     # Get number of nodes
@@ -385,10 +400,9 @@ def run_danse(
             ), axis=1)
 
             # Compute covariance matrices
-            Ryy = yTilde.T.conj() @ yTilde
-            d = x[:, channelToNodeMap == k]
-            d = d[:, 0]
-            Ryd = yTilde.T.conj() @ d
+            Ryy = yTilde.T @ yTilde.conj()
+            d = x[:, np.where(channelToNodeMap == k)[0][0]]
+            Ryd = yTilde.T @ d.conj()
             
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
                 updateFilter = True
