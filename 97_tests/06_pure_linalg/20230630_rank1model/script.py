@@ -11,13 +11,13 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 6
+N_SENSORS = 5
 N_NODES = 3
 SELFNOISE_POWER = 1
-DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
-# DURATIONS = [20]
+# DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
+DURATIONS = [20]
 FS = 16e3
-N_MC = 10
+N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
 RANDOM_DELAYS = False
 
@@ -42,8 +42,13 @@ def main(
     # Set random seed
     np.random.seed(seed)
 
-    # For DANSE: randomly assign sensors to nodes
-    channelToNodeMap = np.random.randint(0, K, M)
+    # For DANSE: randomly assign sensors to nodes, ensuring that each node
+    # has at least one sensor
+    channelToNodeMap = np.zeros(M, dtype=int)
+    for k in range(K):
+        channelToNodeMap[k] = k
+    for n in range(K, M):
+        channelToNodeMap[n] = np.random.randint(0, K)
     # Sort
     channelToNodeMap = np.sort(channelToNodeMap)
 
@@ -102,10 +107,9 @@ def main(
                 'noiseOnlySigs': noiseSignals[:nSamples, :],
             }
 
-            # MWF
+            # MWF and GEVD-MWF
             filter = compute_filter(type='mwf', **kwargs)
             filterGEVD = compute_filter(type='gevdmwf', **kwargs)
-
             # Run DANSE
             filterDANSE = compute_filter(
                 type='danse',
@@ -113,11 +117,71 @@ def main(
                 **kwargs
             )
 
+            # Plot DANSE evolution
+            if 1:
+                for k in range(K):
+                    fig, ax = plt.subplots(1,1)
+                    fig.set_size_inches(8.5, 3.5)
+                    # Determine reference sensor index
+                    nodeChannels = np.where(channelToNodeMap == k)[0]
+                    idxRef = nodeChannels[0]  # first sensor of node k
+                    # Compute FAS + SPF
+                    rtf = scalings / scalings[idxRef]
+                    hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
+                    spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
+                    fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+                    # Plot DANSE evolution
+                    for m in range(M):
+                        lab = f'$[\\mathbf{{w}}_k^i]_{m+1}$'
+                        if m in nodeChannels:
+                            lab += f' (local)'
+                        if m == idxRef:
+                            lab += ' (reference)'
+                        ax.plot(
+                            np.abs(filterDANSE[m, :, k].T),
+                            f'C{m}.-',
+                            label=lab
+                        )
+                        if m == 0:
+                            ax.hlines(
+                                np.abs(fasAndSPF[m]),
+                                0,
+                                filterDANSE.shape[1] - 1,
+                                color=f'C{m}',
+                                linestyle='--',
+                                label=f'$[\\mathbf{{w}}_{{\\mathrm{{FAS}},k}}]_{m+1}$'
+                            )
+                        else:
+                            ax.hlines(
+                                np.abs(fasAndSPF[m]),
+                                0,
+                                filterDANSE.shape[1] - 1,
+                                color=f'C{m}',
+                                linestyle='--'
+                            )
+                    ax.set_title(f'Node $k=${k + 1}, channels {nodeChannels + 1}')
+                    # # Build and show legend
+                    # legendEntries = []
+                    # for n in range(filterDANSE.shape[0]):
+                    #     if channelToNodeMap[n] == k:
+                    #         entr = f'$w_{{{k}{k},{n+1}}}^{{i}}$'
+                    #     else:
+                    #         q = channelToNodeMap[n]
+                    #         entr = f'$w_{{{q},{q},m}}^{{i-1}} g_{{{k},{q}}}^{{i}}$'
+                    #     legendEntries.append(entr)
+                    ax.legend()
+                    ax.grid(which='both')
+                    plt.xlabel('Iteration index $i$')
+                    fig.tight_layout()
+                    if 1:
+                        fig.savefig(f'{EXPORT_FOLDER}/danse_evol_n{k+1}_dur{int(durations[ii] * 1e3)}ms.png', dpi=300, bbox_inches='tight')
+                    plt.show(block=False)
+
+
             # Compute difference between normalized estimated filters
             # and normalized expected filters
             diffsPerSensor = np.zeros(M)
             diffsPerSensorGEVD = np.zeros(M)
-            diffsPerSensorDANSE = np.zeros(M)
             for n in range(M):
                 rtf = scalings / scalings[n]
                 hs = np.sum(rtf ** 2) * sigma_sr[n] ** 2
@@ -125,10 +189,21 @@ def main(
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
                 diffsPerSensorGEVD[n] = np.mean(np.abs(filterGEVD[:, n] - fasAndSPF))
-                diffsPerSensorDANSE[n] = np.mean(np.abs(filterDANSE[:, n] - fasAndSPF))
+
+            diffsPerNodeDANSE = np.zeros(K)
+            for k in range(K):
+                # Determine reference sensor index
+                idxRef = np.where(channelToNodeMap == k)[0][0]
+                #
+                rtf = scalings / scalings[idxRef]
+                hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
+                spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
+                fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+                diffsPerNodeDANSE[k] = np.mean(np.abs(filterDANSE[:, k] - fasAndSPF))
+
             diff[idxMC, ii] = np.mean(diffsPerSensor)
             diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
-            diffDANSE[idxMC, ii] = np.mean(diffsPerSensorDANSE)
+            diffDANSE[idxMC, ii] = np.mean(diffsPerNodeDANSE)
 
         # Plots
         if 0:
@@ -156,13 +231,14 @@ def main(
     fig.set_size_inches(8.5, 3.5)
     axes.loglog(durations, diffGEVD.T, '-', color='#FFCACA')
     axes.loglog(durations, diff.T, '--', color='0.75')
-    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label='GEVD-MWF (mean)')
-    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label='MWF (mean)')
+    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label=f'GEVD-MWF (mean over $M$={M} sensors)')
+    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label=f'MWF (mean over $M$={M} sensors)')
+    axes.loglog(durations, np.mean(diffDANSE, axis=0), '.:', color='b', label=f'DANSE (mean over $K$={K} nodes)')
     plt.grid(which='both')
     axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
     plt.ylabel('Abs. diff. bw. MWF and FAS + SPF')
-    axes.set_title(f'{nMC} MC runs - $M$ = {M} sensors - target signal: "{SIGNAL_TYPE}"')
+    axes.set_title(f'{nMC} MC runs - target signal: "{SIGNAL_TYPE}"')
     fig.tight_layout()
     plt.show(block=False)
 
@@ -287,14 +363,19 @@ def run_danse(
     idxNodes = np.arange(nNodes)
     idxUpdatingNode = 0
     wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
-    # Run DANSE
+
+    for k in range(nNodes):
+        # Determine reference sensor index
+        idxRef = np.where(channelToNodeMap == k)[0][0]
+        wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
+    # Run DANSEz
     for iter in range(maxIter):
-        print(f'Iteration {iter+1}/{maxIter}')
+        print(f'DANSE iteration {iter+1}/{maxIter}')
         # Compute fused signals from all sensors
         fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
         for q in range(nNodes):
             yq = y[:, channelToNodeMap == q]
-            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter]
+            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter].conj()
             
         for k in range(nNodes):
             # Get y tilde
@@ -342,16 +423,14 @@ def run_danse(
             for m in range(x.shape[1]):
                 # Node index corresponding to channel `m`
                 currNode = channelToNodeMap[m]
-
                 # Count channel index within node
                 c = channelCount[currNode]
-
                 if currNode == k:
-                    wNet[m, iter, k] = w[k][c, iter + 1]  # use local filter coefficient
+                    wNet[m, iter + 1, k] = w[k][c, iter + 1]  # use local filter coefficient
                 else:
                     nChannels_k = np.sum(channelToNodeMap == k)
                     gkq = w[k][nChannels_k + neighborCount, iter + 1]
-                    wNet[m, iter, k] = w[currNode][c, iter] * gkq
+                    wNet[m, iter + 1, k] = w[currNode][c, iter] * gkq
                 channelCount[currNode] += 1
 
                 if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
@@ -366,29 +445,12 @@ def run_danse(
                 print(f'Convergence reached after {iter+1} iterations')
                 break
 
-    # Plot filter evolution
-    if 1:
-        fig, axs = plt.subplots(nNodes, 1, sharex=True)
-        for k in range(nNodes):
-            # axs[k].plot(np.abs(w[k][:, :(iter + 1)].T), '.-')
-            axs[k].plot(np.abs(wNet[:, :(iter + 1), k].T), '.-')
-            axs[k].set_title(f'Node {k + 1}')
-            # Build and show legend
-            legendEntries = []
-            for n in range(wNet.shape[0]):
-                if channelToNodeMap[n] == k:
-                    entr = f'$w_{{{k}{k},{n+1}}}^{{i}}$'
-                else:
-                    q = channelToNodeMap[n]
-                    entr = f'$w_{{{q},{q},m}}^{{i-1}} g_{{{k},{q}}}^{{i}}$'
-                legendEntries.append(entr)
-            axs[k].legend(legendEntries)
-        plt.xlabel('Iteration')
-        fig.tight_layout()
-        plt.show(block=False)
-    stop = 1
+    # Format for output
+    wOut = np.zeros((x.shape[1], iter + 2, nNodes), dtype=myDtype)
+    for k in range(nNodes):
+        wOut[:, :, k] = wNet[:, :(iter + 2), k]
 
-    return wNet
+    return wOut
 
 
 def danse_iteration(
