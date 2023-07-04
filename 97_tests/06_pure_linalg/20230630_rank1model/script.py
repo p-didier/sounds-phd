@@ -11,8 +11,8 @@ import soundfile as sf
 import matplotlib.pyplot as plt
 
 TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 10
-N_NODES = 3
+N_SENSORS = 4
+N_NODES = 4
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
 # DURATIONS = [5]
@@ -55,6 +55,7 @@ def main(
     diff = np.zeros((nMC, len(durations)))
     diffGEVD = np.zeros((nMC, len(durations)))
     diffDANSE = np.zeros((nMC, len(durations)))
+    diffGEVDDANSE = np.zeros((nMC, len(durations)))
     # scalings = np.random.uniform(low=50, high=100, size=M)
     scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
@@ -116,18 +117,33 @@ def main(
                 channelToNodeMap=channelToNodeMap,
                 **kwargs
             )
+            # Run GEVD-DANSE
+            filterGEVDDANSE = compute_filter(
+                type='gevddanse',
+                channelToNodeMap=channelToNodeMap,
+                **kwargs
+            )
 
             # Plot DANSE evolution
             if 0:
+                # plot_danse_evol(
+                #     K,
+                #     channelToNodeMap,
+                #     durations[ii],
+                #     filterDANSE,
+                #     scalings,
+                #     sigma_sr,
+                #     sigma_nr,
+                #     savefigs=True
+                # )
                 plot_danse_evol(
                     K,
                     channelToNodeMap,
                     durations[ii],
-                    filterDANSE,
+                    filterGEVDDANSE,
                     scalings,
                     sigma_sr,
-                    sigma_nr,
-                    savefigs=True
+                    sigma_nr
                 )
 
             # Compute difference between normalized estimated filters
@@ -140,9 +156,12 @@ def main(
                 spf = hs / (hs + sigma_nr[n] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
                 diffsPerSensor[n] = np.mean(np.abs(filter[:, n] - fasAndSPF))
-                diffsPerSensorGEVD[n] = np.mean(np.abs(filterGEVD[:, n] - fasAndSPF))
+                diffsPerSensorGEVD[n] = np.mean(np.abs(
+                    filterGEVD[:, n] - fasAndSPF
+                ))
 
             diffsPerNodeDANSE = np.zeros(K)
+            diffsPerNodeGEVDDANSE = np.zeros(K)
             for k in range(K):
                 # Determine reference sensor index
                 idxRef = np.where(channelToNodeMap == k)[0][0]
@@ -151,11 +170,17 @@ def main(
                 hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
                 spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
                 fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
-                diffsPerNodeDANSE[k] = np.mean(np.abs(filterDANSE[:, -1, k] - fasAndSPF))
+                diffsPerNodeDANSE[k] = np.mean(np.abs(
+                    filterDANSE[:, -1, k] - fasAndSPF
+                ))
+                diffsPerNodeGEVDDANSE[k] = np.mean(np.abs(
+                    filterGEVDDANSE[:, -1, k] - fasAndSPF
+                ))
 
             diff[idxMC, ii] = np.mean(diffsPerSensor)
             diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
             diffDANSE[idxMC, ii] = np.mean(diffsPerNodeDANSE)
+            diffGEVDDANSE[idxMC, ii] = np.mean(diffsPerNodeGEVDDANSE)
 
         # Plots
         if 0:
@@ -182,9 +207,11 @@ def main(
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(8.5, 3.5)
     axes.loglog(durations, diffGEVD.T, '-', color='#FFCACA')
+    axes.loglog(durations, diffGEVDDANSE.T, ':', color='#FACAFF')
     axes.loglog(durations, diff.T, '--', color='0.75')
     axes.loglog(durations, diffDANSE.T, ':', color='#CECAFF')
     axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label=f'GEVD-MWF (mean over $M$={M} sensors)')
+    axes.loglog(durations, np.mean(diffGEVDDANSE, axis=0), '.:', color='m', label=f'GEVD-DANSE (mean over $K$={K} nodes)')
     axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label=f'MWF (mean over $M$={M} sensors)')
     axes.loglog(durations, np.mean(diffDANSE, axis=0), '.:', color='b', label=f'DANSE (mean over $K$={K} nodes)')
     plt.grid(which='both')
@@ -348,6 +375,14 @@ def compute_filter(
         w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
     elif type == 'danse':
         w = run_danse(cleanSigs, noiseOnlySigs, channelToNodeMap)
+    elif type == 'gevddanse':
+        w = run_danse(
+            cleanSigs,
+            noiseOnlySigs,
+            channelToNodeMap,
+            filterType='gevd',
+            rank=rank
+        )
     return w
 
 
@@ -388,9 +423,12 @@ def run_danse(
         print(f'DANSE iteration {iter+1}/{maxIter}')
         # Compute fused signals from all sensors
         fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
+        fusedSignalsNoiseOnly = np.zeros((x.shape[0], nNodes), dtype=myDtype)
         for q in range(nNodes):
             yq = y[:, channelToNodeMap == q]
             fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter].conj()
+            nq = n[:, channelToNodeMap == q]
+            fusedSignalsNoiseOnly[:, q] = nq @ w[q][:nq.shape[1], iter].conj()
             
         for k in range(nNodes):
             # Get y tilde
@@ -398,9 +436,14 @@ def run_danse(
                 y[:, channelToNodeMap == k],
                 fusedSignals[:, idxNodes != k]
             ), axis=1)
+            nTilde = np.concatenate((
+                n[:, channelToNodeMap == k],
+                fusedSignalsNoiseOnly[:, idxNodes != k]
+            ), axis=1)
 
             # Compute covariance matrices
             Ryy = yTilde.T @ yTilde.conj()
+            Rnn = nTilde.T @ nTilde.conj()
             d = x[:, np.where(channelToNodeMap == k)[0][0]]
             Ryd = yTilde.T @ d.conj()
             
@@ -414,7 +457,6 @@ def run_danse(
                 if filterType == 'regular':
                     w[k][:, iter + 1] = np.linalg.inv(Ryy) @ Ryd
                 elif filterType == 'gevd':
-                    Rnn = n.T.conj() @ n
                     sigma, Xmat = la.eigh(Ryy, Rnn)
                     idx = np.flip(np.argsort(sigma))
                     sigma = sigma[idx]
@@ -422,7 +464,9 @@ def run_danse(
                     Qmat = np.linalg.inv(Xmat.T.conj())
                     Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
                     Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                    w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj()
+                    e = np.zeros(Ryy.shape[0])
+                    e[:rank] = 1
+                    w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
             else:
                 w[k][: , iter + 1] = w[k][: , iter]  # keep old filter
             
