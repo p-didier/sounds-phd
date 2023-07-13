@@ -5,26 +5,44 @@
 
 import sys
 import resampy
-import scipy.linalg as la
 import numpy as np
 import soundfile as sf
+from pathlib import Path
+import scipy.linalg as la
+from scipy.signal import stft
 import matplotlib.pyplot as plt
+from utils.online_danse import *
+sys.path.append('..')
 
-TARGET_SIGNAL = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 3
+RANDOM_DELAYS = False
+TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
+N_SENSORS = 5
 N_NODES = 3
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
-# DURATIONS = [5]
+# DURATIONS = [30]
 FS = 16e3
 N_MC = 1
-EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs'
-RANDOM_DELAYS = False
+EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/forPhDSU_20230707'
+EXPORT_FOLDER = None
 
 # Type of signal
 # SIGNAL_TYPE = 'speech'
 # SIGNAL_TYPE = 'noise_real'
 SIGNAL_TYPE = 'noise_complex'
+
+TO_COMPUTE = [
+    'mwf',
+    'gevdmwf',
+    # 'danse',
+    # 'gevddanse',
+    # 'danse_sim',
+    # 'gevddanse_sim',
+    # 'danse_online',
+    # 'gevddanse_online',
+    # 'danse_sim_online',
+    # 'gevddanse_sim_online'
+]
 
 SEED = 0
 
@@ -41,6 +59,7 @@ def main(
 
     # Set random seed
     np.random.seed(seed)
+    rngState = np.random.get_state()
 
     # For DANSE: randomly assign sensors to nodes, ensuring that each node
     # has at least one sensor
@@ -52,12 +71,9 @@ def main(
     # Sort
     channelToNodeMap = np.sort(channelToNodeMap)
 
-    diff = np.zeros((nMC, len(durations)))
-    diffGEVD = np.zeros((nMC, len(durations)))
-    diffDANSE = np.zeros((nMC, len(durations)))
-    diffGEVDDANSE = np.zeros((nMC, len(durations)))
-    diffDANSEsim = np.zeros((nMC, len(durations)))
-    diffGEVDDANSEsim = np.zeros((nMC, len(durations)))
+    # Set rng state back to original after the random assignment of sensors
+    np.random.set_state(rngState)
+
     # scalings = np.random.uniform(low=50, high=100, size=M)
     scalings = np.random.uniform(low=0.5, high=1, size=M)
     # Get clean signals
@@ -72,6 +88,9 @@ def main(
         maxDelay=0.1
     )
     sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+    toPlot = dict([
+        (key, np.zeros((nMC, len(durations)))) for key in TO_COMPUTE
+    ])
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
 
@@ -104,24 +123,28 @@ def main(
             nSamples = int(durations[ii] * fs)
             noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
 
-            kwargs = {
-                'noisySignals': noisySignals,
-                'cleanSigs': cleanSigs[:nSamples, :],
-                'noiseOnlySigs': noiseSignals[:nSamples, :],
-                'channelToNodeMap': channelToNodeMap
-            }
-            # MWF
-            filterMWF = compute_filter(type='mwf', **kwargs)
-            # GEVD-MWF
-            filterGEVDMWF = compute_filter(type='gevdmwf', **kwargs)
-            # DANSE (sequential node updating)
-            filterDANSE = compute_filter(type='danse', **kwargs)
-            # GEVD-DANSE (sequential node updating)
-            filterGEVDDANSE = compute_filter(type='gevddanse', **kwargs)
-            # DANSE (simultaneous node updating)
-            filterDANSEsim = compute_filter(type='danse_sim', **kwargs)
-            # GEVD-DANSE (simultaneous node updating)
-            filterGEVDDANSEsim = compute_filter(type='gevddanse_sim', **kwargs)
+            # Compute desired filters
+            filters = get_filters(
+                noisySignals,
+                cleanSigs[:nSamples, :],
+                noiseSignals[:nSamples, :],
+                channelToNodeMap,
+                # gevdRank=1,
+                gevdRank=int(cleanSigs.shape[1]),
+            )
+
+            if 0:
+                fig = plot_individual_run(
+                    filters,
+                    scalings,
+                    sigma_sr,
+                    sigma_nr,
+                    nSamples
+                )
+                fname = f'{EXPORT_FOLDER}/indiv/diff_1stSensor_{nSamples}samples'
+                if not Path( f'{EXPORT_FOLDER}/indiv/').is_dir():
+                    Path(f'{EXPORT_FOLDER}/indiv/').mkdir(parents=True, exist_ok=True)
+                fig.savefig(f'{fname}.png', dpi=300, bbox_inches='tight')
 
             # Plot DANSE evolution
             if 0:
@@ -129,110 +152,97 @@ def main(
                     K,
                     channelToNodeMap,
                     durations[ii],
-                    filterDANSE,
+                    filters[TO_COMPUTE[0]],
                     scalings,
                     sigma_sr,
                     sigma_nr,
-                    savefigs=True
+                    savefigs=True,
+                    figLabelRef=TO_COMPUTE[0]
                 )
+                stop = 1
             
-            # Compute difference between normalized estimated filters
-            # and normalized expected filters
-            diffsPerSensor = np.zeros(M)
-            diffsPerSensorGEVD = np.zeros(M)
-            for n in range(M):
-                rtf = scalings / scalings[n]
-                hs = np.sum(rtf ** 2) * sigma_sr[n] ** 2
-                spf = hs / (hs + sigma_nr[n] ** 2)  # spectral post-filter
-                fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
-                diffsPerSensor[n] = np.mean(np.abs(filterMWF[:, n] - fasAndSPF))
-                diffsPerSensorGEVD[n] = np.mean(np.abs(
-                    filterGEVDMWF[:, n] - fasAndSPF
-                ))
+            metrics = get_metrics(
+                M,
+                filters,
+                scalings,
+                sigma_sr,
+                sigma_nr,
+                channelToNodeMap
+            )
 
-            diffsPerNodeDANSE = np.zeros(K)
-            diffsPerNodeGEVDDANSE = np.zeros(K)
-            diffsPerNodeDANSEsim = np.zeros(K)
-            diffsPerNodeGEVDDANSEsim = np.zeros(K)
-            for k in range(K):
-                # Determine reference sensor index
-                idxRef = np.where(channelToNodeMap == k)[0][0]
-                #
-                rtf = scalings / scalings[idxRef]
-                hs = np.sum(rtf ** 2) * sigma_sr[idxRef] ** 2
-                spf = hs / (hs + sigma_nr[idxRef] ** 2)  # spectral post-filter
-                fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
-                diffsPerNodeDANSE[k] = np.mean(np.abs(
-                    filterDANSE[:, -1, k] - fasAndSPF
-                ))
-                diffsPerNodeGEVDDANSE[k] = np.mean(np.abs(
-                    filterGEVDDANSE[:, -1, k] - fasAndSPF
-                ))
-                diffsPerNodeDANSEsim[k] = np.mean(np.abs(
-                    filterDANSEsim[:, -1, k] - fasAndSPF
-                ))
-                diffsPerNodeGEVDDANSEsim[k] = np.mean(np.abs(
-                    filterGEVDDANSEsim[:, -1, k] - fasAndSPF
-                ))
+            # Store metrics
+            for key in metrics.keys():
+                toPlot[key][idxMC, ii] = metrics[key]
 
-            diff[idxMC, ii] = np.mean(diffsPerSensor)
-            diffGEVD[idxMC, ii] = np.mean(diffsPerSensorGEVD)
-            diffDANSE[idxMC, ii] = np.mean(diffsPerNodeDANSE)
-            diffGEVDDANSE[idxMC, ii] = np.mean(diffsPerNodeGEVDDANSE)
-            diffDANSEsim[idxMC, ii] = np.mean(diffsPerNodeDANSEsim)
-            diffGEVDDANSEsim[idxMC, ii] = np.mean(diffsPerNodeGEVDDANSEsim)
+    
+    # Plot results
+    fig = plot_final(durations, toPlot)
 
-        # Plots
-        if 0:
-            filteredSignals = np.zeros((nSamples, M))
-            filteredSignal_RTFs = np.zeros((nSamples, M))
-            for n in range(M):
-                filteredSignals[:, n] = noisySignals @ filterMWF[:, n]
-                # Compute filtered signal using RTFs
-                h = scalings / scalings[n]
-                h2 = np.sum(h ** 2)
-                hs = h2 * sigma_sr[n] ** 2
-                spf = hs / (hs + sigma_nr[n] ** 2)
-                filteredSignal_RTFs[:, n] = noisySignals @ h / h2 * spf
-            # plot_results(
-            #     cleanSigs[:nSamples, :],
-            #     noisySignals,
-            #     filteredSignals,
-            #     filteredSignal_RTFs
-            # )
-            plot_filter(filterMWF, scalings, sigma_sr, sigma_nr)
-            stop = 1
+    if EXPORT_FOLDER is not None:
+        fname = f'{EXPORT_FOLDER}/diff'
+        for t in TO_COMPUTE:
+            fname += f'_{t}'
+        if not Path(EXPORT_FOLDER).is_dir():
+            Path(EXPORT_FOLDER).mkdir(parents=True, exist_ok=True)
+        fig.savefig(f'{fname}.png', dpi=300, bbox_inches='tight')
 
-    # Plot difference
-    fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(8.5, 3.5)
-    axes.loglog(durations, diffGEVD.T, '-', color='#FFCACA')
-    axes.loglog(durations, diffGEVDDANSE.T, ':', color='#FACAFF')
-    axes.loglog(durations, diffGEVDDANSEsim.T, '-.', color='#CEFFCA')
-    axes.loglog(durations, diff.T, '--', color='0.75')
-    axes.loglog(durations, diffDANSE.T, ':', color='#CECAFF')
-    axes.loglog(durations, diffDANSEsim.T, '-.', color='#CAFFFC')
-    axes.loglog(durations, np.mean(diffGEVD, axis=0), '.-', color='r', label=f'GEVD-MWF (mean over $M$={M} sensors)')
-    axes.loglog(durations, np.mean(diffGEVDDANSE, axis=0), '.:', color='m', label=f'GEVD-DANSE (mean over $K$={K} nodes)')
-    axes.loglog(durations, np.mean(diffGEVDDANSEsim, axis=0), '.-.', color='g', label=f'rS-GEVD-DANSE (mean over $K$={K} nodes)')
-    axes.loglog(durations, np.mean(diff, axis=0), '.--', color='k', label=f'MWF (mean over $M$={M} sensors)')
-    axes.loglog(durations, np.mean(diffDANSE, axis=0), '.:', color='b', label=f'DANSE (mean over $K$={K} nodes)')
-    axes.loglog(durations, np.mean(diffDANSEsim, axis=0), '.-.', color='c', label=f'rS-DANSE (mean over $K$={K} nodes)')
-    plt.grid(which='both')
-    axes.legend(loc='lower left')
-    plt.xlabel('Signal duration (s)')
-    plt.ylabel('Abs. diff. bw. MWF and FAS + SPF')
-    axes.set_title(f'{nMC} MC runs - target signal: "{SIGNAL_TYPE}"')
+    stop = 1
+
+
+def plot_individual_run(filters: dict, scalings, sigma_sr, sigma_nr, nSamples):
+    """Plot a visual comparison of the estimate filters with the FAS-SPF,
+    for a single MC run, using the absolulte values."""
+    
+    # Compute FAS + SPF
+    rtf = scalings / scalings[0]
+    hs = np.sum(rtf ** 2) * sigma_sr[0] ** 2
+    spf = hs / (hs + sigma_nr[0] ** 2)  # spectral post-filter
+    fasAndSPF = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+
+    # Plot comparison in absolute value, for each filter and the first sensor
+    fig, axs = plt.subplots(1, 1)
+    fig.set_size_inches(8.5, 2.5)
+    for key in filters.keys():
+        axs.plot(np.abs(filters[key][:, 0]), '.-', label=key)
+    axs.plot(np.abs(fasAndSPF), '.-',label='FAS + SPF')
+    axs.legend()
+    axs.grid(which='both')
+    axs.set_title(f'{nSamples} samples signals')
+    axs.set_xlabel('Filter coefficients (absolute value)')
     fig.tight_layout()
     plt.show(block=False)
 
-    if 0:
-        fname = f'{EXPORT_FOLDER}/diff'
-        if RANDOM_DELAYS:
-            fname += '_randomDelays'
-        fig.savefig(f'{fname}_{SIGNAL_TYPE}.png', dpi=300, bbox_inches='tight')
+    return fig
 
-    stop = 1
+
+
+def plot_final(durations, toPlot: dict):
+
+    nMC = toPlot[list(toPlot.keys())[0]].shape[0]
+    fig, axes = plt.subplots(1,1)
+    fig.set_size_inches(8.5, 3.5)
+    for ii, key in enumerate(toPlot.keys()):
+        baseColor = f'C{ii}'
+        lineStyle = np.random.choice(['-', '--', '-.', ':'])
+        # Add a patch of color to show the range of values across MC runs
+        axes.fill_between(
+            durations,
+            np.amin(toPlot[key], axis=0),
+            np.amax(toPlot[key], axis=0),
+            color=f'{baseColor}',
+            alpha=0.2
+        )
+        # axes.loglog(durations, toPlot[key].T, f'{baseColor}.{lineStyle}', alpha=0.5)
+        axes.loglog(durations, np.mean(toPlot[key], axis=0), f'{baseColor}.{lineStyle}', label=key)
+    plt.grid(which='both')
+    axes.legend(loc='lower left')
+    plt.xlabel('Signal duration (s)')
+    plt.ylabel('Abs. diff. $\\Delta$ bw. filter and FAS + SPF')
+    axes.set_title(f'{nMC} MC runs')
+    fig.tight_layout()
+    plt.show(block=False)
+
+    return fig
 
 
 def plot_danse_evol(
@@ -243,13 +253,14 @@ def plot_danse_evol(
         scalings,
         sigma_sr,
         sigma_nr,
-        savefigs=False
+        savefigs=False,
+        figLabelRef=''
     ):
     """ Plot DANSE evolution. """
     nSensors = filterDANSE.shape[0]
     for k in range(K):
         fig, ax = plt.subplots(1,1)
-        fig.set_size_inches(8.5, .5)
+        fig.set_size_inches(8.5, 2.5)
         # Determine reference sensor index
         nodeChannels = np.where(channelToNodeMap == k)[0]
         idxRef = nodeChannels[0]  # first sensor of node k
@@ -264,7 +275,7 @@ def plot_danse_evol(
             if m in nodeChannels:
                 lab += f' (local)'
             if m == idxRef:
-                lab += ' (reference)'
+                lab += ' (ref.)'
             ax.plot(
                 np.abs(filterDANSE[m, :, k].T),
                 f'C{m}.-',
@@ -277,7 +288,7 @@ def plot_danse_evol(
                     filterDANSE.shape[1] - 1,
                     color=f'C{m}',
                     linestyle='--',
-                    label=f'$[\\mathbf{{w}}_{{\\mathrm{{FAS}},k}}]_{m+1}$'
+                    label=f'$[\\mathbf{{w}}_{{\\mathrm{{MF}},k}}]_{m+1}\\cdot\\mathrm{{SPS}}_{m+1}$'
                 )
             else:
                 ax.hlines(
@@ -288,12 +299,12 @@ def plot_danse_evol(
                     linestyle='--'
                 )
         ax.set_title(f'Node $k=${k + 1}, channels {nodeChannels + 1}')
-        ax.legend()
+        ax.legend(loc='upper right')
         ax.grid(which='both')
         plt.xlabel('Iteration index $i$')
-        fig.tight_layout()
+        # fig.tight_layout()
         if savefigs:
-            fig.savefig(f'{EXPORT_FOLDER}/danse_evol_n{k+1}_dur{int(dur * 1e3)}ms.png', dpi=300, bbox_inches='tight')
+            fig.savefig(f'{EXPORT_FOLDER}/danse_evol_n{k+1}_dur{int(dur * 1e3)}ms_{figLabelRef}.png', dpi=300, bbox_inches='tight')
         plt.show(block=False)
 
 
@@ -358,6 +369,7 @@ def compute_filter(
 
     nSensors = cleanSigs.shape[1]
     Ryy = noisySignals.T.conj() @ noisySignals
+    Rnn = noiseOnlySigs.T.conj() @ noiseOnlySigs
     if type == 'mwf':
         RyyInv = np.linalg.inv(Ryy)
         if np.iscomplex(cleanSigs).any():
@@ -365,10 +377,13 @@ def compute_filter(
         else:
             w = np.zeros((nSensors, nSensors))
         for n in range(nSensors):
-            Ryd = noisySignals.T.conj() @ cleanSigs[:, n]
-            w[:, n] = RyyInv @ Ryd
+            # ryd = noisySignals.T.conj() @ cleanSigs[:, n]
+            # Selection vector
+            e = np.zeros(nSensors)
+            e[n] = 1
+            ryd = (Ryy - Rnn) @ e
+            w[:, n] = RyyInv @ ryd
     elif type == 'gevdmwf':
-        Rnn = noiseOnlySigs.T.conj() @ noiseOnlySigs
         sigma, Xmat = la.eigh(Ryy, Rnn)
         idx = np.flip(np.argsort(sigma))
         sigma = sigma[idx]
@@ -390,7 +405,13 @@ def compute_filter(
         else:
             kwargs['nodeUpdatingStrategy'] = 'sequential'
 
-        w = run_danse(**kwargs) 
+        if 'online' in type:
+            kwargs['nfft'] = 1024
+            kwargs['hop'] = 512
+            kwargs['referenceSensorIdx'] = 0
+            w = run_online_danse(**kwargs)
+        else:
+            w = run_danse(**kwargs) 
     return w
 
 
@@ -428,9 +449,9 @@ def run_danse(
         wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
     # Run DANSE
     if nodeUpdatingStrategy == 'sequential':
-        label = 'DANSE [seq NU]'
+        label = 'Batch DANSE [seq NU]'
     else:
-        label = 'DANSE [sim NU]'
+        label = 'Batch DANSE [sim NU]'
     if filterType == 'gevd':
         label += ' [GEVD]'
     for iter in range(maxIter):
@@ -534,62 +555,113 @@ def run_online_danse(
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
+        nfft=1024,
+        hop=512,
+        windowType='sqrt-hann',
+        referenceSensorIdx=0,
+        fs=16000,
     ):
 
-    maxIter = 100
-    tol = 1e-9
-    # Get noisy signal
+    # Check that signals are real-valued
+    if np.iscomplex(x).any() or np.iscomplex(n).any():
+        raise ValueError('Online DANSE only implemented for real-valued signals')
+
+    # Get noisy signal (time-domain)
     y = x + n
     # Get number of nodes
     nNodes = np.amax(channelToNodeMap) + 1
-    # Determine data type (complex or real)
-    myDtype = np.complex128 if np.iscomplex(x).any() else np.float64
+
+    # Get window
+    win = get_window(windowType, nfft)
+
+    # Convert to STFT domain using SciPy
+    kwargs = {
+        'fs': fs,
+        'window': win,
+        'nperseg': nfft,
+        'nfft': nfft,
+        'noverlap': nfft - hop,
+        'return_onesided': True,
+        'axis': 0
+    }
+    x_stft = stft(x, **kwargs)[2]
+    y_stft = stft(y, **kwargs)[2]
+    n_stft = stft(n, **kwargs)[2]
+    # Reshape
+    x_stft = x_stft.reshape((x_stft.shape[0], -1, nNodes))
+    y_stft = y_stft.reshape((y_stft.shape[0], -1, nNodes))
+    n_stft = n_stft.reshape((n_stft.shape[0], -1, nNodes))
+    nIter = x_stft.shape[1]
+
+    # Select one frequency bin to work with
+    freqIdx = 100  # HARDCODED
+    x_in = x_stft[freqIdx, :, :]
+    y_in = y_stft[freqIdx, :, :]
+    n_in = n_stft[freqIdx, :, :]
+    
     # Initialize
-    raise NotImplementedError('Online DANSE not implemented yet')
     w = []
+    dimYtilde = np.zeros(nNodes, dtype=int)
     for k in range(nNodes):
         nSensorsPerNode = np.sum(channelToNodeMap == k)
-        wCurr = np.zeros((nSensorsPerNode + nNodes - 1, maxIter), dtype=myDtype)
-        wCurr[0, :] = 1
+        dimYtilde[k] = nSensorsPerNode + nNodes - 1
+        wCurr = np.zeros((dimYtilde[k], nIter), dtype=np.complex128)
+        wCurr[referenceSensorIdx, :] = 1
         w.append(wCurr)
-    idxNodes = np.arange(nNodes)
-    idxUpdatingNode = 0
-    wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
-
+    Ryy = []
+    Rnn = []
+    ryd = []
     for k in range(nNodes):
-        # Determine reference sensor index
-        idxRef = np.where(channelToNodeMap == k)[0][0]
-        wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
-    # Run DANSEz
-    for iter in range(maxIter):
-        print(f'DANSE iteration {iter+1}/{maxIter}')
+        Ryy.append(np.zeros((dimYtilde[k], dimYtilde[k]), dtype=np.complex128))
+        Rnn.append(np.zeros((dimYtilde[k], dimYtilde[k]), dtype=np.complex128))
+        ryd.append(np.zeros(dimYtilde[k], dtype=np.complex128))
+    
+    wNet = np.zeros((x_in.shape[1], nIter, nNodes), dtype=np.complex128)
+    idxUpdatingNode = 0
+    if nodeUpdatingStrategy == 'sequential':
+        label = 'Online DANSE [seq NU]'
+    else:
+        label = 'Online DANSE [sim NU]'
+    if filterType == 'gevd':
+        label += ' [GEVD]'
+    # Loop over frames
+    for i in range(nIter - 1):
+        print(f'{label} iteration {i+1}/{nIter}')
         # Compute fused signals from all sensors
-        fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
-        fusedSignalsNoiseOnly = np.zeros((x.shape[0], nNodes), dtype=myDtype)
+        fusedSignals = np.zeros(nNodes, dtype=np.complex128)
+        fusedSignalsNoiseOnly = np.zeros(nNodes, dtype=np.complex128)
         for q in range(nNodes):
-            yq = y[:, channelToNodeMap == q]
-            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter].conj()
-            nq = n[:, channelToNodeMap == q]
-            fusedSignalsNoiseOnly[:, q] = nq @ w[q][:nq.shape[1], iter].conj()
-            
+            yq = y_in[i, channelToNodeMap == q]
+            fusedSignals[q] = yq @ w[q][:len(yq), i].conj()
+            nq = n_in[i, channelToNodeMap == q]
+            fusedSignalsNoiseOnly[q] = nq @ w[q][:len(nq), i].conj()
+        
+        # Loop over nodes
         for k in range(nNodes):
             # Get y tilde
             yTilde = np.concatenate((
-                y[:, channelToNodeMap == k],
-                fusedSignals[:, idxNodes != k]
-            ), axis=1)
+                y_in[i, channelToNodeMap == k],
+                fusedSignals[channelToNodeMap != k]
+            ), axis=0)
             nTilde = np.concatenate((
-                n[:, channelToNodeMap == k],
-                fusedSignalsNoiseOnly[:, idxNodes != k]
-            ), axis=1)
+                n_in[i, channelToNodeMap == k],
+                fusedSignalsNoiseOnly[channelToNodeMap != k]
+            ), axis=0)
 
             # Compute covariance matrices
-            Ryy = yTilde.T @ yTilde.conj()
-            Rnn = nTilde.T @ nTilde.conj()
-            d = x[:, np.where(channelToNodeMap == k)[0][0]]
-            Ryd = yTilde.T @ d.conj()
-            
+            RyyCurr = np.outer(yTilde, yTilde.conj())
+            RnnCurr = np.outer(nTilde, nTilde.conj())
+            d = x_in[i, np.where(channelToNodeMap == k)[0][0]]
+            rydCurr = yTilde.T * d.conj()
+            # Update covariance matrices
+            Ryy[k] = (1 - 1 / (i + 1)) * Ryy[k] + 1 / (i + 1) * RyyCurr
+            Rnn[k] = (1 - 1 / (i + 1)) * Rnn[k] + 1 / (i + 1) * RnnCurr
+            ryd[k] = (1 - 1 / (i + 1)) * ryd[k] + 1 / (i + 1) * rydCurr
+
+            # Update filter
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
+                updateFilter = True
+            elif nodeUpdatingStrategy == 'simultaneous':
                 updateFilter = True
             else:
                 updateFilter = False
@@ -597,60 +669,56 @@ def run_online_danse(
             if updateFilter:
                 # Compute filter
                 if filterType == 'regular':
-                    w[k][:, iter + 1] = np.linalg.inv(Ryy) @ Ryd
+                    w[k][:, i + 1] = np.linalg.inv(Ryy[k]) @ ryd[k]
                 elif filterType == 'gevd':
-                    sigma, Xmat = la.eigh(Ryy, Rnn)
+                    sigma, Xmat = la.eigh(Ryy[k], Rnn[k])
                     idx = np.flip(np.argsort(sigma))
                     sigma = sigma[idx]
                     Xmat = Xmat[:, idx]
                     Qmat = np.linalg.inv(Xmat.T.conj())
-                    Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
+                    Dmat = np.zeros((Ryy[k].shape[0], Ryy[k].shape[0]))
                     Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                    e = np.zeros(Ryy.shape[0])
+                    e = np.zeros(Ryy[k].shape[0])
                     e[:rank] = 1
-                    w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
+                    w[k][:, i + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
             else:
-                w[k][: , iter + 1] = w[k][: , iter]  # keep old filter
-            
+                w[k][: , i + 1] = w[k][: , i]
+
         # Update node index
         if nodeUpdatingStrategy == 'sequential':
             idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
-
+        
         # Compute network-wide filters
         for k in range(nNodes):
             channelCount = np.zeros(nNodes, dtype=int)
             neighborCount = 0
-            for m in range(x.shape[1]):
+            for m in range(x_in.shape[1]):
                 # Node index corresponding to channel `m`
                 currNode = channelToNodeMap[m]
                 # Count channel index within node
                 c = channelCount[currNode]
                 if currNode == k:
-                    wNet[m, iter + 1, k] = w[k][c, iter + 1]  # use local filter coefficient
+                    wNet[m, i + 1, k] = w[k][c, i + 1]
                 else:
                     nChannels_k = np.sum(channelToNodeMap == k)
-                    gkq = w[k][nChannels_k + neighborCount, iter + 1]
-                    wNet[m, iter + 1, k] = w[currNode][c, iter] * gkq
+                    gkq = w[k][nChannels_k + neighborCount, i + 1]
+                    wNet[m, i + 1, k] = w[currNode][c, i] * gkq
                 channelCount[currNode] += 1
-
+                
                 if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
                     neighborCount += 1
-        
-        # Check convergence
-        if iter > 0:
-            diff = 0
-            for k in range(nNodes):
-                diff += np.mean(np.abs(w[k][:, iter + 1] - w[k][:, iter]))
-            if diff < tol:
-                print(f'Convergence reached after {iter+1} iterations')
-                break
 
-    # Format for output
-    wOut = np.zeros((x.shape[1], iter + 2, nNodes), dtype=myDtype)
-    for k in range(nNodes):
-        wOut[:, :, k] = wNet[:, :(iter + 2), k]
+    # Plot
+    if 0:
+        fig, axs = plt.subplots(1, 1)
+        fig.set_size_inches(8.5, 3.5)
+        for k in range(nNodes):
+            axs.plot(np.abs(w[k][referenceSensorIdx, :]), label=f'Node {k+1}')
+        axs.set_title('Online DANSE - Ref. sensor |w|')
+        axs.legend()
+        plt.show(block=False)
 
-    return wOut
+    return wNet
 
 
 def get_clean_signals(
@@ -664,7 +732,7 @@ def get_clean_signals(
     ):
     # Load target signal
     if sigType == 'speech':
-        latentSignal, fs = sf.read(TARGET_SIGNAL)
+        latentSignal, fs = sf.read(TARGET_SIGNAL_SPEECHFILE)
         if fs != fsTarget:
             # Resample
             latentSignal = resampy.resample(
@@ -695,6 +763,62 @@ def get_clean_signals(
             cleanSigs[:, n] = np.roll(cleanSigs[:, n], delay)
 
     return cleanSigs, latentSignal
+
+
+def get_filters(
+        noisySignals,
+        cleanSigs,
+        noiseSignals,
+        channelToNodeMap,
+        gevdRank=1
+    ):
+    """Compute filters."""
+    kwargs = {
+        'noisySignals': noisySignals,
+        'cleanSigs': cleanSigs,
+        'noiseOnlySigs': noiseSignals,
+        'channelToNodeMap': channelToNodeMap,
+        'rank': gevdRank
+    }
+    filters = {}
+    for filterType in TO_COMPUTE:
+        filters[filterType] = compute_filter(type=filterType, **kwargs)
+
+    return filters
+
+
+def get_metrics(M, filters, scalings, sigma_sr, sigma_nr, channelToNodeMap):
+    
+    # Compute FAS + SPF
+    fasAndSPF = np.zeros((M, M))
+    for m in range(M):
+        rtf = scalings / scalings[m]
+        hs = np.sum(rtf ** 2) * sigma_sr[m] ** 2
+        spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter
+        fasAndSPF[:, m] = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+
+    # Compute difference between normalized estimated filters
+    # and normalized expected filters
+    diffs = {}
+    for filterType in TO_COMPUTE:
+        nFilters = filters[filterType].shape[-1]
+        diffsPerCoefficient = np.zeros(nFilters)
+        for m in range(nFilters):
+            if 'danse' in filterType:  # DANSE case
+                # Determine reference sensor index
+                idxRef = np.where(channelToNodeMap == m)[0][0]
+                currFilt = filters[filterType][:, -1, m]
+            else:
+                idxRef = m
+                currFilt = filters[filterType][:, m]
+            
+            diffsPerCoefficient[m] = np.mean(np.abs(
+                currFilt - fasAndSPF[:, idxRef]
+            ))
+        diffs[filterType] = np.mean(diffsPerCoefficient)
+
+    return diffs
+
 
 if __name__ == '__main__':
     sys.exit(main())
