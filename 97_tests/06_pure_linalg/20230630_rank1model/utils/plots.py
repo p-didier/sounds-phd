@@ -55,7 +55,7 @@ def plot_final(durations, taus, toPlot: dict):
                 np.amin(toPlot[key][:, :, jj], axis=0),
                 np.amax(toPlot[key][:, :, jj], axis=0),
                 color=baseColor,
-                alpha=0.2
+                alpha=0.15
             )
             tauLabel = f'tau{taus[jj]}'
             # Replace dot (".") by "p"
@@ -67,7 +67,7 @@ def plot_final(durations, taus, toPlot: dict):
                 label=f'{key}_{tauLabel}'
             )
     plt.grid(which='both')
-    axes.legend(loc='lower left')
+    # axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
     plt.ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
     axes.set_title(f'{nMC} MC runs')
@@ -354,11 +354,12 @@ def plot_online_mwf_evol(
         sigma_nr,
         savefigs=False,
         figLabelRef='',
-        exportFolder=''
+        exportFolder='',
+        beta=None
     ):
     """ Plot MWF evolution for non-WOLA online processing. """
 
-    nSensors = filterMWF.shape[0]
+    nSensors = filterMWF.shape[-1]
     for m in range(nSensors):
         # Compute FAS + SPF
         rtf = scalings / scalings[m]  # relative transfer functions at ref. sensor
@@ -370,10 +371,10 @@ def plot_online_mwf_evol(
         fig, ax = plt.subplots(1,1)
         fig.set_size_inches(8.5, 2.5)
         # Plot DANSE evolution
-        for m2 in range(nSensors):
+        for m2 in range(filterMWF.shape[0]):  # loop over filter taps
             lab = f'$[\\hat{{\\mathbf{{w}}}}_{m+1}^i]_{m2+1}$'
-            ax.plot(
-                np.abs(filterMWF[m, m2, :].T),
+            ax.semilogy(
+                np.abs(filterMWF[m2, :, m].T),
                 f'C{m2}.-',
                 label=lab
             )
@@ -381,7 +382,7 @@ def plot_online_mwf_evol(
                 ax.hlines(
                     np.abs(fasAndSPF[m2]),
                     0,
-                    filterMWF.shape[-1] - 1,
+                    filterMWF.shape[1] - 1,
                     color=f'C{m2}',
                     linestyle='--',
                     label=f'$[\\mathbf{{w}}_{{\\mathrm{{MF}},k}}]_{m+1}\\cdot\\mathrm{{SPS}}_{m+1}$'
@@ -390,12 +391,15 @@ def plot_online_mwf_evol(
                 ax.hlines(
                     np.abs(fasAndSPF[m2]),
                     0,
-                    filterMWF.shape[-1] - 1,
+                    filterMWF.shape[1] - 1,
                     color=f'C{m2}',
                     linestyle='--'
                 )
 
-        ax.set_title(f'Sensor $k=${m + 1}')
+        ti = f'Sensor $k=${m + 1}'
+        if beta is not None:
+            ti += f', $\\beta={np.round(beta, 3)}$'
+        ax.set_title(ti)
         ax.legend(loc='upper right')
         ax.grid(which='both')
         plt.xlabel('Iteration index $i$')

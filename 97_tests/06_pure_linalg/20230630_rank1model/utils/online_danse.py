@@ -292,8 +292,7 @@ def run_online_danse(
     w = []
     dimYtilde = np.zeros(nNodes, dtype=int)
     for k in range(nNodes):
-        nSensorsPerNode = np.sum(channelToNodeMap == k)
-        dimYtilde[k] = nSensorsPerNode + nNodes - 1
+        dimYtilde[k] = np.sum(channelToNodeMap == k) + nNodes - 1
         wCurr = np.zeros((dimYtilde[k], nIter), dtype=np.complex128)
         wCurr[referenceSensorIdx, :] = 1
         w.append(wCurr)
@@ -308,7 +307,15 @@ def run_online_danse(
             (dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
-    
+        # Ryy.append(
+        #     np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k])) +\
+        #     1j * np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k]))
+        # )
+        # Rnn.append(
+        #     np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k])) +\
+        #     1j * np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k]))
+        # )
+
     wNet = np.zeros(
         (nSensors, nIter, nNodes),
         dtype=np.complex128
@@ -324,6 +331,8 @@ def run_online_danse(
     # Loop over frames
     for i in range(nIter - 1):
         print(f'{label} iteration {i+1}/{nIter}')
+        idxBegFrame = i * L
+        idxEndFrame = (i + 1) * L
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
             (L, nNodes),
@@ -333,13 +342,11 @@ def run_online_danse(
             (L, nNodes),
             dtype=np.complex128
         )
-        idxBegFrame = i * L
-        idxEndFrame = (i + 1) * L
-        for q in range(nNodes):
-            yq = y[idxBegFrame:idxEndFrame, channelToNodeMap == q]
-            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], i].conj()
-            nq = n[idxBegFrame:idxEndFrame, channelToNodeMap == q]
-            fusedSignalsNoiseOnly[:, q] = nq @ w[q][:yq.shape[1], i].conj()
+        for k in range(nNodes):
+            yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
+            nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
+            fusedSignals[:, k] = yk @ w[k][:yk.shape[1], i].conj()
+            fusedSignalsNoiseOnly[:, k] = nk @ w[k][:nk.shape[1], i].conj()
         
         # Loop over nodes
         for k in range(nNodes):
@@ -357,8 +364,12 @@ def run_online_danse(
             RyyCurr = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
             # Update covariance matrices
-            Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-            Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            if i > 2:
+                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
+                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            else:
+                Ryy[k] = RyyCurr
+                Rnn[k] = RnnCurr
 
             # Check if filter ought to be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
@@ -369,11 +380,11 @@ def run_online_danse(
                 updateFilter = False
             if updateFilter:
                 # Check if Ryy is full rank
-                if np.any(np.linalg.matrix_rank(Ryy[k]) < dimYtilde[k]):
+                if np.linalg.matrix_rank(Ryy[k]) < dimYtilde[k]:
                     print(f'Rank-deficient Ryy[{k}]')
                     updateFilter = False
                 # Check if Rnn is full rank
-                if np.any(np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]):
+                if np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]:
                     print(f'Rank-deficient Rnn[{k}]')
                     updateFilter = False
 
@@ -405,22 +416,25 @@ def run_online_danse(
         
         # Compute network-wide filters
         for k in range(nNodes):
+            Mk = np.sum(channelToNodeMap == k)
             channelCount = np.zeros(nNodes, dtype=int)
             neighborCount = 0
             for m in range(nSensors):
                 # Node index corresponding to channel `m`
                 currNode = channelToNodeMap[m]
-                # Count channel index within node
-                c = channelCount[currNode]
-                if currNode == k:
-                    wNet[m, i + 1, k] = w[k][c, i + 1]
-                else:
-                    nChannels_k = np.sum(channelToNodeMap == k)
-                    gkq = w[k][nChannels_k + neighborCount, i + 1]
-                    wNet[m, i + 1, k] = w[currNode][c, i] * gkq
+                # Channel index within node
+                cIdx = channelCount[currNode]
+                if currNode == k:  # current node channel
+                    wNet[m, i + 1, k] = w[currNode][cIdx, i + 1]
+                else:  # neighbor node channel
+                    gkq = w[k][Mk + neighborCount, i + 1]
+                    wNet[m, i + 1, k] = w[currNode][cIdx, i] * gkq
+                    # If we have reached the last channel of the current 
+                    # neighbor node, increment neighbor count
+                    if cIdx == np.sum(channelToNodeMap == currNode) - 1:
+                        neighborCount += 1
                 channelCount[currNode] += 1
-                
-                if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
-                    neighborCount += 1
+
+        stop = 1    
 
     return wNet

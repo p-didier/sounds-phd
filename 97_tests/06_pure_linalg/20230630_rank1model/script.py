@@ -22,12 +22,12 @@ N_SENSORS = 5
 N_NODES = 5
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
-# DURATIONS = [30]
+# DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
+# DURATIONS = [20]
 FS = 16e3
 N_MC = 10
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/forPhDSU_20230719'
 # EXPORT_FOLDER = None
-# TAUS = [.8, 1.2, 2.]
 TAUS = [2., 4., 8.]
 # TAUS = [2.]
 B = 0.1  # factor for beta in WOLA
@@ -45,9 +45,10 @@ TO_COMPUTE = [
     # 'danse_sim',
     # 'gevddanse_sim',
     'mwf_online',
+    # 'gevdmwf_online',
     # 'danse_online',
     # 'gevddanse_online',
-    # 'danse_sim_online',
+    'danse_sim_online',
     # 'gevddanse_sim_online'
     # 'danse_wola',
     # 'gevddanse_wola',
@@ -60,7 +61,7 @@ SEED = 0
 WOLA_PARAMS = WOLAparameters(
     fs=FS,
     betaDanse=0.75,
-    nfft=1024,
+    # nfft=4096,
 )
 
 def main(
@@ -160,7 +161,7 @@ def main(
                 )
 
                 # Plot online MWF evolution
-                if 1:
+                if 0:
                     plot_online_mwf_evol(
                         durations[ii],
                         filters['mwf_online'],
@@ -169,8 +170,34 @@ def main(
                         sigma_nr,
                         savefigs=False,
                         figLabelRef=TO_COMPUTE[0],
-                        exportFolder=EXPORT_FOLDER
+                        exportFolder=EXPORT_FOLDER,
+                        beta=wolaParams.betaDanse
                     )
+
+                if 0:
+                    # Plot filters
+                    subfolder = f'{EXPORT_FOLDER}/evol_2'
+                    # subfolder = f'{EXPORT_FOLDER}/evol_3_3nodes'
+                    for ii in range(filters['mwf_online'].shape[1]):
+                        fig, axes = plt.subplots(1,1)
+                        fig.set_size_inches(8.5, 3.5)
+                        for m in range(M):
+                            # axes.plot(np.abs(filters['danse'][:, -1, m]), f'C{m}s-')
+                            axes.plot(np.abs(filters['mwf'][:, m]),  f'C{m}o--')
+                            axes.plot(np.abs(filters['mwf_online'][:, ii, m]),  f'C{m}x-.')
+                            axes.plot(np.abs(filters['danse_sim_online'][:, ii, m]),  f'C{m}d:')
+                            if m == 0:
+                                axes.legend(['Batch-MWF', 'Online MWF', 'Online DANSE'])
+                        axes.set_ylim([0.1, 0.25])
+                        axes.set_xlabel('Tap index')
+                        axes.set_ylabel('Filter magnitude')
+                        axes.set_title(f'Online DANSE iteration {ii+1}/{filters["mwf_online"].shape[1]}')
+                        axes.grid(True)
+                        fig.tight_layout()
+                        if not Path(subfolder).is_dir():
+                            Path(subfolder).mkdir(parents=True, exist_ok=True)
+                        fig.savefig(f'{subfolder}/online_danse_evol_{ii}.png', dpi=300, bbox_inches='tight')
+                        plt.close(fig)
 
                 stop = 1
 
@@ -265,9 +292,7 @@ def compute_filter(
         w = run_online_mwf(
             x=cleanSigs,
             n=noiseOnlySigs,
-            channelToNodeMap=channelToNodeMap,
             filterType='regular',
-            rank=rank,
             L=wolaParams.nfft,
             beta=wolaParams.betaDanse
         )
@@ -284,7 +309,6 @@ def compute_filter(
         w = run_online_mwf(
             x=cleanSigs,
             n=noiseOnlySigs,
-            channelToNodeMap=channelToNodeMap,
             filterType='gevd',
             rank=rank,
             L=wolaParams.nfft,
@@ -543,9 +567,12 @@ def get_metrics(M, filters, scalings, sigma_sr, sigma_nr, channelToNodeMap):
         nFilters = filters[filterType].shape[-1]
         diffsPerCoefficient = np.zeros(nFilters)
         for m in range(nFilters):
-            if 'danse' in filterType:  # DANSE case
+            if 'danse' in filterType or 'online' in filterType:  # DANSE case
                 # Determine reference sensor index
-                idxRef = np.where(channelToNodeMap == m)[0][0]
+                if 'danse' in filterType:
+                    idxRef = np.where(channelToNodeMap == m)[0][0]
+                else:
+                    idxRef = m
                 currFilt = filters[filterType][:, -1, m]
             else:
                 idxRef = m
