@@ -9,11 +9,9 @@ import resampy
 import numpy as np
 import soundfile as sf
 from pathlib import Path
-from utils.plots import *
 import scipy.linalg as la
-from scipy.signal import stft
+from utils.plots import *
 from utils.online_mwf import *
-import matplotlib.pyplot as plt
 from utils.online_danse import *
 sys.path.append('..')
 
@@ -22,15 +20,15 @@ TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 5
 N_NODES = 3
 SELFNOISE_POWER = 1
-DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
+# DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
-# DURATIONS = [20]
+DURATIONS = [5]
 FS = 16e3
-N_MC = 10
+N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/forPhDSU_20230719'
 # EXPORT_FOLDER = None
-# TAUS = [2., 4., 8.]
-TAUS = [2.]
+TAUS = [2., 4., 8.]
+# TAUS = [2.]
 B = 0.1  # factor for beta in WOLA
 
 # Type of signal
@@ -68,6 +66,7 @@ WOLA_PARAMS = WOLAparameters(
 def main(
         M=N_SENSORS,
         K=N_NODES,
+        toCompute=TO_COMPUTE,
         durations=DURATIONS,
         fs=FS,
         nMC=N_MC,
@@ -110,8 +109,9 @@ def main(
         maxDelay=0.1
     )
     sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+
     toPlot = dict([
-        (key, np.zeros((nMC, len(durations), len(taus)))) for key in TO_COMPUTE
+        (key, np.zeros((nMC, len(durations), len(taus)))) for key in toCompute
     ])
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
@@ -145,113 +145,51 @@ def main(
             nSamples = int(durations[idxDur] * fs)
             noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
 
-            for idxTau in range(len(taus)):
-                # Set beta based on tau
-                wolaParams.betaDanse = np.exp(
-                    np.log(b) / (taus[idxTau] * fs / wolaParams.nfft)
-                )
-                # Compute desired filters
-                filters = get_filters(
-                    noisySignals,
-                    cleanSigs[:nSamples, :],
-                    noiseSignals[:nSamples, :],
-                    channelToNodeMap,
-                    gevdRank=1,
-                    toCompute=TO_COMPUTE,
-                    wolaParams=wolaParams
-                )
+            # Compute desired filters
+            filtersAllTaus = get_filters(
+                noisySignals,
+                cleanSigs[:nSamples, :],
+                noiseSignals[:nSamples, :],
+                channelToNodeMap,
+                gevdRank=1,
+                toCompute=toCompute,
+                wolaParams=wolaParams,
+                taus=taus,
+                b=b
+            )
 
-                # Plot online MWF evolution
-                if 0:
-                    plot_online_mwf_evol(
-                        durations[idxDur],
-                        filters['mwf_online'],
+            # Compute metrics
+            for idxFilter in range(len(toCompute)):
+
+                filterType = toCompute[idxFilter]
+                currFilt = filtersAllTaus[filterType]
+
+                for idxTau in range(currFilt.shape[0]):
+
+                    if len(currFilt.shape) == 4:
+                        currFiltCurrTau = currFilt[idxTau, :, :, :]
+                    else:
+                        currFiltCurrTau = currFilt[idxTau, :, :]
+
+                    metrics = get_metrics(
+                        M,
+                        currFiltCurrTau,
                         scalings,
                         sigma_sr,
                         sigma_nr,
-                        savefigs=False,
-                        figLabelRef=TO_COMPUTE[0],
-                        exportFolder=EXPORT_FOLDER,
-                        beta=wolaParams.betaDanse
+                        channelToNodeMap,
+                        filterType=filterType
                     )
 
-                if 0:
-                    # Plot filters
-                    subfolder = f'{EXPORT_FOLDER}/evol_2'
-                    # subfolder = f'{EXPORT_FOLDER}/evol_3_3nodes'
-                    for idxDur in range(filters['mwf_online'].shape[1]):
-                        fig, axes = plt.subplots(1,1)
-                        fig.set_size_inches(8.5, 3.5)
-                        for m in range(M):
-                            # axes.plot(np.abs(filters['danse'][:, -1, m]), f'C{m}s-')
-                            axes.plot(np.abs(filters['mwf'][:, m]),  f'C{m}o--')
-                            axes.plot(np.abs(filters['mwf_online'][:, idxDur, m]),  f'C{m}x-.')
-                            axes.plot(np.abs(filters['danse_sim_online'][:, idxDur, m]),  f'C{m}d:')
-                            if m == 0:
-                                axes.legend(['Batch-MWF', 'Online MWF', 'Online DANSE'])
-                        axes.set_ylim([0.1, 0.25])
-                        axes.set_xlabel('Tap index')
-                        axes.set_ylabel('Filter magnitude')
-                        axes.set_title(f'Online DANSE iteration {idxDur+1}/{filters["mwf_online"].shape[1]}')
-                        axes.grid(True)
-                        fig.tight_layout()
-                        if not Path(subfolder).is_dir():
-                            Path(subfolder).mkdir(parents=True, exist_ok=True)
-                        fig.savefig(f'{subfolder}/online_danse_evol_{idxDur}.png', dpi=300, bbox_inches='tight')
-                        plt.close(fig)
-
-                stop = 1
-
-                # Plot DANSE evolution
-                if 0:
-                    if 'wola' in TO_COMPUTE[0]:
-                        plot_danse_wola_evol(
-                            K,
-                            channelToNodeMap,
-                            durations[idxDur],
-                            filters[TO_COMPUTE[0]],
-                            scalings,
-                            savefigs=False,
-                            figLabelRef=TO_COMPUTE[0],
-                            wolaParams=wolaParams,
-                            refCleanSigs=cleanSigs[:nSamples, :],
-                            noiseOnlySigs=noiseSignals[:nSamples, :],
-                            exportFolder=EXPORT_FOLDER
-                        )
-                    elif 'online' in TO_COMPUTE[0]:
-                        plot_danse_online_evol(
-                            K,
-                            channelToNodeMap,
-                            durations[idxDur],
-                            filters[TO_COMPUTE[0]],
-                            scalings,
-                            sigma_sr,
-                            sigma_nr,
-                            savefigs=False,
-                            figLabelRef=TO_COMPUTE[0],
-                            exportFolder=EXPORT_FOLDER
-                        )
-                    stop = 1
-                
-                metrics = get_metrics(
-                    M,
-                    filters,
-                    scalings,
-                    sigma_sr,
-                    sigma_nr,
-                    channelToNodeMap
-                )
-
-                # Store metrics
-                for key in metrics.keys():
-                    toPlot[key][idxMC, idxDur, idxTau] = metrics[key]
+                    # Store metrics
+                    toPlot[filterType][idxMC, idxDur, idxTau] = metrics
     
     # Plot results
     fig = plot_final(durations, taus, toPlot)
 
     if EXPORT_FOLDER is not None:
         fname = f'{EXPORT_FOLDER}/diff'
-        for t in TO_COMPUTE:
+        for t in toCompute:
             fname += f'_{t}'
         if not Path(EXPORT_FOLDER).is_dir():
             Path(EXPORT_FOLDER).mkdir(parents=True, exist_ok=True)
@@ -533,7 +471,9 @@ def get_filters(
         channelToNodeMap,
         gevdRank=1,
         toCompute=[''],
-        wolaParams: WOLAparameters=WOLAparameters()
+        wolaParams: WOLAparameters=WOLAparameters(),
+        taus=[2.],
+        b=0.1
     ):
     """Compute filters."""
     kwargs = {
@@ -546,12 +486,38 @@ def get_filters(
     }
     filters = {}
     for filterType in toCompute:
-        filters[filterType] = compute_filter(type=filterType, **kwargs)
+        # Differentiate tau-dependent filters from other filters
+        if 'danse' in filterType or 'online' in filterType:
+            tausCurr = copy.deepcopy(taus)
+        else:
+            tausCurr = [0.]  # dummy value (no need to compute for several tau's)
+        
+        currFiltersAllTaus = []
+        for idxTau in range(len(tausCurr)):
+            # Set beta based on tau
+            kwargs['wolaParams'].betaDanse = np.exp(
+                np.log(b) / (tausCurr[idxTau] *\
+                    kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
+            )
+
+            currFiltersAllTaus.append(
+                compute_filter(type=filterType, **kwargs)
+            )
+        
+        filters[filterType] = np.array(currFiltersAllTaus)
 
     return filters
 
 
-def get_metrics(M, filters, scalings, sigma_sr, sigma_nr, channelToNodeMap):
+def get_metrics(
+        M,
+        filters,
+        scalings,
+        sigma_sr,
+        sigma_nr,
+        channelToNodeMap,
+        filterType
+    ):
     
     # Compute FAS + SPF
     fasAndSPF = np.zeros((M, M))
@@ -563,36 +529,34 @@ def get_metrics(M, filters, scalings, sigma_sr, sigma_nr, channelToNodeMap):
 
     # Compute difference between normalized estimated filters
     # and normalized expected filters
-    diffs = {}
-    for filterType in TO_COMPUTE:
-        nFilters = filters[filterType].shape[-1]
-        diffsPerCoefficient = np.zeros(nFilters)
-        currNode = 0
-        for m in range(nFilters):
-            if 'danse' in filterType or 'online' in filterType:  # DANSE case
-                # Determine reference sensor index
-                if 'danse' in filterType:
-                    idxRef = np.where(channelToNodeMap == m)[0][0]
-                else:
-                    idxRef = copy.deepcopy(m)
-                currFilt = filters[filterType][:, -1, m]
+    nFilters = filters.shape[-1]
+    diffsPerCoefficient = np.zeros(nFilters)
+    currNode = 0
+    for m in range(nFilters):
+        if 'danse' in filterType or 'online' in filterType:  # DANSE case
+            # Determine reference sensor index
+            if 'danse' in filterType:
+                idxRef = np.where(channelToNodeMap == m)[0][0]
             else:
-                if 'danse' in TO_COMPUTE:
-                    if channelToNodeMap[m] == currNode:
-                        idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
-                        currFilt = filters[filterType][:, idxRef]
-                        currNode += 1
-                    else:
-                        diffsPerCoefficient[m] = np.nan
-                        continue
+                idxRef = copy.deepcopy(m)
+            currFilt = filters[:, -1, m]
+        else:
+            if 'danse' in filterType:
+                if channelToNodeMap[m] == currNode:
+                    idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
+                    currFilt = filters[:, idxRef]
+                    currNode += 1
                 else:
-                    idxRef = copy.deepcopy(m)
-                    currFilt = filters[filterType][:, m]
-            
-            diffsPerCoefficient[m] = np.mean(np.abs(
-                currFilt - fasAndSPF[:, idxRef]
-            ))
-        diffs[filterType] = np.nanmean(diffsPerCoefficient)
+                    diffsPerCoefficient[m] = np.nan
+                    continue
+            else:
+                idxRef = copy.deepcopy(m)
+                currFilt = filters[:, m]
+        
+        diffsPerCoefficient[m] = np.mean(np.abs(
+            currFilt - fasAndSPF[:, idxRef]
+        ))
+    diffs = np.nanmean(diffsPerCoefficient)
 
     return diffs
 

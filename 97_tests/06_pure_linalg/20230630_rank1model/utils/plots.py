@@ -57,15 +57,26 @@ def plot_final(durations, taus, toPlot: dict):
                 color=baseColor,
                 alpha=0.15
             )
-            tauLabel = f'tau{taus[jj]}'
-            # Replace dot (".") by "p"
-            tauLabel = tauLabel.replace('.', 'p')
-            axes.loglog(
-                durations,
-                np.mean(toPlot[key][:, :, jj], axis=0),
-                f'{baseColor}{marker}{lineStyle}',
-                label=f'{key}_{tauLabel}'
-            )
+            # Case where we have a single tau
+            if 'danse' not in key and 'online' not in key:
+                axes.loglog(
+                    durations,
+                    np.mean(toPlot[key][:, :, jj], axis=0),
+                    f'{baseColor}{marker}{lineStyle}',
+                    label=key
+                )
+                break
+            else:  # Case where we have multiple tau's
+                tauLabel = f'tau{taus[jj]}'
+                # Replace dot (".") by "p"
+                tauLabel = tauLabel.replace('.', 'p')
+                axes.loglog(
+                    durations,
+                    np.mean(toPlot[key][:, :, jj], axis=0),
+                    f'{baseColor}{marker}{lineStyle}',
+                    label=f'{key}_{tauLabel}'
+                )
+
     plt.grid(which='both')
     axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
