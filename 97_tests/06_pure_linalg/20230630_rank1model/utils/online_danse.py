@@ -364,12 +364,12 @@ def run_online_danse(
             RyyCurr = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
             # Update covariance matrices
-            if i > 2:
-                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
-            else:
-                Ryy[k] = RyyCurr
-                Rnn[k] = RnnCurr
+            # if i > 2:
+            Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
+            Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            # else:
+            #     Ryy[k] = RyyCurr
+            #     Rnn[k] = RnnCurr
 
             # Check if filter ought to be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:

@@ -67,7 +67,7 @@ def plot_final(durations, taus, toPlot: dict):
                 label=f'{key}_{tauLabel}'
             )
     plt.grid(which='both')
-    # axes.legend(loc='lower left')
+    axes.legend(loc='lower left')
     plt.xlabel('Signal duration (s)')
     plt.ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
     axes.set_title(f'{nMC} MC runs')
