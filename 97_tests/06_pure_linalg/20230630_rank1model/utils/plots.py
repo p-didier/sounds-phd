@@ -31,51 +31,67 @@ def plot_individual_run(filters: dict, scalings, sigma_sr, sigma_nr, nSamples):
 
 def plot_final(durations, taus, toPlot: dict):
 
+    # Check if we have data per node, or an average over nodes
+    avgAcrossNodesFlag = len(toPlot[list(toPlot.keys())[0]].shape) == 3
+    # if `len(toPlot[list(toPlot.keys())[0]].shape) == 4`, the data is available
+    # per node and per MC run (i.e., we have a 4D array).
+
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(8.5, 3.5)
     allLineStyles = ['-', '--', '-.', ':']
     allMarkers = ['s', 'o', 'x', 'd']
-    for ii, key in enumerate(toPlot.keys()):
-        baseColor = f'C{ii}'
-        if ii > len(allLineStyles):
+    for idxFilter, filterType in enumerate(toPlot.keys()):
+        baseColor = f'C{idxFilter}'
+        if idxFilter > len(allLineStyles):
             lineStyle = np.random.choice(allLineStyles)
         else:
-            lineStyle = allLineStyles[ii]
+            lineStyle = allLineStyles[idxFilter]
 
-        nTaus = toPlot[key].shape[-1]
-        for jj in range(nTaus):
-            if jj > len(allMarkers):
+        nTaus = toPlot[filterType].shape[2]
+        for idxTau in range(nTaus):
+            if idxTau > len(allMarkers):
                 marker = np.random.choice(allMarkers)
             else:
-                marker = allMarkers[jj]
-            # Add a patch of color to show the range of values across MC runs
-            axes.fill_between(
-                durations,
-                np.amin(toPlot[key][:, :, jj], axis=0),
-                np.amax(toPlot[key][:, :, jj], axis=0),
-                color=baseColor,
-                alpha=0.15
-            )
-            # Case where we have a single tau
-            if 'danse' not in key and 'online' not in key:
-                axes.loglog(
+                marker = allMarkers[idxTau]
+            
+            if avgAcrossNodesFlag:  # Case where we have an average across nodes
+                # Add a patch of color to show the range of values across MC runs
+                axes.fill_between(
                     durations,
-                    np.mean(toPlot[key][:, :, jj], axis=0),
-                    f'{baseColor}{marker}{lineStyle}',
-                    label=key
+                    np.amin(toPlot[filterType][:, :, idxTau], axis=0),
+                    np.amax(toPlot[filterType][:, :, idxTau], axis=0),
+                    color=baseColor,
+                    alpha=0.15
                 )
-                break
-            else:  # Case where we have multiple tau's
-                tauLabel = f'tau{taus[jj]}'
-                # Replace dot (".") by "p"
-                tauLabel = tauLabel.replace('.', 'p')
-                axes.loglog(
-                    durations,
-                    np.mean(toPlot[key][:, :, jj], axis=0),
-                    f'{baseColor}{marker}{lineStyle}',
-                    label=f'{key}_{tauLabel}'
-                )
+                # Case where we have a single tau
+                if 'danse' not in filterType and 'online' not in filterType:
+                    axes.loglog(
+                        durations,
+                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                        f'{baseColor}{marker}{lineStyle}',
+                        label=filterType
+                    )
+                    break  # no need to loop over tau's
+                else:  # Case where we have multiple tau's
+                    tauLabel = f'tau{taus[idxTau]}'
+                    # Replace dot (".") by "p"
+                    tauLabel = tauLabel.replace('.', 'p')
+                    axes.loglog(
+                        durations,
+                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                        f'{baseColor}{marker}{lineStyle}',
+                        label=f'{filterType}_{tauLabel}'
+                    )
+            else:  # Case where we have data per node and per MC run
+                for k in range(toPlot[filterType].shape[-1]):
+                    axes.loglog(
+                        durations,
+                        np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
+                        f'{baseColor}{marker}{lineStyle}',
+                        label=f'{filterType} $k=${k+1}',
+                        alpha=(k + 1) / toPlot[filterType].shape[-1]
+                    )
 
     plt.grid(which='both')
     axes.legend(loc='lower left')

@@ -4,6 +4,7 @@
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
 import numpy as np
+import scipy.linalg as la
 from scipy.signal import stft
 from dataclasses import dataclass
 from matplotlib import pyplot as plt
@@ -396,7 +397,6 @@ def run_online_danse(
                     ryd = (Ryy[k] - Rnn[k]) @ e
                     w[k][:, i + 1] = np.linalg.inv(Ryy[k]) @ ryd
                 elif filterType == 'gevd':
-                    raise NotImplementedError('not yet implemented for multiple frequency lines')
                     sigma, Xmat = la.eigh(Ryy[k], Rnn[k])
                     idx = np.flip(np.argsort(sigma))
                     sigma = sigma[idx]

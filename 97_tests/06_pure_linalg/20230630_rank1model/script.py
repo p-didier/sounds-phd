@@ -18,17 +18,17 @@ sys.path.append('..')
 RANDOM_DELAYS = False
 TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 5
-N_NODES = 3
+N_NODES = 5
 SELFNOISE_POWER = 1
-# DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
+DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
-DURATIONS = [5]
+# DURATIONS = [5]
 FS = 16e3
 N_MC = 1
-EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/forPhDSU_20230719'
+EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230731_gevd_tests'
 # EXPORT_FOLDER = None
-TAUS = [2., 4., 8.]
-# TAUS = [2.]
+# TAUS = [2., 4., 8.]
+TAUS = [2.]
 B = 0.1  # factor for beta in WOLA
 
 # Type of signal
@@ -37,16 +37,16 @@ B = 0.1  # factor for beta in WOLA
 SIGNAL_TYPE = 'noise_complex'
 
 TO_COMPUTE = [
-    'mwf',
+    # 'mwf',
     'gevdmwf',
-    'danse',
-    'gevddanse',
+    # 'danse',
+    # 'gevddanse',
     # 'danse_sim',
     # 'gevddanse_sim',
     # 'mwf_online',
-    # 'gevdmwf_online',
+    'gevdmwf_online',
     # 'danse_online',
-    # 'gevddanse_online',
+    'gevddanse_online',
     # 'danse_sim_online',
     # 'gevddanse_sim_online'
     # 'danse_wola',
@@ -62,6 +62,9 @@ WOLA_PARAMS = WOLAparameters(
     betaDanse=0.75,
     # nfft=4096,
 )
+
+# Debug parameters
+SHOW_DELTA_PER_NODE = True
 
 def main(
         M=N_SENSORS,
@@ -110,9 +113,12 @@ def main(
     )
     sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
 
-    toPlot = dict([
-        (key, np.zeros((nMC, len(durations), len(taus)))) for key in toCompute
-    ])
+    # Initialize arrays for storing results
+    shape = (nMC, len(durations), len(taus))
+    if SHOW_DELTA_PER_NODE:
+        shape += (M,)  # add dimension for nodes
+    toPlot = dict([(key, np.zeros(shape)) for key in TO_COMPUTE])
+
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
 
@@ -178,11 +184,15 @@ def main(
                         sigma_sr,
                         sigma_nr,
                         channelToNodeMap,
-                        filterType=filterType
+                        filterType=filterType,
+                        exportDiffPerFilter=SHOW_DELTA_PER_NODE  # export all differences individually
                     )
 
                     # Store metrics
-                    toPlot[filterType][idxMC, idxDur, idxTau] = metrics
+                    if SHOW_DELTA_PER_NODE:
+                        toPlot[filterType][idxMC, idxDur, idxTau, :] = metrics
+                    else:
+                        toPlot[filterType][idxMC, idxDur, idxTau] = metrics
     
     # Plot results
     fig = plot_final(durations, taus, toPlot)
@@ -516,7 +526,9 @@ def get_metrics(
         sigma_sr,
         sigma_nr,
         channelToNodeMap,
-        filterType
+        filterType,
+        computeForComparisonWithDANSE=True,
+        exportDiffPerFilter=False
     ):
     
     # Compute FAS + SPF
@@ -533,18 +545,21 @@ def get_metrics(
     diffsPerCoefficient = np.zeros(nFilters)
     currNode = 0
     for m in range(nFilters):
-        if 'danse' in filterType or 'online' in filterType:  # DANSE case
+        if 'danse' in filterType:  # DANSE case
             # Determine reference sensor index
             if 'danse' in filterType:
                 idxRef = np.where(channelToNodeMap == m)[0][0]
             else:
                 idxRef = copy.deepcopy(m)
             currFilt = filters[:, -1, m]
-        else:
-            if 'danse' in filterType:
+        else:  # MWF case
+            if computeForComparisonWithDANSE:
                 if channelToNodeMap[m] == currNode:
                     idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
-                    currFilt = filters[:, idxRef]
+                    if 'online' in filterType:
+                        currFilt = filters[:, -1, idxRef]
+                    else:
+                        currFilt = filters[:, idxRef]
                     currNode += 1
                 else:
                     diffsPerCoefficient[m] = np.nan
@@ -556,7 +571,13 @@ def get_metrics(
         diffsPerCoefficient[m] = np.mean(np.abs(
             currFilt - fasAndSPF[:, idxRef]
         ))
-    diffs = np.nanmean(diffsPerCoefficient)
+    
+    if exportDiffPerFilter:
+        # All differences individually
+        diffs = np.array([d for d in diffsPerCoefficient if not np.isnan(d)])
+    else:
+        # Average absolute difference over filters
+        diffs = np.nanmean(diffsPerCoefficient)
 
     return diffs
 
