@@ -65,7 +65,7 @@ def run_online_mwf(
             myMat = Xmat @ Dmat @ Qmat.T.conj()
             for m in range(nSensors):
                 e = np.zeros(nSensors)
-                e[m] = 1
+                e[m] = 1  # selection vector for the ref. sensor index
                 w[:, i + 1, m] = myMat @ e
     
     return w

@@ -39,14 +39,8 @@ def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
 
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
     nDurations = toPlot[list(toPlot.keys())[0]].shape[1]
-    if nDurations == 1:
-        nSp = 2
-        figHeight = 4
-    else:
-        nSp = 1
-        figHeight = 3.5
-    fig, axes = plt.subplots(nSp, 1)
-    fig.set_size_inches(8.5, figHeight)
+    fig, axes = plt.subplots(1, 1)
+    fig.set_size_inches(8.5, 3.5)
     allLineStyles = ['-', '--', '-.', ':']
     allMarkers = ['s', 'o', 'x', 'd']
     for idxFilter, filterType in enumerate(toPlot.keys()):
@@ -60,29 +54,15 @@ def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
 
         if nDurations == 1:  # Case where we consider a single signal duration
             # Plot as function of beta (== as function of tau)
-            betas = np.exp(np.log(b) / (np.array(taus) * fs / L))
             if avgAcrossNodesFlag:
-                axes[0].fill_between(
+                axes.fill_between(
                     taus,
                     np.amin(toPlot[filterType][:, 0, :], axis=0),
                     np.amax(toPlot[filterType][:, 0, :], axis=0),
                     color=baseColor,
                     alpha=0.15
                 )
-                axes[1].fill_between(
-                    betas,
-                    np.amin(toPlot[filterType][:, 0, :], axis=0),
-                    np.amax(toPlot[filterType][:, 0, :], axis=0),
-                    color=baseColor,
-                    alpha=0.15
-                )
-                axes[1].loglog(
-                    betas,
-                    np.mean(toPlot[filterType][:, 0, :], axis=0),
-                    f'{baseColor}o-',
-                    label=filterType
-                )
-                axes[0].semilogy(
+                axes.semilogy(
                     taus,
                     np.mean(toPlot[filterType][:, 0, :], axis=0),
                     f'{baseColor}o-',
@@ -98,14 +78,15 @@ def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )
-            axes[0].set_xlabel('Exp. avg. time constant $\\tau$ (s)')
-            axes[1].set_xlabel('Exp. avg. constant $\\beta$ (-)')
-            axes[0].legend(loc='upper right')
-            axes[0].set_title(f'{nMC} MC runs - {durations[0]} s signals')
-            axes[0].grid(which='both')
-            axes[0].set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
-            axes[1].grid(which='both')
-            axes[1].set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
+            axes.set_xlabel('Exp. avg. time constant $\\tau$ (s)', loc='left')
+            axes.legend(loc='upper right')
+            axes.set_title(f'{nMC} MC runs - {durations[0]} s signals')
+            # Add secondary x-axis with beta values
+            ax2 = axes.secondary_xaxis("top")
+            ax2.set_xticks(axes.get_xticks())
+            betas = np.exp(np.log(b) / (np.array(axes.get_xticks()) * fs / L))
+            ax2.set_xticklabels(np.round(betas, 3))
+            ax2.set_xlabel('Exp. avg. constant $\\beta$ (-)', loc='left')
         else:
             # Plot as function of signal duration
             for idxTau in range(nTaus):
@@ -154,8 +135,8 @@ def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
             axes.set_xlabel('Signal duration (s)')
             axes.legend(loc='lower left')
             axes.set_title(f'{nMC} MC runs')
-            axes.grid(which='both')
-            axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
+    axes.grid(which='both')
+    axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
     fig.tight_layout()
     plt.show(block=False)
 

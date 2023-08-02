@@ -18,19 +18,19 @@ sys.path.append('..')
 RANDOM_DELAYS = False
 TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 5
-N_NODES = 3
+N_NODES = 5
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
-DURATIONS = [30]
+# DURATIONS = [30]
 FS = 16e3
-N_MC = 1
-EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230731_gevd_tests'
+N_MC = 10
+EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230802_tests'
 # EXPORT_FOLDER = None
-# TAUS = [2., 4., 8.]
-TAUS = list(np.linspace(1, 10, 30))
+TAUS = [2., 4., 8.]
+# TAUS = list(np.linspace(1, 10, 10))
 # TAUS = [2.]
-B = 0.1  # factor for beta in WOLA
+B = 0.1  # factor for beta in online processing
 
 # Type of signal
 # SIGNAL_TYPE = 'speech'
@@ -62,10 +62,12 @@ WOLA_PARAMS = WOLAparameters(
     fs=FS,
     betaDanse=0.75,
     # nfft=4096,
+    upExtFiltEvery=0.2,
 )
 
 # Debug parameters
 SHOW_DELTA_PER_NODE = False
+USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE = True
 
 def main(
         M=N_SENSORS,
@@ -199,7 +201,10 @@ def main(
     fig = plot_final(durations, taus, toPlot, b=b, fs=fs, L=wolaParams.nfft)
 
     if EXPORT_FOLDER is not None:
-        fname = f'{EXPORT_FOLDER}/diff'
+        if len(durations) > 1:
+            fname = f'{EXPORT_FOLDER}/diff'
+        else:
+            fname = f'{EXPORT_FOLDER}/betas'
         for t in toCompute:
             fname += f'_{t}'
         if not Path(EXPORT_FOLDER).is_dir():
@@ -284,11 +289,17 @@ def compute_filter(
             kwargs['hop'] = wolaParams.hop
             kwargs['windowType'] = wolaParams.winType
             kwargs['fs'] = wolaParams.fs
+            kwargs['upExtFiltEvery'] = wolaParams.upExtFiltEvery
             w = run_wola_danse(**kwargs)
         elif 'online' in type:
+            if USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE:
+                wBatchNetWide = run_danse(**kwargs)
+                kwargs['batchModeNetWideFilters'] = wBatchNetWide
             kwargs['referenceSensorIdx'] = 0
             kwargs['L'] = wolaParams.nfft
             kwargs['beta'] = wolaParams.betaDanse
+            kwargs['fs'] = wolaParams.fs
+            kwargs['upExtFiltEvery'] = wolaParams.upExtFiltEvery
             w = run_online_danse(**kwargs)
             pass
         else:
@@ -404,7 +415,8 @@ def run_danse(
                 # Count channel index within node
                 c = channelCount[currNode]
                 if currNode == k:
-                    wNet[m, iter + 1, k] = w[k][c, iter + 1]  # use local filter coefficient
+                    # Use local filter coefficient
+                    wNet[m, iter + 1, k] = w[currNode][c, iter + 1]
                 else:
                     nChannels_k = np.sum(channelToNodeMap == k)
                     gkq = w[k][nChannels_k + neighborCount, iter + 1]
@@ -510,10 +522,11 @@ def get_filters(
                 np.log(b) / (tausCurr[idxTau] *\
                     kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
             )
-            kwargs['wolaParams'].betaMwf = np.exp(
-                np.log(b) / (tausCurr[idxTau] *\
-                    kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft - 1)
-            )
+            # kwargs['wolaParams'].betaMwf = np.exp(
+            #     np.log(b) / (tausCurr[idxTau] *\
+            #         kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft - 1)
+            # )
+            kwargs['wolaParams'].betaMwf = kwargs['wolaParams'].betaDanse
 
             currFiltersAllTaus.append(
                 compute_filter(type=filterType, **kwargs)

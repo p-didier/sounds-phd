@@ -17,6 +17,7 @@ class WOLAparameters:
     fs: int = 16000  # [Hz]
     betaDanse: float = 0.99  # exponential averaging constant
     betaMwf: float = 0.99  # exponential averaging constant for MWF
+    upExtFiltEvery: float = 1. # [s] bw. consecutive updates of external target filters
 
 
 def get_window(winType, nfft):
@@ -47,7 +48,8 @@ def run_wola_danse(
         windowType='sqrt-hann',  # `sqrt-hann` or `rect`
         referenceSensorIdx=0,
         fs=16000,
-        beta=0.99  # exponential averaging constant
+        beta=0.99,  # exponential averaging constant
+        upExtFiltEvery=1  # time [s] bw. consecutive updates of external target filters
     ):
 
     # Get noisy signal (time-domain)
@@ -129,8 +131,21 @@ def run_wola_danse(
     idxUpdatingNode = 0
     if nodeUpdatingStrategy == 'sequential':
         label = 'Online DANSE [seq NU]'
-    else:
+    elif nodeUpdatingStrategy == 'simultaneous':
         label = 'Online DANSE [sim NU]'
+        wExt = []
+        wExtTarget = []
+        for k in range(nNodes):
+            nSensorsPerNode = np.sum(channelToNodeMap == k)
+            wExt.append(np.zeros(
+                (nPosFreqs, nSensorsPerNode, nIter),
+                dtype=np.complex128
+            ))
+            wExtTarget.append(np.zeros(
+                (nPosFreqs, nSensorsPerNode, nIter),
+                dtype=np.complex128
+            ))
+        lastExtFiltUp = -1
     if filterType == 'gevd':
         label += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
@@ -148,19 +163,33 @@ def run_wola_danse(
             (nPosFreqs, nNodes),
             dtype=np.complex128
         )
+
         for q in range(nNodes):
+            # Define fusion vector
+            if nodeUpdatingStrategy == 'sequential':
+                fusionFilt = w[q][:, :yq.shape[1], i].conj()
+            elif nodeUpdatingStrategy == 'simultaneous':
+                # Deal with external target filters
+                currTime = i * hop / fs
+                if lastExtFiltUp == -1 or currTime - lastExtFiltUp >= upExtFiltEvery:
+                    print(f'Updating external target filters at time {np.round(currTime, 3)} s...')
+                    # Update external target filters
+                    wExtTarget[q][:, i, :] = .5 * (wExtTarget[q][:, i, :] +\
+                        w[q][:, :yq.shape[1], i].conj())
+                    lastExtFiltUp = currTime
+                else:
+                    # Do not update external target filters
+                    wExtTarget[q][:, i, :] = wExtTarget[q][:, i - 1, :]
+                
+                # Update external filters (effectively used)
+                wExt[q][:, i, :] = beta * wExt[:, i - 1, :] +\
+                    (1 - beta) * wExtTarget[:, i, :]
+                fusionFilt = wExt[q][:, i, :]
+            # Perform fusion
             yq = y_in[:, i, channelToNodeMap == q]
-            fusedSignals[:, q] = np.einsum(
-                'ij,ij->i',
-                yq,
-                w[q][:, :yq.shape[1], i].conj()
-            )
+            fusedSignals[:, q] = np.einsum('ij,ij->i', yq, fusionFilt)
             nq = n_in[:, i, channelToNodeMap == q]
-            fusedSignalsNoiseOnly[:, q] = np.einsum(
-                'ij,ij->i',
-                nq,
-                w[q][:, :yq.shape[1], i].conj()
-            )
+            fusedSignalsNoiseOnly[:, q] = np.einsum('ij,ij->i', nq, fusionFilt)
         
         # Loop over nodes
         for k in range(nNodes):
@@ -200,11 +229,7 @@ def run_wola_danse(
                 if np.any(np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]):
                     print(f'Rank-deficient Rnn[{k}]')
                     updateFilter = False
-                # # Check if Ryy and Rnn have been updated enough
-                # if nRyyUpdates[k] < len(channelToNodeMap) or\
-                #     nRnnUpdates[k] < len(channelToNodeMap):
-                #     updateFilter = False
-
+            
             if updateFilter:
                 # Compute filter
                 if filterType == 'regular':
@@ -278,7 +303,10 @@ def run_online_danse(
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
         L=1024,
         referenceSensorIdx=0,
-        beta=0.99  # exponential averaging constant
+        beta=0.99,  # exponential averaging constant
+        fs=16000,
+        upExtFiltEvery=1,  # time [s] bw. consecutive updates of external target filters
+        batchModeNetWideFilters=None,
     ):
 
     # Get noisy signal (time-domain)
@@ -327,6 +355,19 @@ def run_online_danse(
         label = 'Online DANSE [seq NU]'
     else:
         label = 'Online DANSE [sim NU]'
+        wExt = []
+        wExtTarget = []
+        for k in range(nNodes):
+            nSensorsPerNode = np.sum(channelToNodeMap == k)
+            wExt.append(np.zeros(
+                (nSensorsPerNode, nIter),
+                dtype=np.complex128
+            ))
+            wExtTarget.append(np.zeros(
+                (nSensorsPerNode, nIter),
+                dtype=np.complex128
+            ))
+        lastExtFiltUp = -1 * np.ones(nNodes)
     if filterType == 'gevd':
         label += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
@@ -344,11 +385,40 @@ def run_online_danse(
             (L, nNodes),
             dtype=np.complex128
         )
+        fusionFilts = [None for _ in range(nNodes)]
         for k in range(nNodes):
             yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
-            fusedSignals[:, k] = yk @ w[k][:yk.shape[1], i].conj()
-            fusedSignalsNoiseOnly[:, k] = nk @ w[k][:nk.shape[1], i].conj()
+            if batchModeNetWideFilters is None:
+                # Define fusion vector
+                if nodeUpdatingStrategy == 'sequential':
+                    fusionFilts[k] = w[k][:yk.shape[1], i].conj()
+                elif nodeUpdatingStrategy == 'simultaneous':
+                    # Deal with external target filters
+                    currTime = i * L / fs
+                    if lastExtFiltUp[k] == -1 or\
+                        currTime - lastExtFiltUp[k] >= upExtFiltEvery:
+                        print(f'Updating ext. target filters at node {k+1} at time {np.round(currTime, 3)} s [every {upExtFiltEvery} s]...')
+                        # Update external target filters
+                        wExtTarget[k][:, i + 1] = .5 * (wExtTarget[k][:, i] +\
+                            w[k][:yk.shape[1], i].conj())
+                        lastExtFiltUp[k] = currTime
+                    else:
+                        # Do not update external target filters
+                        wExtTarget[k][:, i + 1] = wExtTarget[k][:, i]
+                    
+                    # Update external filters (effectively used)
+                    wExt[k][:, i + 1] = beta * wExt[k][:, i] +\
+                        (1 - beta) * wExtTarget[k][:, i + 1]
+                    fusionFilts[k] = wExt[k][:, i + 1]
+            else:
+                # Compute index where the fusion filters are stored in the
+                # batch-mode network-wide DANSE filters
+                fusionFilts[k] = batchModeNetWideFilters[channelToNodeMap == k, -1, k]
+            
+            # Perform fusion
+            fusedSignals[:, k] = yk @ fusionFilts[k]
+            fusedSignalsNoiseOnly[:, k] = nk @ fusionFilts[k]
         
         # Loop over nodes
         for k in range(nNodes):
@@ -411,6 +481,11 @@ def run_online_danse(
             else:
                 w[k][:, i + 1] = w[k][:, i]
 
+            # if batchModeNetWideFilters is not None:
+            #     # Fix first coefficients using batch-mode values
+            #     w[k][:sum(channelToNodeMap == k), i + 1] = \
+            #     batchModeNetWideFilters[channelToNodeMap == k, -1, k]
+
         # Update node index
         if nodeUpdatingStrategy == 'sequential':
             idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
@@ -429,7 +504,8 @@ def run_online_danse(
                     wNet[m, i + 1, k] = w[currNode][cIdx, i + 1]
                 else:  # neighbor node channel
                     gkq = w[k][Mk + neighborCount, i + 1]
-                    wNet[m, i + 1, k] = w[currNode][cIdx, i] * gkq
+                    # wNet[m, i + 1, k] = w[currNode][cIdx, i] * gkq
+                    wNet[m, i + 1, k] = fusionFilts[currNode][cIdx] * gkq
                     # If we have reached the last channel of the current 
                     # neighbor node, increment neighbor count
                     if cIdx == np.sum(channelToNodeMap == currNode) - 1:
