@@ -47,9 +47,9 @@ TO_COMPUTE = [
     # 'mwf_online',
     'gevdmwf_online',
     # 'danse_online',
-    'gevddanse_online',
+    # 'gevddanse_online',
     # 'danse_sim_online',
-    # 'gevddanse_sim_online'
+    'gevddanse_sim_online'
     # 'danse_wola',
     # 'gevddanse_wola',
     # 'danse_sim_wola',
@@ -62,8 +62,9 @@ WOLA_PARAMS = WOLAparameters(
     fs=FS,
     betaDanse=0.75,
     # nfft=4096,
-    upExtTargetFiltEvery=0.2,
-    upFusionVectEvery=10,  # frames
+    B=0,  # frames
+    alpha=1,  # if ==1, no fusion vector relaxation
+    betaExt=0.98  # if ==0, no extra fusion vector relaxation
 )
 
 # Debug parameters
@@ -300,9 +301,9 @@ def compute_filter(
             kwargs['referenceSensorIdx'] = 0
             kwargs['L'] = wolaParams.nfft
             kwargs['beta'] = wolaParams.betaDanse
-            kwargs['fs'] = wolaParams.fs
-            kwargs['upExtFiltEvery'] = wolaParams.upExtTargetFiltEvery
-            kwargs['upFusionVectEvery'] = wolaParams.upFusionVectEvery
+            kwargs['B'] = wolaParams.B
+            kwargs['alpha'] = wolaParams.alpha
+            kwargs['betaExt'] = wolaParams.betaExt
             w = run_online_danse(**kwargs)
         else:
             w = run_danse(**kwargs)
