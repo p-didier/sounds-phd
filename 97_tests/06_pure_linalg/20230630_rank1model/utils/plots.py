@@ -29,16 +29,24 @@ def plot_individual_run(filters: dict, scalings, sigma_sr, sigma_nr, nSamples):
     return fig
 
 
-def plot_final(durations, taus, toPlot: dict):
-
+def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
+    """Plot the final results of the MC runs, for each filter type."""
+    
     # Check if we have data per node, or an average over nodes
     avgAcrossNodesFlag = len(toPlot[list(toPlot.keys())[0]].shape) == 3
     # if `len(toPlot[list(toPlot.keys())[0]].shape) == 4`, the data is available
     # per node and per MC run (i.e., we have a 4D array).
 
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
-    fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(8.5, 3.5)
+    nDurations = toPlot[list(toPlot.keys())[0]].shape[1]
+    if nDurations == 1:
+        nSp = 2
+        figHeight = 4
+    else:
+        nSp = 1
+        figHeight = 3.5
+    fig, axes = plt.subplots(nSp, 1)
+    fig.set_size_inches(8.5, figHeight)
     allLineStyles = ['-', '--', '-.', ':']
     allMarkers = ['s', 'o', 'x', 'd']
     for idxFilter, filterType in enumerate(toPlot.keys()):
@@ -49,55 +57,105 @@ def plot_final(durations, taus, toPlot: dict):
             lineStyle = allLineStyles[idxFilter]
 
         nTaus = toPlot[filterType].shape[2]
-        for idxTau in range(nTaus):
-            if idxTau > len(allMarkers):
-                marker = np.random.choice(allMarkers)
-            else:
-                marker = allMarkers[idxTau]
-            
-            if avgAcrossNodesFlag:  # Case where we have an average across nodes
-                # Add a patch of color to show the range of values across MC runs
-                axes.fill_between(
-                    durations,
-                    np.amin(toPlot[filterType][:, :, idxTau], axis=0),
-                    np.amax(toPlot[filterType][:, :, idxTau], axis=0),
+
+        if nDurations == 1:  # Case where we consider a single signal duration
+            # Plot as function of beta (== as function of tau)
+            betas = np.exp(np.log(b) / (np.array(taus) * fs / L))
+            if avgAcrossNodesFlag:
+                axes[0].fill_between(
+                    taus,
+                    np.amin(toPlot[filterType][:, 0, :], axis=0),
+                    np.amax(toPlot[filterType][:, 0, :], axis=0),
                     color=baseColor,
                     alpha=0.15
                 )
-                # Case where we have a single tau
-                if 'danse' not in filterType and 'online' not in filterType:
-                    axes.loglog(
-                        durations,
-                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
-                        f'{baseColor}{marker}{lineStyle}',
-                        label=filterType
-                    )
-                    break  # no need to loop over tau's
-                else:  # Case where we have multiple tau's
-                    tauLabel = f'tau{taus[idxTau]}'
-                    # Replace dot (".") by "p"
-                    tauLabel = tauLabel.replace('.', 'p')
-                    axes.loglog(
-                        durations,
-                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
-                        f'{baseColor}{marker}{lineStyle}',
-                        label=f'{filterType}_{tauLabel}'
-                    )
-            else:  # Case where we have data per node and per MC run
+                axes[1].fill_between(
+                    betas,
+                    np.amin(toPlot[filterType][:, 0, :], axis=0),
+                    np.amax(toPlot[filterType][:, 0, :], axis=0),
+                    color=baseColor,
+                    alpha=0.15
+                )
+                axes[1].loglog(
+                    betas,
+                    np.mean(toPlot[filterType][:, 0, :], axis=0),
+                    f'{baseColor}o-',
+                    label=filterType
+                )
+                axes[0].semilogy(
+                    taus,
+                    np.mean(toPlot[filterType][:, 0, :], axis=0),
+                    f'{baseColor}o-',
+                    label=filterType
+                )
+            else:
                 for k in range(toPlot[filterType].shape[-1]):
-                    axes.loglog(
-                        durations,
-                        np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
-                        f'{baseColor}{marker}{lineStyle}',
+                    raise NotImplementedError('Not tested yet')
+                    axes[0].loglog(
+                        taus,
+                        np.mean(toPlot[filterType][:, 0, :, k], axis=0),
+                        f'{baseColor}o-',
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )
-
-    plt.grid(which='both')
-    axes.legend(loc='lower left')
-    plt.xlabel('Signal duration (s)')
-    plt.ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
-    axes.set_title(f'{nMC} MC runs')
+            axes[0].set_xlabel('Exp. avg. time constant $\\tau$ (s)')
+            axes[1].set_xlabel('Exp. avg. constant $\\beta$ (-)')
+            axes[0].legend(loc='upper right')
+            axes[0].set_title(f'{nMC} MC runs - {durations[0]} s signals')
+            axes[0].grid(which='both')
+            axes[0].set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
+            axes[1].grid(which='both')
+            axes[1].set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
+        else:
+            # Plot as function of signal duration
+            for idxTau in range(nTaus):
+                if idxTau > len(allMarkers):
+                    marker = np.random.choice(allMarkers)
+                else:
+                    marker = allMarkers[idxTau]
+                
+                if avgAcrossNodesFlag:  # Case where we have an average across nodes
+                    # Add a patch of color to show the range of values across MC runs
+                    axes.fill_between(
+                        durations,
+                        np.amin(toPlot[filterType][:, :, idxTau], axis=0),
+                        np.amax(toPlot[filterType][:, :, idxTau], axis=0),
+                        color=baseColor,
+                        alpha=0.15
+                    )
+                    # Case where we have a single tau
+                    if 'danse' not in filterType and 'online' not in filterType:
+                        axes.loglog(
+                            durations,
+                            np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                            f'{baseColor}{marker}{lineStyle}',
+                            label=filterType
+                        )
+                        break  # no need to loop over tau's
+                    else:  # Case where we have multiple tau's
+                        tauLabel = f'tau{taus[idxTau]}'
+                        # Replace dot (".") by "p"
+                        tauLabel = tauLabel.replace('.', 'p')
+                        axes.loglog(
+                            durations,
+                            np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                            f'{baseColor}{marker}{lineStyle}',
+                            label=f'{filterType}_{tauLabel}'
+                        )
+                else:  # Case where we have data per node and per MC run
+                    for k in range(toPlot[filterType].shape[-1]):
+                        axes.loglog(
+                            durations,
+                            np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
+                            f'{baseColor}{marker}{lineStyle}',
+                            label=f'{filterType} $k=${k+1}',
+                            alpha=(k + 1) / toPlot[filterType].shape[-1]
+                        )
+            axes.set_xlabel('Signal duration (s)')
+            axes.legend(loc='lower left')
+            axes.set_title(f'{nMC} MC runs')
+            axes.grid(which='both')
+            axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
     fig.tight_layout()
     plt.show(block=False)
 

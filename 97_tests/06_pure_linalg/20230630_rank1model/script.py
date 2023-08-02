@@ -18,17 +18,18 @@ sys.path.append('..')
 RANDOM_DELAYS = False
 TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 5
-N_NODES = 5
+N_NODES = 3
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
-# DURATIONS = [5]
+DURATIONS = [30]
 FS = 16e3
 N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230731_gevd_tests'
 # EXPORT_FOLDER = None
 # TAUS = [2., 4., 8.]
-TAUS = [2.]
+TAUS = list(np.linspace(1, 10, 30))
+# TAUS = [2.]
 B = 0.1  # factor for beta in WOLA
 
 # Type of signal
@@ -64,7 +65,7 @@ WOLA_PARAMS = WOLAparameters(
 )
 
 # Debug parameters
-SHOW_DELTA_PER_NODE = True
+SHOW_DELTA_PER_NODE = False
 
 def main(
         M=N_SENSORS,
@@ -116,7 +117,7 @@ def main(
     # Initialize arrays for storing results
     shape = (nMC, len(durations), len(taus))
     if SHOW_DELTA_PER_NODE:
-        shape += (M,)  # add dimension for nodes
+        shape += (K,)  # add dimension for nodes
     toPlot = dict([(key, np.zeros(shape)) for key in TO_COMPUTE])
 
     for idxMC in range(nMC):
@@ -195,7 +196,7 @@ def main(
                         toPlot[filterType][idxMC, idxDur, idxTau] = metrics
     
     # Plot results
-    fig = plot_final(durations, taus, toPlot)
+    fig = plot_final(durations, taus, toPlot, b=b, fs=fs, L=wolaParams.nfft)
 
     if EXPORT_FOLDER is not None:
         fname = f'{EXPORT_FOLDER}/diff'
@@ -243,7 +244,7 @@ def compute_filter(
             n=noiseOnlySigs,
             filterType='regular',
             L=wolaParams.nfft,
-            beta=wolaParams.betaDanse
+            beta=wolaParams.betaMwf
         )
     elif type == 'gevdmwf':
         sigma, Xmat = la.eigh(Ryy, Rnn)
@@ -261,7 +262,7 @@ def compute_filter(
             filterType='gevd',
             rank=rank,
             L=wolaParams.nfft,
-            beta=wolaParams.betaDanse
+            beta=wolaParams.betaMwf
         )
     elif 'danse' in type:
         kwargs = {
@@ -508,6 +509,10 @@ def get_filters(
             kwargs['wolaParams'].betaDanse = np.exp(
                 np.log(b) / (tausCurr[idxTau] *\
                     kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
+            )
+            kwargs['wolaParams'].betaMwf = np.exp(
+                np.log(b) / (tausCurr[idxTau] *\
+                    kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft - 1)
             )
 
             currFiltersAllTaus.append(

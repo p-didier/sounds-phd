@@ -15,7 +15,8 @@ class WOLAparameters:
     hop: int = 512
     winType: str = 'sqrt-hann'  # sqrt-hann | rect
     fs: int = 16000  # [Hz]
-    betaDanse: float = 0.99  # exponential averaging constant   
+    betaDanse: float = 0.99  # exponential averaging constant
+    betaMwf: float = 0.99  # exponential averaging constant for MWF
 
 
 def get_window(winType, nfft):
