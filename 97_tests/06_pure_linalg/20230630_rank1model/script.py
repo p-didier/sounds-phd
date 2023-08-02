@@ -24,13 +24,13 @@ DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
 # DURATIONS = [30]
 FS = 16e3
-N_MC = 10
+N_MC = 5
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230802_tests'
 # EXPORT_FOLDER = None
-TAUS = [2., 4., 8.]
+# TAUS = [2., 4., 8.]
 # TAUS = list(np.linspace(1, 10, 10))
-# TAUS = [2.]
-B = 0.1  # factor for beta in online processing
+TAUS = [2.]
+B = 0.1  # factor for determining beta from tau (online processing)
 
 # Type of signal
 # SIGNAL_TYPE = 'speech'
@@ -62,12 +62,13 @@ WOLA_PARAMS = WOLAparameters(
     fs=FS,
     betaDanse=0.75,
     # nfft=4096,
-    upExtFiltEvery=0.2,
+    upExtTargetFiltEvery=0.2,
+    upFusionVectEvery=10,  # frames
 )
 
 # Debug parameters
 SHOW_DELTA_PER_NODE = False
-USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE = True
+USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE = False
 
 def main(
         M=N_SENSORS,
@@ -283,13 +284,14 @@ def compute_filter(
             kwargs['nodeUpdatingStrategy'] = 'sequential'
 
         if 'wola' in type:
+            raise NotImplementedError('To be implemented properly [PD~2023.08.02]')
             kwargs['referenceSensorIdx'] = 0
             kwargs['nfft'] = wolaParams.nfft
             kwargs['beta'] = wolaParams.betaDanse
             kwargs['hop'] = wolaParams.hop
             kwargs['windowType'] = wolaParams.winType
             kwargs['fs'] = wolaParams.fs
-            kwargs['upExtFiltEvery'] = wolaParams.upExtFiltEvery
+            kwargs['upExtFiltEvery'] = wolaParams.upExtTargetFiltEvery
             w = run_wola_danse(**kwargs)
         elif 'online' in type:
             if USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE:
@@ -299,9 +301,9 @@ def compute_filter(
             kwargs['L'] = wolaParams.nfft
             kwargs['beta'] = wolaParams.betaDanse
             kwargs['fs'] = wolaParams.fs
-            kwargs['upExtFiltEvery'] = wolaParams.upExtFiltEvery
+            kwargs['upExtFiltEvery'] = wolaParams.upExtTargetFiltEvery
+            kwargs['upFusionVectEvery'] = wolaParams.upFusionVectEvery
             w = run_online_danse(**kwargs)
-            pass
         else:
             w = run_danse(**kwargs)
     return w

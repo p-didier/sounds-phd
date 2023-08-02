@@ -17,7 +17,8 @@ class WOLAparameters:
     fs: int = 16000  # [Hz]
     betaDanse: float = 0.99  # exponential averaging constant
     betaMwf: float = 0.99  # exponential averaging constant for MWF
-    upExtFiltEvery: float = 1. # [s] bw. consecutive updates of external target filters
+    upExtTargetFiltEvery: float = 1. # [s] bw. consecutive updates of external target filters
+    upFusionVectEvery: int = 0  # number of frames bw. consecutive updates of fusion vectors
 
 
 def get_window(winType, nfft):
@@ -49,7 +50,8 @@ def run_wola_danse(
         referenceSensorIdx=0,
         fs=16000,
         beta=0.99,  # exponential averaging constant
-        upExtFiltEvery=1  # time [s] bw. consecutive updates of external target filters
+        upExtTargetFiltEvery=1,  # time [s] bw. consecutive updates of external target filters
+        upFusionVectEvery=0  # number of frames bw. consecutive updates of fusion vectors
     ):
 
     # Get noisy signal (time-domain)
@@ -151,6 +153,7 @@ def run_wola_danse(
     nodeIndices = np.arange(nNodes)
     nRyyUpdates = np.zeros(nNodes, dtype=int)
     nRnnUpdates = np.zeros(nNodes, dtype=int)
+    lastFusionVectorUpdate = -1 * np.ones(nNodes)
     # Loop over frames
     for i in range(nIter - 1):
         print(f'{label} iteration {i+1}/{nIter}')
@@ -171,7 +174,7 @@ def run_wola_danse(
             elif nodeUpdatingStrategy == 'simultaneous':
                 # Deal with external target filters
                 currTime = i * hop / fs
-                if lastExtFiltUp == -1 or currTime - lastExtFiltUp >= upExtFiltEvery:
+                if lastExtFiltUp == -1 or currTime - lastExtFiltUp >= upExtTargetFiltEvery:
                     print(f'Updating external target filters at time {np.round(currTime, 3)} s...')
                     # Update external target filters
                     wExtTarget[q][:, i, :] = .5 * (wExtTarget[q][:, i, :] +\
@@ -306,6 +309,7 @@ def run_online_danse(
         beta=0.99,  # exponential averaging constant
         fs=16000,
         upExtFiltEvery=1,  # time [s] bw. consecutive updates of external target filters
+        B=0,  # number of frames bw. consecutive updates of fusion vectors
         batchModeNetWideFilters=None,
     ):
 
@@ -371,6 +375,8 @@ def run_online_danse(
     if filterType == 'gevd':
         label += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
+    fusionFilts = [None for _ in range(nNodes)]
+    lastFuVectUp = -1 * np.ones(nNodes)
     # Loop over frames
     for i in range(nIter - 1):
         print(f'{label} iteration {i+1}/{nIter}')
@@ -385,14 +391,23 @@ def run_online_danse(
             (L, nNodes),
             dtype=np.complex128
         )
-        fusionFilts = [None for _ in range(nNodes)]
+        
+        # Check if fusion vectors are to be updated
+        # raise NotImplementedError('See TODO in code below')
+        # TODO: only update the fusion vectors every T_EXT seconds, according
+        # to a certain alpha (e.g., alpha = 0.5) and the target fusion vectors,
+        # which are themselves updated every frame based on the DANSE filters
+        # wkk and an exponential averaging constant betaEXT >> 0.
         for k in range(nNodes):
             yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             if batchModeNetWideFilters is None:
                 # Define fusion vector
                 if nodeUpdatingStrategy == 'sequential':
-                    fusionFilts[k] = w[k][:yk.shape[1], i].conj()
+                    if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
+                        print(f'Updating fusion vectors at frame {i} (every {B} frames)...')
+                        lastFuVectUp[k] = i
+                        fusionFilts[k] = w[k][:yk.shape[1], i].conj()
                 elif nodeUpdatingStrategy == 'simultaneous':
                     # Deal with external target filters
                     currTime = i * L / fs
