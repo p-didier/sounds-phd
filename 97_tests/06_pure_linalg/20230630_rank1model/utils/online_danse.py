@@ -20,6 +20,7 @@ class WOLAparameters:
     B: int = 0  # number of frames bw. consecutive updates of fusion vectors
     alpha: float = 0.5  # exponential averaging constant for fusion vectors
     betaExt: float = 0.99  # exponential averaging constant for external target filters
+    startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
 
 def get_window(winType, nfft):
     
@@ -311,6 +312,7 @@ def run_online_danse(
         alpha=0.5,  # exponential averaging constant for fusion vectors
         betaExt=0.99,  # exponential averaging constant for external target filters
         batchModeNetWideFilters=None,
+        startExpAvgAfter=0 # number of frames after which to start exponential averaging
     ):
 
     # Get noisy signal (time-domain)
@@ -392,37 +394,19 @@ def run_online_danse(
             dtype=np.complex128
         )
         
-        # Check if fusion vectors are to be updated
-        # raise NotImplementedError('See TODO in code below')
-        # TODO: only update the fusion vectors every T_EXT seconds, according
-        # to a certain alpha (e.g., alpha = 0.5) and the target fusion vectors,
-        # which are themselves updated every frame based on the DANSE filters
-        # wkk and an exponential averaging constant betaEXT >> 0.
+        # Update fusion vectors
         for k in range(nNodes):
             yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             if batchModeNetWideFilters is None:
-                # Update target fusion vector
+                # Update target fusion vector (using beta_EXT)
                 fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
                     (1 - betaExt) * w[k][:yk.shape[1], i].conj()
-                # Check if fusion vector is to be updated
+                # Check if effective fusion vector is to be updated
                 if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
-                    print(f'Updating fusion vectors at frame {i} (every {B} frames)...')
-                    lastFuVectUp[k] = i
                     fusionVects[k] = (1 - alpha) * fusionVects[k] +\
                         alpha * fusionVectTargets[k]
-                    
-                    
-                    #     wExtTarget[k][:, i + 1] = .5 * (wExtTarget[k][:, i] +\
-                    #         w[k][:yk.shape[1], i].conj())
-                    # else:
-                    #     # Do not update external target filters
-                    #     wExtTarget[k][:, i + 1] = wExtTarget[k][:, i]
-                    
-                    # # Update external filters (effectively used)
-                    # wExt[k][:, i + 1] = beta * wExt[k][:, i] +\
-                    #     (1 - beta) * wExtTarget[k][:, i + 1]
-                    # fusionFilts[k] = wExt[k][:, i + 1]
+                    lastFuVectUp[k] = i
             else:
                 # Compute index where the fusion filters are stored in the
                 # batch-mode network-wide DANSE filters
@@ -432,7 +416,7 @@ def run_online_danse(
             fusedSignals[:, k] = yk @ fusionVects[k]
             fusedSignalsNoiseOnly[:, k] = nk @ fusionVects[k]
         
-        # Loop over nodes
+        # Filter update loop
         for k in range(nNodes):
             # Get y tilde
             yTilde = np.concatenate((
@@ -448,12 +432,12 @@ def run_online_danse(
             RyyCurr = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
             # Update covariance matrices
-            # if i > 2:
-            Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-            Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
-            # else:
-            #     Ryy[k] = RyyCurr
-            #     Rnn[k] = RnnCurr
+            if i > startExpAvgAfter:
+                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
+                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            else:
+                Ryy[k] = RyyCurr
+                Rnn[k] = RnnCurr
 
             # Check if filter ought to be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:

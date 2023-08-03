@@ -35,7 +35,8 @@ def plot_final(
         toPlot: dict,
         fs=16e3,
         L=1024,
-        avgAcrossNodesFlag=False
+        avgAcrossNodesFlag=False,
+        figTitleSuffix=None
     ):
     """Plot the final results of the MC runs, for each filter type."""
 
@@ -43,7 +44,6 @@ def plot_final(
     fig, axes = plt.subplots(1, 1)
     fig.set_size_inches(8.5, 3.5)
     allLineStyles = ['-', '--', '-.', ':']
-    allMarkers = ['s', 'o', 'x', 'd']
     for idxFilter, filterType in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
         if idxFilter > len(allLineStyles):
@@ -82,12 +82,6 @@ def plot_final(
                         )
         else:  # <-- batch-mode 
             # Plot as function of signal duration
-            nDurations = toPlot[filterType].shape[1]
-            if nDurations > len(allMarkers):
-                marker = np.random.choice(allMarkers)
-            else:
-                marker = allMarkers[nDurations]
-            
             if avgAcrossNodesFlag:  # Case where we have an average across nodes
                 # Add a patch of color to show the range of values across MC runs
                 axes.fill_between(
@@ -100,7 +94,7 @@ def plot_final(
                 axes.loglog(
                     durations,
                     np.mean(toPlot[filterType], axis=0),
-                    f'{baseColor}{marker}{lineStyle}',
+                    f'{baseColor}o{lineStyle}',
                     label=filterType
                 )
             else:  # Case where we have data per node and per MC run
@@ -108,13 +102,16 @@ def plot_final(
                     axes.loglog(
                         durations,
                         np.mean(toPlot[filterType][:, :, k], axis=0),
-                        f'{baseColor}{marker}{lineStyle}',
+                        f'{baseColor}o{lineStyle}',
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )
     axes.set_xlabel('Signal duration (s)', loc='left')
     axes.legend(loc='lower left')
-    axes.set_title(f'{nMC} MC runs')
+    ti = f'{nMC} MC runs'
+    if figTitleSuffix is not None:
+        ti += f' ({figTitleSuffix})'
+    axes.set_title(ti)
     axes.grid(which='both')
     axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
     axes.set_xlim([np.amin(durations), np.amax(durations)])
@@ -126,6 +123,20 @@ def plot_final(
     ax2.set_xlabel('Iteration index (-)', loc='left')
     fig.tight_layout()
     # Adapt y-axis limits to the data
+    ymin, ymax = np.inf, -np.inf
+    for idxFilter, filterType in enumerate(toPlot.keys()):
+        if 'online' in filterType:
+            idxStart = int(np.amin(durations) * fs // L)
+            ymin = min(ymin, np.amin(toPlot[filterType][:, idxStart:, :]))
+            ymax = max(ymax, np.amax(toPlot[filterType][:, idxStart:, :]))
+        else:
+            ymin = min(ymin, np.amin(toPlot[filterType]))
+            ymax = max(ymax, np.amax(toPlot[filterType]))
+    # Round to the nearest power of 10
+    # ymax = 10 ** np.ceil(np.log10(ymax))
+    ymax = 0.1  # <-- FIXME: HARDCODED
+    ymin = 10 ** np.floor(np.log10(ymin))
+    axes.set_ylim([ymin, ymax])
     plt.show(block=False)
 
     return fig
