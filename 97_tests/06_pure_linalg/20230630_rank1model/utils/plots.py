@@ -29,16 +29,17 @@ def plot_individual_run(filters: dict, scalings, sigma_sr, sigma_nr, nSamples):
     return fig
 
 
-def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
+def plot_final(
+        durations,
+        taus,
+        toPlot: dict,
+        fs=16e3,
+        L=1024,
+        avgAcrossNodesFlag=False
+    ):
     """Plot the final results of the MC runs, for each filter type."""
-    
-    # Check if we have data per node, or an average over nodes
-    avgAcrossNodesFlag = len(toPlot[list(toPlot.keys())[0]].shape) == 3
-    # if `len(toPlot[list(toPlot.keys())[0]].shape) == 4`, the data is available
-    # per node and per MC run (i.e., we have a 4D array).
 
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
-    nDurations = toPlot[list(toPlot.keys())[0]].shape[1]
     fig, axes = plt.subplots(1, 1)
     fig.set_size_inches(8.5, 3.5)
     allLineStyles = ['-', '--', '-.', ':']
@@ -50,94 +51,81 @@ def plot_final(durations, taus, toPlot: dict, b=0.1, fs=16e3, L=1024):
         else:
             lineStyle = allLineStyles[idxFilter]
 
-        nTaus = toPlot[filterType].shape[2]
-
-        if nDurations == 1:  # Case where we consider a single signal duration
+        if 'online' in filterType:
+            nTaus = toPlot[filterType].shape[2]
             # Plot as function of beta (== as function of tau)
-            if avgAcrossNodesFlag:
-                axes.fill_between(
-                    taus,
-                    np.amin(toPlot[filterType][:, 0, :], axis=0),
-                    np.amax(toPlot[filterType][:, 0, :], axis=0),
-                    color=baseColor,
-                    alpha=0.15
-                )
-                axes.semilogy(
-                    taus,
-                    np.mean(toPlot[filterType][:, 0, :], axis=0),
-                    f'{baseColor}o-',
-                    label=filterType
-                )
-            else:
-                for k in range(toPlot[filterType].shape[-1]):
-                    raise NotImplementedError('Not tested yet')
-                    axes[0].loglog(
-                        taus,
-                        np.mean(toPlot[filterType][:, 0, :, k], axis=0),
-                        f'{baseColor}o-',
-                        label=f'{filterType} $k=${k+1}',
-                        alpha=(k + 1) / toPlot[filterType].shape[-1]
-                    )
-            axes.set_xlabel('Exp. avg. time constant $\\tau$ (s)', loc='left')
-            axes.legend(loc='upper right')
-            axes.set_title(f'{nMC} MC runs - {durations[0]} s signals')
-            # Add secondary x-axis with beta values
-            ax2 = axes.secondary_xaxis("top")
-            ax2.set_xticks(axes.get_xticks())
-            betas = np.exp(np.log(b) / (np.array(axes.get_xticks()) * fs / L))
-            ax2.set_xticklabels(np.round(betas, 3))
-            ax2.set_xlabel('Exp. avg. constant $\\beta$ (-)', loc='left')
-        else:
-            # Plot as function of signal duration
+            xAxis = np.arange(0, toPlot[filterType].shape[1]) * L / fs
             for idxTau in range(nTaus):
-                if idxTau > len(allMarkers):
-                    marker = np.random.choice(allMarkers)
-                else:
-                    marker = allMarkers[idxTau]
-                
-                if avgAcrossNodesFlag:  # Case where we have an average across nodes
-                    # Add a patch of color to show the range of values across MC runs
+                if avgAcrossNodesFlag:
                     axes.fill_between(
-                        durations,
+                        xAxis,
                         np.amin(toPlot[filterType][:, :, idxTau], axis=0),
                         np.amax(toPlot[filterType][:, :, idxTau], axis=0),
                         color=baseColor,
                         alpha=0.15
                     )
-                    # Case where we have a single tau
-                    if 'danse' not in filterType and 'online' not in filterType:
-                        axes.loglog(
-                            durations,
-                            np.mean(toPlot[filterType][:, :, idxTau], axis=0),
-                            f'{baseColor}{marker}{lineStyle}',
-                            label=filterType
-                        )
-                        break  # no need to loop over tau's
-                    else:  # Case where we have multiple tau's
-                        tauLabel = f'tau{taus[idxTau]}'
-                        # Replace dot (".") by "p"
-                        tauLabel = tauLabel.replace('.', 'p')
-                        axes.loglog(
-                            durations,
-                            np.mean(toPlot[filterType][:, :, idxTau], axis=0),
-                            f'{baseColor}{marker}{lineStyle}',
-                            label=f'{filterType}_{tauLabel}'
-                        )
-                else:  # Case where we have data per node and per MC run
+                    axes.semilogy(
+                        xAxis,
+                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                        f'{baseColor}-',
+                        label=filterType
+                    )
+                else:
                     for k in range(toPlot[filterType].shape[-1]):
-                        axes.loglog(
-                            durations,
-                            np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
-                            f'{baseColor}{marker}{lineStyle}',
+                        raise NotImplementedError('Not tested yet')
+                        axes[0].loglog(
+                            taus,
+                            np.mean(toPlot[filterType][:, 0, :, k], axis=0),
+                            f'{baseColor}o-',
                             label=f'{filterType} $k=${k+1}',
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )
-            axes.set_xlabel('Signal duration (s)')
-            axes.legend(loc='lower left')
-            axes.set_title(f'{nMC} MC runs')
+        else:  # <-- batch-mode 
+            # Plot as function of signal duration
+            nDurations = toPlot[filterType].shape[1]
+            if nDurations > len(allMarkers):
+                marker = np.random.choice(allMarkers)
+            else:
+                marker = allMarkers[nDurations]
+            
+            if avgAcrossNodesFlag:  # Case where we have an average across nodes
+                # Add a patch of color to show the range of values across MC runs
+                axes.fill_between(
+                    durations,
+                    np.amin(toPlot[filterType], axis=0),
+                    np.amax(toPlot[filterType], axis=0),
+                    color=baseColor,
+                    alpha=0.15
+                )
+                axes.loglog(
+                    durations,
+                    np.mean(toPlot[filterType], axis=0),
+                    f'{baseColor}{marker}{lineStyle}',
+                    label=filterType
+                )
+            else:  # Case where we have data per node and per MC run
+                for k in range(toPlot[filterType].shape[-1]):
+                    axes.loglog(
+                        durations,
+                        np.mean(toPlot[filterType][:, :, k], axis=0),
+                        f'{baseColor}{marker}{lineStyle}',
+                        label=f'{filterType} $k=${k+1}',
+                        alpha=(k + 1) / toPlot[filterType].shape[-1]
+                    )
+    axes.set_xlabel('Signal duration (s)', loc='left')
+    axes.legend(loc='lower left')
+    axes.set_title(f'{nMC} MC runs')
     axes.grid(which='both')
     axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
+    axes.set_xlim([np.amin(durations), np.amax(durations)])
+    # Add secondary x-axis with beta values
+    ax2 = axes.secondary_xaxis("top")
+    ax2.set_xticks(axes.get_xticks())
+    xTicks2 = np.round(axes.get_xticks() * fs / L).astype(int)
+    ax2.set_xticklabels(xTicks2)
+    ax2.set_xlabel('Iteration index (-)', loc='left')
     fig.tight_layout()
+    # Adapt y-axis limits to the data
     plt.show(block=False)
 
     return fig

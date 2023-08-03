@@ -24,7 +24,7 @@ DURATIONS = np.logspace(np.log10(1), np.log10(30), 20)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
 # DURATIONS = [30]
 FS = 16e3
-N_MC = 5
+N_MC = 10
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230802_tests'
 # EXPORT_FOLDER = None
 # TAUS = [2., 4., 8.]
@@ -60,11 +60,10 @@ SEED = 0
 
 WOLA_PARAMS = WOLAparameters(
     fs=FS,
-    betaDanse=0.75,
-    # nfft=4096,
     B=0,  # frames
     alpha=1,  # if ==1, no fusion vector relaxation
-    betaExt=0.98  # if ==0, no extra fusion vector relaxation
+    betaExt=0.  # if ==0, no extra fusion vector relaxation
+    # betaExt=0.98  # if ==0, no extra fusion vector relaxation
 )
 
 # Debug parameters
@@ -118,11 +117,21 @@ def main(
     )
     sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
 
-    # Initialize arrays for storing results
-    shape = (nMC, len(durations), len(taus))
-    if SHOW_DELTA_PER_NODE:
-        shape += (K,)  # add dimension for nodes
-    toPlot = dict([(key, np.zeros(shape)) for key in TO_COMPUTE])
+    # Initialize dictionary where results are stored for plotting
+    toDict = []
+    for filterType in toCompute:
+        if 'online' in filterType:
+            nIter = int(np.amax(durations) * fs / wolaParams.nfft)
+            if SHOW_DELTA_PER_NODE:
+                toDict.append((filterType, np.zeros((nMC, nIter, len(taus), K))))
+            else:
+                toDict.append((filterType, np.zeros((nMC, nIter, len(taus)))))
+        else:
+            if SHOW_DELTA_PER_NODE:
+                toDict.append((filterType, np.zeros((nMC, len(durations), K))))
+            else:
+                toDict.append((filterType, np.zeros((nMC, len(durations)))))
+    toPlot = dict(toDict)
 
     for idxMC in range(nMC):
         print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
@@ -150,38 +159,26 @@ def main(
             if np.abs(sigma_nr[n] ** 2 - selfNoisePower) > 1e-6:
                 raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {selfNoisePower}')
             
-        # Loop over durations
-        for idxDur in range(len(durations)):
-            # Generate noisy signals
-            nSamples = int(durations[idxDur] * fs)
-            noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
+        # Compute desired filters
+        allFilters = get_filters(
+            cleanSigs,
+            noiseSignals,
+            channelToNodeMap,
+            gevdRank=1,
+            toCompute=toCompute,
+            wolaParams=wolaParams,
+            taus=taus,
+            durations=durations,
+            b=b,
+            fs=fs
+        )
 
-            # Compute desired filters
-            filtersAllTaus = get_filters(
-                noisySignals,
-                cleanSigs[:nSamples, :],
-                noiseSignals[:nSamples, :],
-                channelToNodeMap,
-                gevdRank=1,
-                toCompute=toCompute,
-                wolaParams=wolaParams,
-                taus=taus,
-                b=b
-            )
-
-            # Compute metrics
-            for idxFilter in range(len(toCompute)):
-
-                filterType = toCompute[idxFilter]
-                currFilt = filtersAllTaus[filterType]
-
-                for idxTau in range(currFilt.shape[0]):
-
-                    if len(currFilt.shape) == 4:
-                        currFiltCurrTau = currFilt[idxTau, :, :, :]
-                    else:
-                        currFiltCurrTau = currFilt[idxTau, :, :]
-
+        # Compute metrics
+        for filterType in toCompute:
+            currFilters = allFilters[filterType]
+            if 'online' in filterType:
+                for idxTau in range(len(taus)):
+                    currFiltCurrTau = currFilters[idxTau, :, :, :] 
                     metrics = get_metrics(
                         M,
                         currFiltCurrTau,
@@ -192,15 +189,37 @@ def main(
                         filterType=filterType,
                         exportDiffPerFilter=SHOW_DELTA_PER_NODE  # export all differences individually
                     )
-
-                    # Store metrics
                     if SHOW_DELTA_PER_NODE:
-                        toPlot[filterType][idxMC, idxDur, idxTau, :] = metrics
+                        toPlot[filterType][idxMC, :, idxTau, :] = metrics
                     else:
-                        toPlot[filterType][idxMC, idxDur, idxTau] = metrics
+                        toPlot[filterType][idxMC, :, idxTau] = metrics
+            else:
+                for idxDur in range(len(durations)):
+                    currFiltCurrDur = currFilters[idxDur, :, :]
+                    metrics = get_metrics(
+                        M,
+                        currFiltCurrDur,
+                        scalings,
+                        sigma_sr,
+                        sigma_nr,
+                        channelToNodeMap,
+                        filterType=filterType,
+                        exportDiffPerFilter=SHOW_DELTA_PER_NODE  # export all differences individually
+                    )
+                    if SHOW_DELTA_PER_NODE:
+                        toPlot[filterType][idxMC, idxDur, :] = metrics
+                    else:
+                        toPlot[filterType][idxMC, idxDur] = metrics
     
     # Plot results
-    fig = plot_final(durations, taus, toPlot, b=b, fs=fs, L=wolaParams.nfft)
+    fig = plot_final(
+        durations,
+        taus,
+        toPlot,
+        fs=fs,
+        L=wolaParams.nfft,
+        avgAcrossNodesFlag=not SHOW_DELTA_PER_NODE
+    )
 
     if EXPORT_FOLDER is not None:
         if len(durations) > 1:
@@ -491,7 +510,6 @@ def get_clean_signals(
 
 
 def get_filters(
-        noisySignals,
         cleanSigs,
         noiseSignals,
         channelToNodeMap,
@@ -499,43 +517,58 @@ def get_filters(
         toCompute=[''],
         wolaParams: WOLAparameters=WOLAparameters(),
         taus=[2.],
-        b=0.1
+        durations=[1.],
+        b=0.1,
+        fs=16e3,
     ):
     """Compute filters."""
     kwargs = {
-        'noisySignals': noisySignals,
-        'cleanSigs': cleanSigs,
-        'noiseOnlySigs': noiseSignals,
         'channelToNodeMap': channelToNodeMap,
         'rank': gevdRank,
         'wolaParams': wolaParams
     }
     filters = {}
     for filterType in toCompute:
-        # Differentiate tau-dependent filters from other filters
-        if 'danse' in filterType or 'online' in filterType:
-            tausCurr = copy.deepcopy(taus)
-        else:
-            tausCurr = [0.]  # dummy value (no need to compute for several tau's)
-        
-        currFiltersAllTaus = []
-        for idxTau in range(len(tausCurr)):
-            # Set beta based on tau
-            kwargs['wolaParams'].betaDanse = np.exp(
-                np.log(b) / (tausCurr[idxTau] *\
-                    kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
-            )
-            # kwargs['wolaParams'].betaMwf = np.exp(
-            #     np.log(b) / (tausCurr[idxTau] *\
-            #         kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft - 1)
-            # )
-            kwargs['wolaParams'].betaMwf = kwargs['wolaParams'].betaDanse
 
-            currFiltersAllTaus.append(
-                compute_filter(type=filterType, **kwargs)
-            )
+        print(f'Computing {filterType} filter(s)')
+
+        if 'online' in filterType:
+            # Only need to compute for longest duration
+            # + computing for several tau's
+            nSamples = int(np.amax(durations) * fs)
+            noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
+            kwargs['noisySignals'] = noisySignals
+            kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
+            kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
+            currFiltsAll = []
+            # ^^^ shape: (nTaus, nSensors, nIters, nNodes)
+            for idxTau in range(len(taus)):
+                # Set beta based on tau
+                kwargs['wolaParams'].betaMwf = np.exp(
+                    np.log(b) / (taus[idxTau] *\
+                        kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
+                )
+                kwargs['wolaParams'].betaDanse = 0.98
+                currFiltsAll.append(
+                    compute_filter(type=filterType, **kwargs)
+                )
         
-        filters[filterType] = np.array(currFiltersAllTaus)
+        else:  # <-- batch-mode
+            # Only need to compute for a single dummy tau
+            # + computing for several durations
+            currFiltsAll = []
+            # ^^^ shape: (nDurations, nSensors, nNodes)
+            for dur in durations:
+                nSamples = int(np.amax(dur) * fs)
+                noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
+                kwargs['noisySignals'] = noisySignals
+                kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
+                kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
+                currFiltsAll.append(
+                    compute_filter(type=filterType, **kwargs)
+                )
+        
+        filters[filterType] = np.array(currFiltsAll)
 
     return filters
 
@@ -563,22 +596,24 @@ def get_metrics(
     # Compute difference between normalized estimated filters
     # and normalized expected filters
     nFilters = filters.shape[-1]
-    diffsPerCoefficient = np.zeros(nFilters)
+    diffsPerCoefficient = [None for _ in range(nFilters)]
     currNode = 0
     for m in range(nFilters):
         if 'danse' in filterType:  # DANSE case
             # Determine reference sensor index
-            if 'danse' in filterType:
-                idxRef = np.where(channelToNodeMap == m)[0][0]
+            idxRef = np.where(channelToNodeMap == m)[0][0]
+            if 'online' in filterType:
+                # Keep all iterations (all durations)
+                currFilt = filters[:, :, m]
             else:
-                idxRef = copy.deepcopy(m)
-            currFilt = filters[:, -1, m]
+                # Only keep last iteration (converged filter coefficients)
+                currFilt = filters[:, -1, m]
         else:  # MWF case
             if computeForComparisonWithDANSE:
                 if channelToNodeMap[m] == currNode:
                     idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
                     if 'online' in filterType:
-                        currFilt = filters[:, -1, idxRef]
+                        currFilt = filters[:, :, idxRef]
                     else:
                         currFilt = filters[:, idxRef]
                     currNode += 1
@@ -589,16 +624,24 @@ def get_metrics(
                 idxRef = copy.deepcopy(m)
                 currFilt = filters[:, m]
         
-        diffsPerCoefficient[m] = np.mean(np.abs(
-            currFilt - fasAndSPF[:, idxRef]
-        ))
+        currFas = fasAndSPF[:, idxRef]
+        if len(currFilt.shape) == 2:
+            diffsPerCoefficient[m] = np.mean(np.abs(
+                currFilt - currFas[:, np.newaxis]
+            ), axis=0)
+        else:
+            diffsPerCoefficient[m] = np.mean(np.abs(
+                currFilt - currFas
+            ))
+    diffsPerCoefficient = np.array(diffsPerCoefficient)
     
     if exportDiffPerFilter:
+        raise NotImplementedError('To be adapted')
         # All differences individually
         diffs = np.array([d for d in diffsPerCoefficient if not np.isnan(d)])
     else:
         # Average absolute difference over filters
-        diffs = np.nanmean(diffsPerCoefficient)
+        diffs = np.nanmean(diffsPerCoefficient, axis=0)
 
     return diffs
 
