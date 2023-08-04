@@ -18,18 +18,18 @@ sys.path.append('..')
 RANDOM_DELAYS = False
 TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
 N_SENSORS = 5
-N_NODES = 5
+N_NODES = 3
 SELFNOISE_POWER = 1
 DURATIONS = np.logspace(np.log10(1), np.log10(40), 30)
 # DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
 # DURATIONS = [30]
 FS = 16e3
-N_MC = 10
+N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230803_tests'
 # EXPORT_FOLDER = None
 # TAUS = [2., 4., 8.]
 # TAUS = list(np.linspace(1, 10, 10))
-TAUS = [2.]
+TAUS = [4.]
 B = 0.1  # factor for determining beta from tau (online processing)
 
 # Type of signal
@@ -38,12 +38,12 @@ B = 0.1  # factor for determining beta from tau (online processing)
 SIGNAL_TYPE = 'noise_complex'
 
 TO_COMPUTE = [
-    # 'mwf',
-    'gevdmwf',
-    # 'danse',
-    # 'gevddanse',
-    # 'danse_sim',
-    # 'gevddanse_sim',
+    # 'mwf_batch',
+    'gevdmwf_batch',
+    # 'danse_batch',
+    # 'gevddanse_batch',
+    # 'danse_sim_batch',
+    # 'gevddanse_sim_batch',
     # 'mwf_online',
     'gevdmwf_online',
     # 'danse_online',
@@ -66,6 +66,7 @@ WOLA_PARAMS = WOLAparameters(
     # betaExt=0.98,  # if ==0, no extra fusion vector relaxation
     betaExt=np.concatenate((np.linspace(0, 0.8, 10), np.linspace(0.9, 0.99, 10))),  # if ==0, no extra fusion vector relaxation
     startExpAvgAfter=2,  # frames
+    startFusionExpAvgAfter=2,  # frames
 )
 
 # Debug parameters
@@ -257,7 +258,7 @@ def compute_filter(
         noisySignals: np.ndarray,
         cleanSigs: np.ndarray,
         noiseOnlySigs: np.ndarray,
-        type='mwf',
+        type='mwf_batch',
         rank=1,
         channelToNodeMap=None,  # only used for DANSE
         wolaParams: WOLAparameters=WOLAparameters()
@@ -271,7 +272,7 @@ def compute_filter(
     nSensors = cleanSigs.shape[1]
     Ryy = noisySignals.T.conj() @ noisySignals
     Rnn = noiseOnlySigs.T.conj() @ noiseOnlySigs
-    if type == 'mwf':
+    if type == 'mwf_batch':
         RyyInv = np.linalg.inv(Ryy)
         if np.iscomplex(cleanSigs).any():
             w = np.zeros((nSensors, nSensors), dtype=np.complex128)
@@ -290,7 +291,7 @@ def compute_filter(
             L=wolaParams.nfft,
             beta=wolaParams.betaMwf
         )
-    elif type == 'gevdmwf':
+    elif type == 'gevdmwf_batch':
         sigma, Xmat = la.eigh(Ryy, Rnn)
         idx = np.flip(np.argsort(sigma))
         sigma = sigma[idx]
@@ -342,6 +343,7 @@ def compute_filter(
             kwargs['alpha'] = wolaParams.alpha
             kwargs['betaExt'] = wolaParams.betaExt
             kwargs['startExpAvgAfter'] = wolaParams.startExpAvgAfter
+            kwargs['startFusionExpAvgAfter'] = wolaParams.startFusionExpAvgAfter
             w = run_online_danse(**kwargs)
         else:
             w = run_danse(**kwargs)
@@ -652,7 +654,7 @@ def get_metrics(
             diffsPerCoefficient[m] = np.mean(np.abs(
                 currFilt - currFas
             ))
-    diffsPerCoefficient = np.array(diffsPerCoefficient)
+    diffsPerCoefficient = np.array(diffsPerCoefficient, dtype=object)
     
     if exportDiffPerFilter:
         raise NotImplementedError('To be adapted')
@@ -660,7 +662,13 @@ def get_metrics(
         diffs = np.array([d for d in diffsPerCoefficient if not np.isnan(d)])
     else:
         # Average absolute difference over filters
-        diffs = np.nanmean(diffsPerCoefficient, axis=0)
+        diffsPerCoefficient_noNan = []
+        for d in diffsPerCoefficient:
+            if isinstance(d, np.ndarray):
+                diffsPerCoefficient_noNan.append(d)
+            elif not np.isnan(d):
+                diffsPerCoefficient_noNan.append(d)
+        diffs = np.nanmean(diffsPerCoefficient_noNan, axis=0)
 
     return diffs
 

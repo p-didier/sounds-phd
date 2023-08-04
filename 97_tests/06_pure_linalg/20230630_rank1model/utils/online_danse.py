@@ -21,6 +21,7 @@ class WOLAparameters:
     alpha: float = 0.5  # exponential averaging constant for fusion vectors
     betaExt: float = 0.99  # exponential averaging constant for external target filters
     startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
+    startFusionExpAvgAfter: int = 0  # same as above, for the fusion vectors
 
 def get_window(winType, nfft):
     
@@ -312,7 +313,8 @@ def run_online_danse(
         alpha=0.5,  # exponential averaging constant for fusion vectors
         betaExt=0.99,  # exponential averaging constant for external target filters
         batchModeNetWideFilters=None,
-        startExpAvgAfter=0 # number of frames after which to start exponential averaging
+        startExpAvgAfter=0, # number of frames after which to start exponential averaging
+        startFusionExpAvgAfter=0, # same as above, for the fusion vectors
     ):
 
     # Get noisy signal (time-domain)
@@ -376,8 +378,15 @@ def run_online_danse(
     if filterType == 'gevd':
         label += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
-    fusionVectTargets = [np.zeros(sum(channelToNodeMap == k)) for k in range(nNodes)]
-    fusionVects = [fusionVectTargets[k] for k in range(nNodes)]
+
+    # Initialize fusion vectors
+    fusionVectTargets = [None for _ in range(nNodes)]
+    fusionVects = [None for _ in range(nNodes)]
+    for k in range(nNodes):
+        baseVect = np.zeros(sum(channelToNodeMap == k))
+        baseVect[0] = 1
+        fusionVectTargets[k] = baseVect
+        fusionVects[k] = baseVect
     lastFuVectUp = -1 * np.ones(nNodes)
     # Loop over frames
     for i in range(nIter - 1):
@@ -399,9 +408,16 @@ def run_online_danse(
             yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             if batchModeNetWideFilters is None:
-                # Update target fusion vector (using beta_EXT)
-                fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
-                    (1 - betaExt) * w[k][:yk.shape[1], i].conj()
+
+                # Update target fusion vector
+                if i > startFusionExpAvgAfter:
+                    # Update using `beta_EXT`
+                    fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
+                        (1 - betaExt) * w[k][:yk.shape[1], i]
+                else:
+                    # Update without `beta_EXT`
+                    fusionVectTargets[k] = w[k][:yk.shape[1], i]
+
                 # Check if effective fusion vector is to be updated
                 if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
                     fusionVects[k] = (1 - alpha) * fusionVects[k] +\
@@ -413,8 +429,8 @@ def run_online_danse(
                 fusionVects[k] = batchModeNetWideFilters[channelToNodeMap == k, -1, k]
             
             # Perform fusion
-            fusedSignals[:, k] = yk @ fusionVects[k]
-            fusedSignalsNoiseOnly[:, k] = nk @ fusionVects[k]
+            fusedSignals[:, k] = yk @ fusionVects[k].conj()
+            fusedSignalsNoiseOnly[:, k] = nk @ fusionVects[k].conj()
         
         # Filter update loop
         for k in range(nNodes):
@@ -433,9 +449,11 @@ def run_online_danse(
             RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
             # Update covariance matrices
             if i > startExpAvgAfter:
+                # Using `beta`
                 Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
                 Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
             else:
+                # Without `beta`
                 Ryy[k] = RyyCurr
                 Rnn[k] = RnnCurr
 

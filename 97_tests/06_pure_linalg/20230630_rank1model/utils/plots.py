@@ -127,14 +127,20 @@ def plot_final(
     for idxFilter, filterType in enumerate(toPlot.keys()):
         if 'online' in filterType:
             idxStart = int(np.amin(durations) * fs // L)
-            ymin = min(ymin, np.amin(toPlot[filterType][:, idxStart:, :]))
-            ymax = max(ymax, np.amax(toPlot[filterType][:, idxStart:, :]))
+            ymin = min(
+                ymin,
+                np.amin(np.mean(toPlot[filterType][:, idxStart:, :], axis=0))
+            )
+            ymax = max(
+                ymax,
+                np.amax(np.mean(toPlot[filterType][:, idxStart:, :], axis=0))
+            )
         else:
             ymin = min(ymin, np.amin(toPlot[filterType]))
             ymax = max(ymax, np.amax(toPlot[filterType]))
     # Round to the nearest power of 10
     # ymax = 10 ** np.ceil(np.log10(ymax))
-    ymax = 0.1  # <-- FIXME: HARDCODED
+    ymax = 0.01  # <-- FIXME: HARDCODED
     ymin = 10 ** np.floor(np.log10(ymin))
     axes.set_ylim([ymin, ymax])
     plt.show(block=False)
