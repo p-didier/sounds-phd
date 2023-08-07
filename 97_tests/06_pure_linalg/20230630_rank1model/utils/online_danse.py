@@ -315,6 +315,8 @@ def run_online_danse(
         batchModeNetWideFilters=None,
         startExpAvgAfter=0, # number of frames after which to start exponential averaging
         startFusionExpAvgAfter=0, # same as above, for the fusion vectors
+        ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
+        verbose=True,
     ):
 
     # Get noisy signal (time-domain)
@@ -390,7 +392,8 @@ def run_online_danse(
     lastFuVectUp = -1 * np.ones(nNodes)
     # Loop over frames
     for i in range(nIter - 1):
-        print(f'{label} iteration {i+1}/{nIter}')
+        if verbose:
+            print(f'{label} iteration {i+1}/{nIter}')
         idxBegFrame = i * L
         idxEndFrame = (i + 1) * L
         # Compute fused signals from all sensors
@@ -403,30 +406,34 @@ def run_online_danse(
             dtype=np.complex128
         )
         
-        # Update fusion vectors
+        # Update fusion vectors and perform fusion
         for k in range(nNodes):
             yk = y[idxBegFrame:idxEndFrame, channelToNodeMap == k]
             nk = n[idxBegFrame:idxEndFrame, channelToNodeMap == k]
-            if batchModeNetWideFilters is None:
 
-                # Update target fusion vector
-                if i > startFusionExpAvgAfter:
-                    # Update using `beta_EXT`
-                    fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
-                        (1 - betaExt) * w[k][:yk.shape[1], i]
-                else:
-                    # Update without `beta_EXT`
-                    fusionVectTargets[k] = w[k][:yk.shape[1], i]
-
-                # Check if effective fusion vector is to be updated
-                if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
-                    fusionVects[k] = (1 - alpha) * fusionVects[k] +\
-                        alpha * fusionVectTargets[k]
-                    lastFuVectUp[k] = i
+            if ignoreFusionForSSNodes and yk.shape[1] == 1:
+                pass  # do not update the fusion vector for single-sensor nodes
             else:
-                # Compute index where the fusion filters are stored in the
-                # batch-mode network-wide DANSE filters
-                fusionVects[k] = batchModeNetWideFilters[channelToNodeMap == k, -1, k]
+                if batchModeNetWideFilters is None:
+
+                    # Update target fusion vector
+                    if i > startFusionExpAvgAfter:
+                        # Update using `beta_EXT`
+                        fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
+                            (1 - betaExt) * w[k][:yk.shape[1], i]
+                    else:
+                        # Update without `beta_EXT`
+                        fusionVectTargets[k] = w[k][:yk.shape[1], i]
+
+                    # Check if effective fusion vector is to be updated
+                    if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
+                        fusionVects[k] = (1 - alpha) * fusionVects[k] +\
+                            alpha * fusionVectTargets[k]
+                        lastFuVectUp[k] = i
+                else:
+                    # Compute index where the fusion filters are stored in the
+                    # batch-mode network-wide DANSE filters
+                    fusionVects[k] = batchModeNetWideFilters[channelToNodeMap == k, -1, k]
             
             # Perform fusion
             fusedSignals[:, k] = yk @ fusionVects[k].conj()
@@ -495,11 +502,6 @@ def run_online_danse(
             else:
                 w[k][:, i + 1] = w[k][:, i]
 
-            # if batchModeNetWideFilters is not None:
-            #     # Fix first coefficients using batch-mode values
-            #     w[k][:sum(channelToNodeMap == k), i + 1] = \
-            #     batchModeNetWideFilters[channelToNodeMap == k, -1, k]
-
         # Update node index
         if nodeUpdatingStrategy == 'sequential':
             idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
@@ -525,7 +527,5 @@ def run_online_danse(
                     if cIdx == np.sum(channelToNodeMap == currNode) - 1:
                         neighborCount += 1
                 channelCount[currNode] += 1
-
-        stop = 1    
 
     return wNet

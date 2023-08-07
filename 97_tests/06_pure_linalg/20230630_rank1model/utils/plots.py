@@ -72,11 +72,17 @@ def plot_final(
                     )
                 else:
                     for k in range(toPlot[filterType].shape[-1]):
-                        raise NotImplementedError('Not tested yet')
-                        axes[0].loglog(
-                            taus,
-                            np.mean(toPlot[filterType][:, 0, :, k], axis=0),
-                            f'{baseColor}o-',
+                        # axes.fill_between(
+                        #     xAxis,
+                        #     np.amin(toPlot[filterType][:, :, idxTau, k], axis=0),
+                        #     np.amax(toPlot[filterType][:, :, idxTau, k], axis=0),
+                        #     color=baseColor,
+                        #     alpha=0.15
+                        # )
+                        axes.loglog(
+                            xAxis,
+                            np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
+                            f'{baseColor}-',
                             label=f'{filterType} $k=${k+1}',
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )

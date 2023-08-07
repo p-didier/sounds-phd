@@ -12,7 +12,8 @@ def run_online_mwf(
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         L=1024,
-        beta=0.99  # exponential averaging constant
+        beta=0.99,  # exponential averaging constant
+        verbose=True
     ):
 
     # Get noisy signal (time-domain)
@@ -34,7 +35,8 @@ def run_online_mwf(
         algLabel = 'MWF'
     # Loop over frames
     for i in range(nIter - 1):
-        print(f'Online {algLabel} iteration {i+1}/{nIter}')
+        if verbose:
+            print(f'Online {algLabel} iteration {i+1}/{nIter}')
         idxBegFrame = i * L
         idxEndFrame = (i + 1) * L
         # Get current frame
