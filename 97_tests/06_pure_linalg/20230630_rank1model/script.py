@@ -27,9 +27,9 @@ FS = 16e3
 N_MC = 1
 EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
 # EXPORT_FOLDER = None
-# TAUS = [2., 4., 8.]
+TAUS = [2., 4., 8.]
 # TAUS = list(np.linspace(1, 10, 10))
-TAUS = [4.]
+# TAUS = [4.]
 B = 0.1  # factor for determining beta from tau (online processing)
 
 # Type of signal
@@ -62,8 +62,8 @@ WOLA_PARAMS = WOLAparameters(
     fs=FS,
     B=0,  # frames
     alpha=1,  # if ==1, no fusion vector relaxation
-    betaExt=0.0,  # if ==0, no extra fusion vector relaxation
-    # betaExt=0.98,  # if ==0, no extra fusion vector relaxation
+    # betaExt=0.0,  # if ==0, no extra fusion vector relaxation
+    betaExt=0.9,  # if ==0, no extra fusion vector relaxation
     # betaExt=np.concatenate((np.linspace(0, 0.8, 10), np.linspace(0.9, 0.99, 10))),  # if ==0, no extra fusion vector relaxation
     startExpAvgAfter=2,  # frames
     startFusionExpAvgAfter=2,  # frames
@@ -89,7 +89,7 @@ def main(
         Mk=None,  # if None, randomly assign sensors to nodes
         exportFolder=EXPORT_FOLDER,
         exportFigures=True,
-        verbose=True
+        verbose=True,
     ):
     """Main function (called by default when running script)."""
 
