@@ -6,13 +6,14 @@
 
 import os
 import sys
-import functools
 import numpy as np
 from typing import Union
-import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from script import main as run_test
 
+
+# Get current file folder
+FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Global variables
 GLOBAL_SEED = 0  # Global seed for random number generator
@@ -26,14 +27,16 @@ TO_COMPUTE = [
     'gevdmwf_online',  # GEVD-MWF (online) 
     'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
 ]
-EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = '97_tests/06_pure_linalg/20230630_rank1model/figs/battery_test/20230808_tests'  # Path to export figures to
+TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
+
+# Battery name
+BATTERY_NAME = 'rank1model_noBetaExt_noSSfusion'
 
 @dataclass
 class TestParameters:
     """Class for parameters of a single test."""
-    seed: int  # Seed for random number generator
-    K: int  # Number of nodes
+    seed: int = 0  # Seed for random number generator
+    K: int = 1  # Number of nodes
     M: int = None # Number of sensors in total (if None, is randomized (at least equal to `K`))
     Mk: list[int] = None  # Number of sensors per node (if None, is randomized)
 
@@ -61,6 +64,7 @@ class TestParameters:
         else:
             assert self.M >= self.K, 'Number of sensors is smaller than number of nodes.'
 
+
 @dataclass
 class Test:
     """Class for a single test."""
@@ -80,10 +84,11 @@ class TestBattery:
 @dataclass
 class TestOutput:
     """Class for the output of a single test."""
-    name: str
-    description: str
-    parameters: TestParameters
-    results: dict[str, dict[str, np.ndarray]]
+    name: str = ''
+    description: str = ''
+    parameters: TestParameters = TestParameters()
+    results: dict[str, dict[str, np.ndarray]] = None
+
 
 def main():
     """Main function (called by default when running script)."""
@@ -95,11 +100,11 @@ def main():
     
     # Create battery of tests
     battery = TestBattery(
-        name='Rank-1 model',
+        name=BATTERY_NAME,
         description='Battery of tests for the rank-1 model.',
         tests=[
             Test(
-                name='Test 1',
+                name='test1',
                 description='Sanity check with only single-sensor nodes.',
                 parameters=TestParameters(
                     seed=0,
@@ -108,7 +113,7 @@ def main():
                 )
             ),
             Test(
-                name='Test 2',
+                name='test2',
                 description='Sanity check with one single-sensor node and one multi-sensor node.',
                 parameters=TestParameters(
                     seed=0,
@@ -118,7 +123,7 @@ def main():
                 )
             ),
             Test(
-                name='Test 3',
+                name='test3',
                 description='Battery of tests with random K and Mk values.',
                 parameters=[
                     TestParameters(
@@ -148,7 +153,7 @@ def main():
             'fs': FS,
             'exportFigures': False,
             'nMC': N_MC,
-            'verbose': False
+            'verbose': False,
         }
         if isinstance(test.parameters, list):
             print(f'- Running battery of tests "{test.name}"...')
@@ -160,6 +165,7 @@ def main():
                     K=parameters.K,
                     seed=parameters.seed,
                     Mk=parameters.Mk,
+                    taus=TAUS,
                     **commonKwargs
                 )
                 # Save output
@@ -180,6 +186,7 @@ def main():
                 K=test.parameters.K,
                 seed=test.parameters.seed,
                 Mk=test.parameters.Mk,
+                taus=TAUS,
                 **commonKwargs
             )
             # Save output
@@ -192,214 +199,15 @@ def main():
                 )
             )
 
-    # Plot results for Type-1/2 tests
-    figs = plot_results(
-        [out for out in allOutputs if out.name == 'Test 1' or out.name == 'Test 2'],
-        xAxisBatch=durations,
+    # Export results
+    if not os.path.exists(f'{FILE_FOLDER}/results'):
+        os.makedirs(f'{FILE_FOLDER}/results')
+    np.savez_compressed(
+        f'{FILE_FOLDER}/results/{battery.name}.npz',
+        allOutputs=allOutputs
     )
-    if EXPORT_FIGURES:
-        if not os.path.exists(EXPORT_PATH):
-            os.makedirs(EXPORT_PATH)
-        for fig in figs:
-            fig.savefig(f'{EXPORT_PATH}/{fig.get_label()}.pdf', bbox_inches='tight')
-            fig.savefig(f'{EXPORT_PATH}/{fig.get_label()}.png', bbox_inches='tight', dpi=300)
-    # Plot results for Type-3 (full Monte-Carlo) tests
-    fig = plot_results_mc_tests(
-        [out for out in allOutputs if 'SEED' in out.description],
-        xAxisBatch=durations,
-        indivRunsFig=False
-    )
-    if EXPORT_FIGURES:
-        if not os.path.exists(EXPORT_PATH):
-            os.makedirs(EXPORT_PATH)
-        fig.savefig(f'{EXPORT_PATH}/{fig.get_label()}.pdf', bbox_inches='tight')
-        fig.savefig(f'{EXPORT_PATH}/{fig.get_label()}.png', bbox_inches='tight', dpi=300)
-
-    # Show figures
-    plt.show(block=False)
-
-    # Wait and close figures
-    print('Press any key to close figures and exit...')
-    plt.waitforbuttonpress()
-    plt.close('all')
 
     stop = 1
-
-
-def generate_plots(baseColor, filterType, data, axes, xAxisBatch):
-    """Generate plots."""
-
-    lineStyles = ['-', '--', '-.', ':']
-
-    if 'online' in filterType:
-        xAxisOnline = np.linspace(
-            start=0,
-            stop=np.amax(xAxisBatch),
-            num=data.shape[1]
-        )
-        for idxTau in range(data.shape[-1]):
-            axes.fill_between(
-                xAxisOnline,
-                np.amin(data[:, :, idxTau], axis=0),
-                np.amax(data[:, :, idxTau], axis=0),
-                color=baseColor,
-                alpha=0.15
-            )
-            idxLineStyles = idxTau % len(lineStyles)
-            axes.loglog(
-                xAxisOnline,
-                np.mean(
-                    data[:, :, idxTau],
-                    axis=0
-                ),
-                f'{baseColor}{lineStyles[idxLineStyles]}',
-                label=filterType
-            )
-    else:
-        xAxisOnline = None
-        axes.fill_between(
-            xAxisBatch,
-            np.amin(data, axis=0),
-            np.amax(data, axis=0),
-            color=baseColor,
-            alpha=0.15
-        )
-        axes.loglog(
-            xAxisBatch,
-            np.mean(
-                data,
-                axis=0
-            ),
-            f'{baseColor}o-',
-            label=filterType
-        )
-    return xAxisOnline
-
-
-def plot_results(resAll: list[TestOutput], xAxisBatch):
-    """Plot results for Type-1 and Type-2 test."""
-    
-    figs = []
-    for res in resAll:
-        fig, axes = plt.subplots(1,1)
-        fig.set_size_inches(8.5, 3.5)
-        for ii, filterType in enumerate(TO_COMPUTE):
-            xAxisOnline = generate_plots(
-                f'C{ii}',
-                filterType,
-                res.results[filterType],
-                axes,
-                xAxisBatch
-            )
-        axes.legend()
-        axes.grid(True, which='both')
-        axes.set_xlabel('Duration [s]')
-        axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
-        # Adapt y-axis limits to the data
-        ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline, xAxisBatch)
-        axes.set_ylim([ymin, ymax])
-        axes.set_title(f'$K={res.parameters.K}$, $M={res.parameters.M}$, $M_k={res.parameters.Mk}$ ({N_MC_2} MC runs)')
-        fig.set_label(res.name)
-        figs.append(fig)
-
-    return figs
-
-
-def plot_results_mc_tests(
-        res: list[TestOutput],
-        xAxisBatch,
-        indivRunsFig=False
-    ):
-    """Plot results for Type-3 (full Monte-Carlo) tests."""
-
-    fig, axes = plt.subplots(1,1)
-    fig.set_size_inches(8.5, 3.5)
-    if indivRunsFig:
-        for testOutput in res:
-            if 'SEED' in testOutput.description:
-                for ii, filterType in enumerate(TO_COMPUTE):
-                    xAxisOnline = generate_plots(
-                        f'C{ii}',
-                        filterType,
-                        testOutput.results[filterType],
-                        axes,
-                        xAxisBatch
-                    )
-    else:  # average over all runs
-        # Build data to plot
-        dataToPlot = dict([(filterType, None) for filterType in TO_COMPUTE])
-        for ii, filterType in enumerate(TO_COMPUTE):
-            # Combine all MC runs along one axis
-            comb = res[0].results[filterType]
-            for jj in range(len(res) - 1):
-                comb = np.concatenate(
-                    (
-                        comb,
-                        res[jj + 1].results[filterType]
-                    ),
-                    axis=0
-                )
-            dataToPlot[filterType] = comb
-        
-        # Plot
-        for ii, filterType in enumerate(TO_COMPUTE):
-            xAxisOnline = generate_plots(
-                f'C{ii}',
-                filterType,
-                dataToPlot[filterType],
-                axes,
-                xAxisBatch
-            )
-        axes.set_title(f'Average over {N_MC} $\\times$ {N_MC_2} MC runs (random $\{{M_k\}}_{{k\\in\\mathcal{{K}}}}$)')
-
-    axes.legend()
-    axes.grid(True, which='both')
-    axes.set_xlabel('Duration [s]')
-    axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
-    # Adapt y-axis limits to the data
-    ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline, xAxisBatch)
-    axes.set_ylim([ymin, ymax])
-    fig.set_label('Test 3')
-
-    return fig
-
-
-def compute_yaxis_limits(
-        data: dict[str, np.ndarray],
-        xAxisOnline=None,
-        xAxisBatch=None
-    ):
-    """Compute y-axis limits for plotting."""
-    ymin, ymax = np.inf, -np.inf
-    for filterType in TO_COMPUTE:
-        if 'online' in filterType:
-            idxStart = np.argmin(np.abs(xAxisOnline - xAxisBatch[0]))
-            ymin = min(
-                ymin,
-                np.amin(np.mean(data[filterType][:, idxStart:, :], axis=0))
-            )
-            ymax = max(
-                ymax,
-                np.amax(np.mean(data[filterType][:, idxStart:, :], axis=0))
-            )
-        else:
-            ymin = min(ymin, np.amin(data[filterType]))
-            ymax = max(ymax, np.amax(data[filterType]))
-    # Add some margin
-    ymin *= 0.9
-    ymax *= 1.1
-    return ymin, ymax
-
-
-def combine_dims(a, i=0, n=1):
-    """
-    Combines dimensions of numpy array `a`, 
-    starting at index `i`,
-    and combining `n` dimensions
-    """
-    s = list(a.shape)
-    combined = functools.reduce(lambda x,y: x*y, s[i:i+n+1])
-    return np.reshape(a, s[:i] + [combined] + s[i+n+1:])
 
 
 if __name__ == '__main__':
