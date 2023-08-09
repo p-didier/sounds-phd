@@ -13,166 +13,145 @@ import scipy.linalg as la
 from utils.plots import *
 from utils.online_mwf import *
 from utils.online_danse import *
+from dataclasses import dataclass, field
 sys.path.append('..')
 
-RANDOM_DELAYS = False
-TARGET_SIGNAL_SPEECHFILE = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-N_SENSORS = 15
-N_NODES = 3
-SELFNOISE_POWER = 1
-DURATIONS = np.logspace(np.log10(1), np.log10(30), 30)
-# DURATIONS = np.logspace(np.log10(0.5), np.log10(3), 20)
-# DURATIONS = [30]
-FS = 16e3
-N_MC = 1
-EXPORT_FOLDER = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
-# EXPORT_FOLDER = None
-TAUS = [2., 4., 8.]
-# TAUS = list(np.linspace(1, 10, 10))
-# TAUS = [4.]
-B = 0.1  # factor for determining beta from tau (online processing)
+@dataclass
+class ScriptParameters:
+    randomDelays: bool = False
+    targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
+    nSensors: int = 15
+    nNodes: int = 3
+    selfNoisePower: float = 1
+    durations: np.ndarray = np.logspace(np.log10(1), np.log10(30), 30)
+    fs: float = 16e3
+    nMC: int = 1
+    exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
+    taus: list[float] = field(default_factory=lambda: [2., 4., 8.])
+    b: float = 0.1  # factor for determining beta from tau (online processing)
+    signalType: str = 'noise_complex'
+    toCompute: list[str] = field(default_factory=lambda: [
+        # 'mwf_batch',
+        'gevdmwf_batch',
+        # 'danse_batch',
+        # 'gevddanse_batch',
+        # 'danse_sim_batch',
+        # 'gevddanse_sim_batch',
+        # 'mwf_online',
+        'gevdmwf_online',
+        # 'danse_online',
+        # 'gevddanse_online',
+        # 'danse_sim_online',
+        'gevddanse_sim_online'
+        # 'danse_wola',
+        # 'gevddanse_wola',
+        # 'danse_sim_wola',
+        # 'gevddanse_sim_wola'
+    ])
+    seed: int = 0
+    wolaParams: WOLAparameters = WOLAparameters(
+        fs=fs,
+        B=0,  # frames
+        alpha=1,  # if ==1, no fusion vector relaxation
+        betaExt=0.0,  # if ==0, no extra fusion vector relaxation
+        # betaExt=0.9,  # if ==0, no extra fusion vector relaxation
+        # betaExt=np.concatenate((np.linspace(0, 0.8, 10), np.linspace(0.9, 0.99, 10))),  # if ==0, no extra fusion vector relaxation
+        startExpAvgAfter=2,  # frames
+        startFusionExpAvgAfter=2,  # frames
+    )
+    showDeltaPerNode: bool = False
+    useBatchModeFusionVectorsInOnlineDanse: bool = False
+    ignoreFusionForSSNodes: bool = True  # in DANSE, ignore fusion vector for single-sensor nodes
+    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
+    exportFigures: bool = True
+    verbose: bool = True
 
-# Type of signal
-# SIGNAL_TYPE = 'speech'
-# SIGNAL_TYPE = 'noise_real'
-SIGNAL_TYPE = 'noise_complex'
 
-TO_COMPUTE = [
-    # 'mwf_batch',
-    'gevdmwf_batch',
-    # 'danse_batch',
-    # 'gevddanse_batch',
-    # 'danse_sim_batch',
-    # 'gevddanse_sim_batch',
-    # 'mwf_online',
-    'gevdmwf_online',
-    # 'danse_online',
-    # 'gevddanse_online',
-    # 'danse_sim_online',
-    'gevddanse_sim_online'
-    # 'danse_wola',
-    # 'gevddanse_wola',
-    # 'danse_sim_wola',
-    # 'gevddanse_sim_wola'
-]
-
-SEED = 0
-
-WOLA_PARAMS = WOLAparameters(
-    fs=FS,
-    B=0,  # frames
-    alpha=1,  # if ==1, no fusion vector relaxation
-    # betaExt=0.0,  # if ==0, no extra fusion vector relaxation
-    betaExt=0.9,  # if ==0, no extra fusion vector relaxation
-    # betaExt=np.concatenate((np.linspace(0, 0.8, 10), np.linspace(0.9, 0.99, 10))),  # if ==0, no extra fusion vector relaxation
-    startExpAvgAfter=2,  # frames
-    startFusionExpAvgAfter=2,  # frames
-)
-
-# Debug parameters
-SHOW_DELTA_PER_NODE = False
-USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE = False
-IGNORE_FUSION_FOR_SSNODES = True  # in DANSE, ignore fusion vector for single-sensor nodes
-
-def main(
-        M=N_SENSORS,
-        K=N_NODES,
-        toCompute=TO_COMPUTE,
-        durations=DURATIONS,
-        fs=FS,
-        nMC=N_MC,
-        selfNoisePower=SELFNOISE_POWER,
-        seed=SEED,
-        wolaParams=WOLA_PARAMS,
-        taus=TAUS,
-        b=B,
-        Mk=None,  # if None, randomly assign sensors to nodes
-        exportFolder=EXPORT_FOLDER,
-        exportFigures=True,
-        verbose=True,
-    ):
+def main(p: ScriptParameters=ScriptParameters()):
     """Main function (called by default when running script)."""
 
     # Set random seed
-    np.random.seed(seed)
+    np.random.seed(p.seed)
     rngState = np.random.get_state()
 
-    if Mk is None:
+    if p.Mk is None:
         # For DANSE: randomly assign sensors to nodes, ensuring that each node
         # has at least one sensor
-        channelToNodeMap = np.zeros(M, dtype=int)
-        for k in range(K):
+        channelToNodeMap = np.zeros(p.nSensors, dtype=int)
+        for k in range(p.nNodes):
             channelToNodeMap[k] = k
-        for n in range(K, M):
-            channelToNodeMap[n] = np.random.randint(0, K)
+        for n in range(p.nNodes, p.nSensors):
+            channelToNodeMap[n] = np.random.randint(0, p.nNodes)
         # Sort
         channelToNodeMap = np.sort(channelToNodeMap)
     else:
         # Assign sensors to nodes according to Mk
-        channelToNodeMap = np.zeros(M, dtype=int)
-        for k in range(K):
-            idxStart = int(np.sum(Mk[:k]))
-            idxEnd = idxStart + Mk[k]
+        channelToNodeMap = np.zeros(p.nSensors, dtype=int)
+        for k in range(p.nNodes):
+            idxStart = int(np.sum(p.Mk[:k]))
+            idxEnd = idxStart + p.Mk[k]
             channelToNodeMap[idxStart:idxEnd] = k
 
     # Set rng state back to original after the random assignment of sensors
     np.random.set_state(rngState)
 
-    if isinstance(wolaParams.betaExt, (float, int)):
-        wolaParams.betaExt = np.array([wolaParams.betaExt])
+    if isinstance(p.wolaParams.betaExt, (float, int)):
+        p.wolaParams.betaExt = np.array([p.wolaParams.betaExt])
 
-    for betaExtCurr in wolaParams.betaExt:
-        if verbose:
+    for betaExtCurr in p.wolaParams.betaExt:
+        if p.verbose:
             print(f'>>>>>>>> Running with betaExt = {betaExtCurr}')
 
         # Set RNG state back to original for each betaExt loop iteration
         np.random.set_state(rngState)
 
         # Set external beta
-        wolaParamsCurr = copy.deepcopy(wolaParams)
+        wolaParamsCurr = copy.deepcopy(p.wolaParams)
         wolaParamsCurr.betaExt = betaExtCurr
         # Initialize dictionary where results are stored for plotting
         toDict = []
-        for filterType in toCompute:
+        for filterType in p.toCompute:
             if 'online' in filterType:
-                nIter = int(np.amax(durations) * fs / wolaParamsCurr.nfft)
-                if SHOW_DELTA_PER_NODE:
-                    toDict.append((filterType, np.zeros((nMC, nIter, len(taus), K))))
+                nIter = int(np.amax(p.durations) *\
+                    wolaParamsCurr.fs / wolaParamsCurr.nfft)
+                if p.showDeltaPerNode:
+                    toDict.append((filterType, np.zeros((p.nMC, nIter, len(p.taus), p.nNodes))))
                 else:
-                    toDict.append((filterType, np.zeros((nMC, nIter, len(taus)))))
+                    toDict.append((filterType, np.zeros((p.nMC, nIter, len(p.taus)))))
             else:
-                if SHOW_DELTA_PER_NODE:
-                    toDict.append((filterType, np.zeros((nMC, len(durations), K))))
+                if p.showDeltaPerNode:
+                    toDict.append((filterType, np.zeros((p.nMC, len(p.durations), p.nNodes))))
                 else:
-                    toDict.append((filterType, np.zeros((nMC, len(durations)))))
+                    toDict.append((filterType, np.zeros((p.nMC, len(p.durations)))))
         metricsData = dict(toDict)
 
-        for idxMC in range(nMC):
-            if verbose:
-                print(f'Running Monte-Carlo iteration {idxMC+1}/{nMC}')
+        for idxMC in range(p.nMC):
+            if p.verbose:
+                print(f'Running Monte-Carlo iteration {idxMC+1}/{p.nMC}')
 
             # Get scalings
-            scalings = np.random.uniform(low=0.5, high=1, size=M)
+            scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
             # Get clean signals
-            nSamplesMax = int(np.amax(durations) * fs)
+            nSamplesMax = int(np.amax(p.durations) * wolaParamsCurr.fs)
             cleanSigs, _ = get_clean_signals(
-                M,
-                np.amax(durations),
+                p.targetSignalSpeechFile,
+                p.nSensors,
+                np.amax(p.durations),
                 scalings,
-                fs,
-                sigType=SIGNAL_TYPE,
-                randomDelays=RANDOM_DELAYS,
+                wolaParamsCurr.fs,
+                sigType=p.signalType,
+                randomDelays=p.randomDelays,
                 maxDelay=0.1
             )
             sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
 
             # Generate noise signals
             if np.iscomplex(cleanSigs).any():
-                noiseSignals = np.zeros((nSamplesMax, M), dtype=np.complex128)
+                noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
             else:
-                noiseSignals = np.zeros((nSamplesMax, M))
-            sigma_nr = np.zeros(M)
-            for n in range(M):
+                noiseSignals = np.zeros((nSamplesMax, p.nSensors))
+            sigma_nr = np.zeros(p.nSensors)
+            for n in range(p.nSensors):
                 # Generate random sequence with unit power
                 if np.iscomplex(cleanSigs).any():
                     randSequence = np.random.normal(size=nSamplesMax) +\
@@ -183,11 +162,11 @@ def main(
                 # Make unit power
                 randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
                 # Scale to desired power
-                noiseSignals[:, n] = randSequence * np.sqrt(selfNoisePower)
+                noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
                 # Check power
                 sigma_nr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
-                if np.abs(sigma_nr[n] ** 2 - selfNoisePower) > 1e-6:
-                    raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {selfNoisePower}')
+                if np.abs(sigma_nr[n] ** 2 - p.selfNoisePower) > 1e-6:
+                    raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {p.selfNoisePower}')
                 
             # Compute desired filters
             allFilters = get_filters(
@@ -195,75 +174,76 @@ def main(
                 noiseSignals,
                 channelToNodeMap,
                 gevdRank=1,
-                toCompute=toCompute,
+                toCompute=p.toCompute,
                 wolaParams=wolaParamsCurr,
-                taus=taus,
-                durations=durations,
-                b=b,
-                fs=fs,
-                verbose=verbose
+                taus=p.taus,
+                durations=p.durations,
+                b=p.b,
+                batchFusionInOnline=p.useBatchModeFusionVectorsInOnlineDanse,
+                noSSfusion=p.ignoreFusionForSSNodes,
+                verbose=p.verbose
             )
 
             # Compute metrics
-            for filterType in toCompute:
+            for filterType in p.toCompute:
                 currFilters = allFilters[filterType]
                 if 'online' in filterType:
-                    for idxTau in range(len(taus)):
+                    for idxTau in range(len(p.taus)):
                         currFiltCurrTau = currFilters[idxTau, :, :, :] 
                         currMetrics = get_metrics(
-                            M,
+                            p.nSensors,
                             currFiltCurrTau,
                             scalings,
                             sigma_sr,
                             sigma_nr,
                             channelToNodeMap,
                             filterType=filterType,
-                            exportDiffPerFilter=SHOW_DELTA_PER_NODE  # export all differences individually
+                            exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
                         )
-                        if SHOW_DELTA_PER_NODE:
+                        if p.showDeltaPerNode:
                             metricsData[filterType][idxMC, :, idxTau, :] = currMetrics
                         else:
                             metricsData[filterType][idxMC, :, idxTau] = currMetrics
                 else:
-                    for idxDur in range(len(durations)):
+                    for idxDur in range(len(p.durations)):
                         currFiltCurrDur = currFilters[idxDur, :, :]
                         currMetrics = get_metrics(
-                            M,
+                            p.nSensors,
                             currFiltCurrDur,
                             scalings,
                             sigma_sr,
                             sigma_nr,
                             channelToNodeMap,
                             filterType=filterType,
-                            exportDiffPerFilter=SHOW_DELTA_PER_NODE  # export all differences individually
+                            exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
                         )
-                        if SHOW_DELTA_PER_NODE:
+                        if p.showDeltaPerNode:
                             metricsData[filterType][idxMC, idxDur, :] = currMetrics
                         else:
                             metricsData[filterType][idxMC, idxDur] = currMetrics
         
-        if exportFigures:
+        if p.exportFigures:
             # Plot results
             fig = plot_final(
-                durations,
-                taus,
+                p.durations,
+                p.taus,
                 metricsData,
-                fs=fs,
+                fs=wolaParamsCurr.fs,
                 L=wolaParamsCurr.nfft,
-                avgAcrossNodesFlag=not SHOW_DELTA_PER_NODE,
+                avgAcrossNodesFlag=not p.showDeltaPerNode,
                 figTitleSuffix=f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
             )
 
-            if exportFolder is not None:
-                if len(durations) > 1:
-                    fname = f'{exportFolder}/diff'
+            if p.exportFolder is not None:
+                if len(p.durations) > 1:
+                    fname = f'{p.exportFolder}/diff'
                 else:
-                    fname = f'{exportFolder}/betas'
+                    fname = f'{p.exportFolder}/betas'
                 fname += f'_betaExt_0p{int(betaExtCurr * 1000)}'
-                for t in toCompute:
+                for t in p.toCompute:
                     fname += f'_{t}'
-                if not Path(exportFolder).is_dir():
-                    Path(exportFolder).mkdir(parents=True, exist_ok=True)
+                if not Path(p.exportFolder).is_dir():
+                    Path(p.exportFolder).mkdir(parents=True, exist_ok=True)
                 fig.savefig(f'{fname}.png', dpi=300, bbox_inches='tight')
         
             plt.close(fig)
@@ -279,6 +259,8 @@ def compute_filter(
         rank=1,
         channelToNodeMap=None,  # only used for DANSE
         wolaParams: WOLAparameters=WOLAparameters(),
+        batchFusionInOnline=False,
+        noSSfusion=True,
         verbose=True
     ):
     """
@@ -354,7 +336,7 @@ def compute_filter(
             kwargs['upExtFiltEvery'] = wolaParams.upExtTargetFiltEvery
             w = run_wola_danse(**kwargs)
         elif 'online' in type:
-            if USE_BATCH_MODE_FUSION_VECTORS_IN_ONLINE_DANSE:
+            if batchFusionInOnline:
                 wBatchNetWide = run_danse(**kwargs)
                 kwargs['batchModeNetWideFilters'] = wBatchNetWide
             kwargs['referenceSensorIdx'] = 0
@@ -365,7 +347,7 @@ def compute_filter(
             kwargs['betaExt'] = wolaParams.betaExt
             kwargs['startExpAvgAfter'] = wolaParams.startExpAvgAfter
             kwargs['startFusionExpAvgAfter'] = wolaParams.startFusionExpAvgAfter
-            kwargs['ignoreFusionForSSNodes'] = IGNORE_FUSION_FOR_SSNODES
+            kwargs['ignoreFusionForSSNodes'] = noSSfusion
             w = run_online_danse(**kwargs)
         else:
             w = run_danse(**kwargs)
@@ -511,7 +493,8 @@ def run_danse(
 
 
 def get_clean_signals(
-        M,
+        targetSignalSpeechFile,
+        nSensors,
         dur,
         scalings,
         fsTarget,
@@ -521,7 +504,7 @@ def get_clean_signals(
     ):
     # Load target signal
     if sigType == 'speech':
-        latentSignal, fs = sf.read(TARGET_SIGNAL_SPEECHFILE)
+        latentSignal, fs = sf.read(targetSignalSpeechFile)
         if fs != fsTarget:
             # Resample
             latentSignal = resampy.resample(
@@ -542,12 +525,12 @@ def get_clean_signals(
     latentSignal /= np.sqrt(np.mean(np.abs(latentSignal) ** 2))
     
     # Generate clean signals
-    mat = np.tile(latentSignal, (M, 1)).T
+    mat = np.tile(latentSignal, (nSensors, 1)).T
     # Random scalings
     cleanSigs = mat @ np.diag(scalings)  # rank-1 matrix (scalings only)
     # Random delays
     if randomDelays:
-        for n in range(M):
+        for n in range(nSensors):
             delay = np.random.randint(0, int(maxDelay * fsTarget))
             cleanSigs[:, n] = np.roll(cleanSigs[:, n], delay)
 
@@ -564,7 +547,8 @@ def get_filters(
         taus=[2.],
         durations=[1.],
         b=0.1,
-        fs=16e3,
+        batchFusionInOnline=False,
+        noSSfusion=True,
         verbose=True
     ):
     """Compute filters."""
@@ -572,7 +556,9 @@ def get_filters(
         'channelToNodeMap': channelToNodeMap,
         'rank': gevdRank,
         'wolaParams': wolaParams,
-        'verbose': verbose 
+        'verbose': verbose,
+        'batchFusionInOnline': batchFusionInOnline,
+        'noSSfusion': noSSfusion,
     }
     filters = {}
     for filterType in toCompute:
@@ -583,7 +569,7 @@ def get_filters(
         if 'online' in filterType:
             # Only need to compute for longest duration
             # + computing for several tau's
-            nSamples = int(np.amax(durations) * fs)
+            nSamples = int(np.amax(durations) * wolaParams.fs)
             noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
             kwargs['noisySignals'] = noisySignals
             kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
@@ -603,11 +589,11 @@ def get_filters(
         
         else:  # <-- batch-mode
             # Only need to compute for a single dummy tau
-            # + computing for several durations
+            # + computing for several p.durations
             currFiltsAll = []
             # ^^^ shape: (nDurations, nSensors, nNodes)
             for dur in durations:
-                nSamples = int(np.amax(dur) * fs)
+                nSamples = int(np.amax(dur) * wolaParams.fs)
                 noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
                 kwargs['noisySignals'] = noisySignals
                 kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
@@ -622,7 +608,7 @@ def get_filters(
 
 
 def get_metrics(
-        M,
+        nSensors,
         filters,
         scalings,
         sigma_sr,
@@ -634,8 +620,8 @@ def get_metrics(
     ):
     
     # Compute FAS + SPF
-    fasAndSPF = np.zeros((M, M))
-    for m in range(M):
+    fasAndSPF = np.zeros((nSensors, nSensors))
+    for m in range(nSensors):
         rtf = scalings / scalings[m]
         hs = np.sum(rtf ** 2) * sigma_sr[m] ** 2
         spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter
@@ -651,7 +637,7 @@ def get_metrics(
             # Determine reference sensor index
             idxRef = np.where(channelToNodeMap == m)[0][0]
             if 'online' in filterType:
-                # Keep all iterations (all durations)
+                # Keep all iterations (all p.durations)
                 currFilt = filters[:, :, m]
             else:
                 # Only keep last iteration (converged filter coefficients)

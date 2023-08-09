@@ -10,6 +10,7 @@ import numpy as np
 from typing import Union
 from dataclasses import dataclass
 from script import main as run_test
+from script import ScriptParameters
 
 
 # Get current file folder
@@ -19,8 +20,8 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 GLOBAL_SEED = 0  # Global seed for random number generator
 TMAX = 30  # [s] Maximum duration of the simulated data
 FS = 16000  # [Hz] Sampling frequency
-N_MC = 5  # Number of Monte Carlo repetitions
-N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
+N_MC = 2  # Number of Monte Carlo repetitions
+N_MC_2 = 2  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
     'gevdmwf_batch',  # GEVD-MWF (batch)
@@ -161,13 +162,14 @@ def main():
                 print(f'-- Running test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, M={parameters.M})...')
                 # Run test
                 res = run_test(
-                    M=parameters.M,
-                    K=parameters.K,
+                ScriptParameters(
+                    nSensors=parameters.M,
+                    nNodes=parameters.K,
                     seed=parameters.seed,
-                    Mk=parameters.Mk,
                     taus=TAUS,
+                    Mk=parameters.Mk,
                     **commonKwargs
-                )
+                ))
                 # Save output
                 allOutputs.append(
                     TestOutput(
@@ -181,14 +183,14 @@ def main():
             print(f'- Running test "{test.name}"...')
 
             # Run test
-            res = run_test(
-                M=test.parameters.M,
-                K=test.parameters.K,
+            res = run_test(ScriptParameters(
+                nSensors=test.parameters.M,
+                nNodes=test.parameters.K,
                 seed=test.parameters.seed,
-                Mk=test.parameters.Mk,
                 taus=TAUS,
+                Mk=test.parameters.Mk,
                 **commonKwargs
-            )
+            ))
             # Save output
             allOutputs.append(
                 TestOutput(
