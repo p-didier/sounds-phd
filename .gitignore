@@ -11,3 +11,4 @@
 Results.json
 ProgramSettings.json
 *.npy
+*.npz

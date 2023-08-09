@@ -51,7 +51,7 @@ def plot_final(
         else:
             lineStyle = allLineStyles[idxFilter]
 
-        if 'online' in filterType:
+        if 'online' in filterType or 'wola' in filterType:
             nTaus = toPlot[filterType].shape[2]
             # Plot as function of beta (== as function of tau)
             xAxis = np.arange(0, toPlot[filterType].shape[1]) * L / fs
@@ -131,7 +131,7 @@ def plot_final(
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf
     for idxFilter, filterType in enumerate(toPlot.keys()):
-        if 'online' in filterType:
+        if 'online' in filterType or 'wola' in filterType:
             idxStart = int(np.amin(durations) * fs // L)
             ymin = min(
                 ymin,
@@ -145,8 +145,7 @@ def plot_final(
             ymin = min(ymin, np.amin(toPlot[filterType]))
             ymax = max(ymax, np.amax(toPlot[filterType]))
     # Round to the nearest power of 10
-    # ymax = 10 ** np.ceil(np.log10(ymax))
-    ymax = 0.01  # <-- FIXME: HARDCODED
+    ymax = 10 ** np.ceil(np.log10(ymax))
     ymin = 10 ** np.floor(np.log10(ymin))
     axes.set_ylim([ymin, ymax])
     plt.show(block=False)

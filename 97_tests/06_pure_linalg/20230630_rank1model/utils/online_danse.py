@@ -18,7 +18,7 @@ class WOLAparameters:
     betaDanse: float = 0.99  # exponential averaging constant
     betaMwf: float = 0.99  # exponential averaging constant for MWF
     B: int = 0  # number of frames bw. consecutive updates of fusion vectors
-    alpha: float = 0.5  # exponential averaging constant for fusion vectors
+    alpha: float = 1  # exponential averaging constant for fusion vectors
     betaExt: float = 0.99  # exponential averaging constant for external target filters
     startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
     startFusionExpAvgAfter: int = 0  # same as above, for the fusion vectors

@@ -18,31 +18,33 @@ sys.path.append('..')
 
 @dataclass
 class ScriptParameters:
-    randomDelays: bool = False
+    signalType: str = 'noise_real'  # 'speech', 'noise_real', 'noise_complex'
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-    nSensors: int = 15
+    nSensors: int = 5
     nNodes: int = 3
+    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    durations: np.ndarray = np.logspace(np.log10(1), np.log10(30), 30)
+    durations: np.ndarray = np.logspace(np.log10(1), np.log10(10), 30)
     fs: float = 16e3
     nMC: int = 1
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
-    taus: list[float] = field(default_factory=lambda: [2., 4., 8.])
+    taus: list[float] = field(default_factory=lambda: [2.])
     b: float = 0.1  # factor for determining beta from tau (online processing)
-    signalType: str = 'noise_complex'
     toCompute: list[str] = field(default_factory=lambda: [
         # 'mwf_batch',
-        'gevdmwf_batch',
+        # 'gevdmwf_batch',
         # 'danse_batch',
         # 'gevddanse_batch',
         # 'danse_sim_batch',
         # 'gevddanse_sim_batch',
-        # 'mwf_online',
-        'gevdmwf_online',
+        # 'mwf_online',     # --------- vvvv ONLINE vvvv
+        # 'gevdmwf_online',
         # 'danse_online',
         # 'gevddanse_online',
         # 'danse_sim_online',
-        'gevddanse_sim_online'
+        # 'gevddanse_sim_online'
+        # 'mwf_wola',       # --------- vvvv WOLA vvvv
+        'gevdmwf_wola',
         # 'danse_wola',
         # 'gevddanse_wola',
         # 'danse_sim_wola',
@@ -50,21 +52,25 @@ class ScriptParameters:
     ])
     seed: int = 0
     wolaParams: WOLAparameters = WOLAparameters(
+        nfft=1024,
+        hop=512,
         fs=fs,
-        B=0,  # frames
-        alpha=1,  # if ==1, no fusion vector relaxation
         betaExt=0.0,  # if ==0, no extra fusion vector relaxation
-        # betaExt=0.9,  # if ==0, no extra fusion vector relaxation
-        # betaExt=np.concatenate((np.linspace(0, 0.8, 10), np.linspace(0.9, 0.99, 10))),  # if ==0, no extra fusion vector relaxation
         startExpAvgAfter=2,  # frames
         startFusionExpAvgAfter=2,  # frames
     )
+    # Booleans vvvv
+    randomDelays: bool = False
     showDeltaPerNode: bool = False
     useBatchModeFusionVectorsInOnlineDanse: bool = False
     ignoreFusionForSSNodes: bool = True  # in DANSE, ignore fusion vector for single-sensor nodes
-    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     exportFigures: bool = True
     verbose: bool = True
+
+    def __post_init__(self):
+        if any(['wola' in t for t in self.toCompute]) and\
+            'complex' in self.signalType:
+            raise ValueError('WOLA not implemented for complex-valued signals')
 
 
 def main(p: ScriptParameters=ScriptParameters()):
@@ -111,9 +117,15 @@ def main(p: ScriptParameters=ScriptParameters()):
         # Initialize dictionary where results are stored for plotting
         toDict = []
         for filterType in p.toCompute:
-            if 'online' in filterType:
-                nIter = int(np.amax(p.durations) *\
-                    wolaParamsCurr.fs / wolaParamsCurr.nfft)
+            if 'online' in filterType or 'wola' in filterType:
+                # Compute number of iterations
+                if 'online' in filterType:
+                    nIter = int(np.amax(p.durations) *\
+                        wolaParamsCurr.fs / wolaParamsCurr.nfft) # divide by frame size
+                elif 'wola' in filterType:
+                    nIter = int(np.amax(p.durations) *\
+                        wolaParamsCurr.fs / wolaParamsCurr.hop) - 1  # divide by hop size
+                
                 if p.showDeltaPerNode:
                     toDict.append((filterType, np.zeros((p.nMC, nIter, len(p.taus), p.nNodes))))
                 else:
@@ -144,6 +156,7 @@ def main(p: ScriptParameters=ScriptParameters()):
                 maxDelay=0.1
             )
             sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+            sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)
 
             # Generate noise signals
             if np.iscomplex(cleanSigs).any():
@@ -151,6 +164,7 @@ def main(p: ScriptParameters=ScriptParameters()):
             else:
                 noiseSignals = np.zeros((nSamplesMax, p.nSensors))
             sigma_nr = np.zeros(p.nSensors)
+            sigma_nr_wola = np.zeros((wolaParamsCurr.nfft, p.nSensors))
             for n in range(p.nSensors):
                 # Generate random sequence with unit power
                 if np.iscomplex(cleanSigs).any():
@@ -167,7 +181,8 @@ def main(p: ScriptParameters=ScriptParameters()):
                 sigma_nr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
                 if np.abs(sigma_nr[n] ** 2 - p.selfNoisePower) > 1e-6:
                     raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {p.selfNoisePower}')
-                
+                sigma_nr_wola[:, n] = get_sigma_wola(noiseSignals[:, n], wolaParamsCurr)
+
             # Compute desired filters
             allFilters = get_filters(
                 cleanSigs,
@@ -187,19 +202,30 @@ def main(p: ScriptParameters=ScriptParameters()):
             # Compute metrics
             for filterType in p.toCompute:
                 currFilters = allFilters[filterType]
-                if 'online' in filterType:
+                if 'online' in filterType or 'wola' in filterType:
                     for idxTau in range(len(p.taus)):
-                        currFiltCurrTau = currFilters[idxTau, :, :, :] 
-                        currMetrics = get_metrics(
-                            p.nSensors,
-                            currFiltCurrTau,
-                            scalings,
-                            sigma_sr,
-                            sigma_nr,
-                            channelToNodeMap,
-                            filterType=filterType,
-                            exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
-                        )
+                        if 'online' in filterType:
+                            currMetrics = get_metrics(
+                                p.nSensors,
+                                currFilters[idxTau, :, :, :],
+                                scalings,
+                                sigma_sr,
+                                sigma_nr,
+                                channelToNodeMap,
+                                filterType=filterType,
+                                exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
+                            )
+                        elif 'wola' in filterType:
+                            currMetrics = get_metrics(
+                                p.nSensors,
+                                currFilters[idxTau, :, :, :, :],
+                                scalings,
+                                sigma_sr_wola,
+                                sigma_nr_wola,
+                                channelToNodeMap,
+                                filterType=filterType,
+                                exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
+                            )
                         if p.showDeltaPerNode:
                             metricsData[filterType][idxMC, :, idxTau, :] = currMetrics
                         else:
@@ -246,7 +272,9 @@ def main(p: ScriptParameters=ScriptParameters()):
                     Path(p.exportFolder).mkdir(parents=True, exist_ok=True)
                 fig.savefig(f'{fname}.png', dpi=300, bbox_inches='tight')
         
-            plt.close(fig)
+            # Wait for button press to close the figures
+            plt.waitforbuttonpress()
+            plt.close('all')
 
     return metricsData
 
@@ -292,6 +320,15 @@ def compute_filter(
             beta=wolaParams.betaMwf,
             verbose=verbose
         )
+    elif type == 'mwf_wola':
+        w = run_wola_mwf(
+            x=cleanSigs,
+            n=noiseOnlySigs,
+            filterType='regular',
+            L=wolaParams.nfft,
+            beta=wolaParams.betaMwf,
+            verbose=verbose
+        )
     elif type == 'gevdmwf_batch':
         sigma, Xmat = la.eigh(Ryy, Rnn)
         idx = np.flip(np.argsort(sigma))
@@ -303,6 +340,16 @@ def compute_filter(
         w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
     elif type == 'gevdmwf_online':
         w = run_online_mwf(
+            x=cleanSigs,
+            n=noiseOnlySigs,
+            filterType='gevd',
+            rank=rank,
+            L=wolaParams.nfft,
+            beta=wolaParams.betaMwf,
+            verbose=verbose
+        )
+    elif type == 'gevdmwf_wola':
+        w = run_wola_mwf(
             x=cleanSigs,
             n=noiseOnlySigs,
             filterType='gevd',
@@ -566,7 +613,7 @@ def get_filters(
         if verbose:
             print(f'Computing {filterType} filter(s)')
 
-        if 'online' in filterType:
+        if 'online' in filterType or 'wola' in filterType:
             # Only need to compute for longest duration
             # + computing for several tau's
             nSamples = int(np.amax(durations) * wolaParams.fs)
@@ -575,7 +622,8 @@ def get_filters(
             kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
             kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
             currFiltsAll = []
-            # ^^^ shape: (nTaus, nSensors, nIters, nNodes)
+            # ^^^ shape: (nTaus, nSensors, nIters, nNodes) for 'online'
+            # & (nTaus, nSensors, nIters, nFrequencies, nNodes) for 'wola'
             for idxTau in range(len(taus)):
                 # Set beta based on tau
                 kwargs['wolaParams'].betaMwf = np.exp(
@@ -619,13 +667,22 @@ def get_metrics(
         exportDiffPerFilter=False
     ):
     
-    # Compute FAS + SPF
-    fasAndSPF = np.zeros((nSensors, nSensors))
-    for m in range(nSensors):
-        rtf = scalings / scalings[m]
-        hs = np.sum(rtf ** 2) * sigma_sr[m] ** 2
-        spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter
-        fasAndSPF[:, m] = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+    # Compute FAS + SPF (baseline)
+    if 'wola' in filterType:
+        nBins = sigma_nr.shape[0]  # number of frequency bins
+        fasAndSPF = np.zeros((nSensors, nSensors, nBins))
+        for m in range(nSensors):
+            rtf = scalings / scalings[m]
+            hs = np.sum(rtf ** 2) * sigma_sr[:, m] ** 2
+            spf = hs / (hs + sigma_nr[:, m] ** 2)  # spectral post-filter
+            fasAndSPF[:, m, :] = np.outer(rtf / (rtf.T @ rtf), spf)  # FAS BF + spectral post-filter
+    else:
+        fasAndSPF = np.zeros((nSensors, nSensors))
+        for m in range(nSensors):
+            rtf = scalings / scalings[m]
+            hs = np.sum(rtf ** 2) * sigma_sr[m] ** 2
+            spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter
+            fasAndSPF[:, m] = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
 
     # Compute difference between normalized estimated filters
     # and normalized expected filters
@@ -639,6 +696,8 @@ def get_metrics(
             if 'online' in filterType:
                 # Keep all iterations (all p.durations)
                 currFilt = filters[:, :, m]
+            elif 'wola' in filterType:
+                currFilt = filters[:, :, :, m]
             else:
                 # Only keep last iteration (converged filter coefficients)
                 currFilt = filters[:, -1, m]
@@ -648,6 +707,8 @@ def get_metrics(
                     idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
                     if 'online' in filterType:
                         currFilt = filters[:, :, idxRef]
+                    elif 'wola' in filterType:
+                        currFilt = filters[:, :, :, idxRef]
                     else:
                         currFilt = filters[:, idxRef]
                     currNode += 1
@@ -658,15 +719,24 @@ def get_metrics(
                 idxRef = copy.deepcopy(m)
                 currFilt = filters[:, m]
         
-        currFas = fasAndSPF[:, idxRef]
-        if len(currFilt.shape) == 2:
+        if 'wola' in filterType:
+            currFas = fasAndSPF[:, idxRef, :]
+            # Average over nodes and frequency bins, keeping iteration index
             diffsPerCoefficient[m] = np.mean(np.abs(
-                currFilt - currFas[:, np.newaxis]
-            ), axis=0)
+                currFilt - currFas[:, np.newaxis, :]
+            ), axis=(0, -1))
         else:
-            diffsPerCoefficient[m] = np.mean(np.abs(
-                currFilt - currFas
-            ))
+            currFas = fasAndSPF[:, idxRef]
+            if len(currFilt.shape) == 2:
+                # Average over nodes, keeping iteration index
+                diffsPerCoefficient[m] = np.mean(np.abs(
+                    currFilt - currFas[:, np.newaxis]
+                ), axis=0)
+            else:
+                # Average over nodes
+                diffsPerCoefficient[m] = np.mean(np.abs(
+                    currFilt - currFas
+                ))
     diffsPerCoefficient = np.array(diffsPerCoefficient, dtype=object)
     
     # Average absolute difference over filters
@@ -683,6 +753,25 @@ def get_metrics(
         diffs = np.nanmean(diffsPerCoefficient_noNan, axis=0)
 
     return diffs
+
+
+def get_sigma_wola(x, params: WOLAparameters):
+    """Compute WOLA-based signal power estimate."""
+    # Check for multichannel input
+    if len(x.shape) == 1:
+        x = x[:, np.newaxis]
+    
+    win = get_window(params.winType, params.nfft)
+    nIter = int((x.shape[0] - params.nfft) / params.hop) + 1
+    sigmas = np.zeros((nIter, params.nfft, x.shape[1]))
+    for i in range(nIter):
+        idxStart = i * params.hop
+        idxEnd = idxStart + params.nfft
+        windowedChunk = x[idxStart:idxEnd, :] * win[:, np.newaxis]
+        Chunk = np.fft.fft(windowedChunk, axis=0) / np.sqrt(params.nfft)
+        sigmas[i, :, :] = np.abs(Chunk) ** 2
+    sigmaWOLA = np.mean(sigmas, axis=0)
+    return np.squeeze(sigmaWOLA)
 
 
 if __name__ == '__main__':
