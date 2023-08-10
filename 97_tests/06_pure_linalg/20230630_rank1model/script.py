@@ -19,14 +19,15 @@ sys.path.append('..')
 @dataclass
 class ScriptParameters:
     signalType: str = 'noise_real'  # 'speech', 'noise_real', 'noise_complex'
+    # signalType: str = 'noise_complex'  # 'speech', 'noise_real', 'noise_complex'
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
     nSensors: int = 5
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    durations: np.ndarray = np.logspace(np.log10(1), np.log10(10), 30)
+    durations: np.ndarray = np.logspace(np.log10(1), np.log10(30), 30)
     fs: float = 16e3
-    nMC: int = 1
+    nMC: int = 10
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
     taus: list[float] = field(default_factory=lambda: [2.])
     b: float = 0.1  # factor for determining beta from tau (online processing)
@@ -44,9 +45,9 @@ class ScriptParameters:
         # 'danse_sim_online',
         # 'gevddanse_sim_online'
         # 'mwf_wola',       # --------- vvvv WOLA vvvv
-        'gevdmwf_wola',
+        # 'gevdmwf_wola',
         # 'danse_wola',
-        # 'gevddanse_wola',
+        'gevddanse_wola',
         # 'danse_sim_wola',
         # 'gevddanse_sim_wola'
     ])
@@ -164,7 +165,7 @@ def main(p: ScriptParameters=ScriptParameters()):
             else:
                 noiseSignals = np.zeros((nSamplesMax, p.nSensors))
             sigma_nr = np.zeros(p.nSensors)
-            sigma_nr_wola = np.zeros((wolaParamsCurr.nfft, p.nSensors))
+            sigma_nr_wola = np.zeros((wolaParamsCurr.nPosFreqs, p.nSensors))
             for n in range(p.nSensors):
                 # Generate random sequence with unit power
                 if np.iscomplex(cleanSigs).any():
@@ -362,39 +363,34 @@ def compute_filter(
         kwargs = {
             'x': cleanSigs,
             'n': noiseOnlySigs,
+            'referenceSensorIdx': 0,
+            'L': wolaParams.nfft,
             'channelToNodeMap': channelToNodeMap,
             'filterType': 'gevd' if 'gevd' in type else 'regular',
             'rank': rank,
-            'verbose': verbose
+            'verbose': verbose,
+            'startFusionExpAvgAfter': wolaParams.startFusionExpAvgAfter,
+            'ignoreFusionForSSNodes': noSSfusion,
+            'startExpAvgAfter': wolaParams.startExpAvgAfter,
+            'beta': wolaParams.betaDanse,
+            'B': wolaParams.B,
+            'alpha': wolaParams.alpha,
+            'betaExt': wolaParams.betaExt
         }
         if 'sim' in type:
             kwargs['nodeUpdatingStrategy'] = 'simultaneous'
         else:
             kwargs['nodeUpdatingStrategy'] = 'sequential'
-
+    
+        if batchFusionInOnline:
+            wBatchNetWide = run_danse(**kwargs)
+            kwargs['batchModeNetWideFilters'] = wBatchNetWide
+        
         if 'wola' in type:
-            raise NotImplementedError('To be implemented properly [PD~2023.08.02]')
-            kwargs['referenceSensorIdx'] = 0
-            kwargs['nfft'] = wolaParams.nfft
-            kwargs['beta'] = wolaParams.betaDanse
-            kwargs['hop'] = wolaParams.hop
+            kwargs['R'] = wolaParams.hop
             kwargs['windowType'] = wolaParams.winType
-            kwargs['fs'] = wolaParams.fs
-            kwargs['upExtFiltEvery'] = wolaParams.upExtTargetFiltEvery
             w = run_wola_danse(**kwargs)
         elif 'online' in type:
-            if batchFusionInOnline:
-                wBatchNetWide = run_danse(**kwargs)
-                kwargs['batchModeNetWideFilters'] = wBatchNetWide
-            kwargs['referenceSensorIdx'] = 0
-            kwargs['L'] = wolaParams.nfft
-            kwargs['beta'] = wolaParams.betaDanse
-            kwargs['B'] = wolaParams.B
-            kwargs['alpha'] = wolaParams.alpha
-            kwargs['betaExt'] = wolaParams.betaExt
-            kwargs['startExpAvgAfter'] = wolaParams.startExpAvgAfter
-            kwargs['startFusionExpAvgAfter'] = wolaParams.startFusionExpAvgAfter
-            kwargs['ignoreFusionForSSNodes'] = noSSfusion
             w = run_online_danse(**kwargs)
         else:
             w = run_danse(**kwargs)
@@ -689,21 +685,21 @@ def get_metrics(
     nFilters = filters.shape[-1]
     diffsPerCoefficient = [None for _ in range(nFilters)]
     currNode = 0
-    for m in range(nFilters):
+    for k in range(nFilters):
         if 'danse' in filterType:  # DANSE case
             # Determine reference sensor index
-            idxRef = np.where(channelToNodeMap == m)[0][0]
+            idxRef = np.where(channelToNodeMap == k)[0][0]
             if 'online' in filterType:
                 # Keep all iterations (all p.durations)
-                currFilt = filters[:, :, m]
+                currFilt = filters[:, :, k]
             elif 'wola' in filterType:
-                currFilt = filters[:, :, :, m]
+                currFilt = filters[:, :, :, k]
             else:
                 # Only keep last iteration (converged filter coefficients)
-                currFilt = filters[:, -1, m]
+                currFilt = filters[:, -1, k]
         else:  # MWF case
             if computeForComparisonWithDANSE:
-                if channelToNodeMap[m] == currNode:
+                if channelToNodeMap[k] == currNode:
                     idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
                     if 'online' in filterType:
                         currFilt = filters[:, :, idxRef]
@@ -713,28 +709,28 @@ def get_metrics(
                         currFilt = filters[:, idxRef]
                     currNode += 1
                 else:
-                    diffsPerCoefficient[m] = np.nan
+                    diffsPerCoefficient[k] = np.nan
                     continue
             else:
-                idxRef = copy.deepcopy(m)
-                currFilt = filters[:, m]
+                idxRef = copy.deepcopy(k)
+                currFilt = filters[:, k]
         
         if 'wola' in filterType:
             currFas = fasAndSPF[:, idxRef, :]
             # Average over nodes and frequency bins, keeping iteration index
-            diffsPerCoefficient[m] = np.mean(np.abs(
+            diffsPerCoefficient[k] = np.mean(np.abs(
                 currFilt - currFas[:, np.newaxis, :]
             ), axis=(0, -1))
         else:
             currFas = fasAndSPF[:, idxRef]
             if len(currFilt.shape) == 2:
                 # Average over nodes, keeping iteration index
-                diffsPerCoefficient[m] = np.mean(np.abs(
+                diffsPerCoefficient[k] = np.mean(np.abs(
                     currFilt - currFas[:, np.newaxis]
                 ), axis=0)
             else:
                 # Average over nodes
-                diffsPerCoefficient[m] = np.mean(np.abs(
+                diffsPerCoefficient[k] = np.mean(np.abs(
                     currFilt - currFas
                 ))
     diffsPerCoefficient = np.array(diffsPerCoefficient, dtype=object)
@@ -770,6 +766,8 @@ def get_sigma_wola(x, params: WOLAparameters):
         windowedChunk = x[idxStart:idxEnd, :] * win[:, np.newaxis]
         Chunk = np.fft.fft(windowedChunk, axis=0) / np.sqrt(params.nfft)
         sigmas[i, :, :] = np.abs(Chunk) ** 2
+    # Only keep positive frequencies
+    sigmas = sigmas[:, :int(params.nfft / 2) + 1, :]
     sigmaWOLA = np.mean(sigmas, axis=0)
     return np.squeeze(sigmaWOLA)
 

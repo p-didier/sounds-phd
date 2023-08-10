@@ -64,7 +64,7 @@ def plot_final(
                         color=baseColor,
                         alpha=0.15
                     )
-                    axes.semilogy(
+                    axes.loglog(
                         xAxis,
                         np.mean(toPlot[filterType][:, :, idxTau], axis=0),
                         f'{baseColor}-',
@@ -144,9 +144,11 @@ def plot_final(
         else:
             ymin = min(ymin, np.amin(toPlot[filterType]))
             ymax = max(ymax, np.amax(toPlot[filterType]))
-    # Round to the nearest power of 10
-    ymax = 10 ** np.ceil(np.log10(ymax))
-    ymin = 10 ** np.floor(np.log10(ymin))
+    ymin *= 0.9
+    ymax *= 1.1
+    # # Round to the nearest power of 10
+    # ymax = 10 ** np.ceil(np.log10(ymax))
+    # ymin = 10 ** np.floor(np.log10(ymin))
     axes.set_ylim([ymin, ymax])
     plt.show(block=False)
 

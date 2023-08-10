@@ -13,6 +13,7 @@ from matplotlib import pyplot as plt
 class WOLAparameters:
     nfft: int = 1024
     hop: int = 512
+    nPosFreqs: int = int(nfft / 2 + 1)
     winType: str = 'sqrt-hann'  # sqrt-hann | rect
     fs: int = 16000  # [Hz]
     betaDanse: float = 0.99  # exponential averaging constant
@@ -40,72 +41,54 @@ def get_window(winType, nfft):
 
 
 def run_wola_danse(
-        x,
-        n,
+        x: np.ndarray,
+        n: np.ndarray,
         channelToNodeMap,      
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
-        nfft=1024,
-        hop=512,
+        L=1024,
+        R=512,
         windowType='sqrt-hann',  # `sqrt-hann` or `rect`
         referenceSensorIdx=0,
-        fs=16000,
         beta=0.99,  # exponential averaging constant
-        upExtTargetFiltEvery=1,  # time [s] bw. consecutive updates of external target filters
-        upFusionVectEvery=0  # number of frames bw. consecutive updates of fusion vectors
+        B=0,  # number of frames bw. consecutive updates of fusion vectors
+        alpha=0.5,  # exponential averaging constant for fusion vectors
+        betaExt=0.99,  # exponential averaging constant for external target filters
+        ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
+        startExpAvgAfter=0,  # number of frames after which to start exponential averaging
+        startFusionExpAvgAfter=0, # same as above, for the fusion vectors
+        verbose=False,
     ):
 
-    # Get noisy signal (time-domain)
-    y = x + n
     # Get number of nodes
     nNodes = np.amax(channelToNodeMap) + 1
+    # Get number of nodes
+    nSensors = x.shape[1]
+    # Get number of frames
+    nIter = x.shape[0] // R - 1
+    # Get noisy signal (time-domain)
+    y = x + n
 
-    # Check method
-    if np.iscomplex(x).any() or np.iscomplex(n).any():
-        print('Complex-valued signal as input of online DANSE: no WOLA permitted.')
-        if windowType != 'rect':
-            print('Setting rectangular window.')
-            windowType = 'rect'
-        if hop != nfft:
-            print('Setting no window overlap (`hop` = `nfft`)')
-            hop = nfft
-        # Section signal
-        nIter = x.shape[0] // nfft
-        x_in = np.zeros((nfft, nIter, x.shape[1]), dtype=np.complex128)
-        n_in = np.zeros((nfft, nIter, n.shape[1]), dtype=np.complex128)
-        y_in = np.zeros((nfft, nIter, y.shape[1]), dtype=np.complex128)
-        for ii in range(nIter):
-            idxBeg = ii * nfft
-            idxEnd = (ii + 1) * nfft
-            x_in[:, ii, :] = x[idxBeg:idxEnd, :]
-            n_in[:, ii, :] = n[idxBeg:idxEnd, :]
-            y_in[:, ii, :] = y[idxBeg:idxEnd, :]
-        # Get window
-        win = get_window(windowType, nfft)
-    
-    else:  # WOLA-processing, STFTs
-        # Convert to STFT domain using SciPy
-        # Get window
-        win = get_window(windowType, nfft)
-        kwargs = {
-            'fs': fs,
-            'window': win,
-            'nperseg': nfft,
-            'nfft': nfft,
-            'noverlap': nfft - hop,
-            'return_onesided': True,
-            'axis': 0
-        }
-        x_stft = stft(x, **kwargs)[2]
-        y_stft = stft(y, **kwargs)[2]
-        n_stft = stft(n, **kwargs)[2]
-        # Reshape
-        x_in = x_stft.reshape((x_stft.shape[0], -1, x.shape[1]))
-        y_in = y_stft.reshape((y_stft.shape[0], -1, y.shape[1]))
-        n_in = n_stft.reshape((n_stft.shape[0], -1, n.shape[1]))
-        nIter = x_in.shape[1]
-        nPosFreqs = x_in.shape[0]
+    # Convert to WOLA domain
+    win = get_window(windowType, L)
+    yWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
+    nWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
+    for m in range(nSensors):
+        for i in range(nIter):
+            idxBegFrame = i * R
+            idxEndFrame = idxBegFrame + L
+            yWola[i, :, m] = np.fft.fft(
+                y[idxBegFrame:idxEndFrame, m] * win
+            ) / np.sqrt(L)
+            nWola[i, :, m] = np.fft.fft(
+                n[idxBegFrame:idxEndFrame, m] * win
+            ) / np.sqrt(L)
+    # Get number of positive frequencies
+    nPosFreqs = L // 2 + 1
+    # Keep only positive frequencies (spare computations)
+    yWola = yWola[:, :nPosFreqs, :]
+    nWola = nWola[:, :nPosFreqs, :]
     
     # Initialize
     w = []
@@ -113,8 +96,11 @@ def run_wola_danse(
     for k in range(nNodes):
         nSensorsPerNode = np.sum(channelToNodeMap == k)
         dimYtilde[k] = nSensorsPerNode + nNodes - 1
-        wCurr = np.zeros((nPosFreqs, dimYtilde[k], nIter), dtype=np.complex128)
-        wCurr[:, referenceSensorIdx, :] = 1
+        wCurr = np.zeros(
+            (nPosFreqs, nIter, dimYtilde[k]),
+            dtype=np.complex128
+        )
+        wCurr[:, :, referenceSensorIdx] = 1
         w.append(wCurr)
     Ryy = []
     Rnn = []
@@ -129,14 +115,14 @@ def run_wola_danse(
         ))
     
     wNet = np.zeros(
-        (nPosFreqs, x_in.shape[-1], nIter, nNodes),
+        (nSensors, nIter, nPosFreqs, nNodes),
         dtype=np.complex128
     )
     idxUpdatingNode = 0
     if nodeUpdatingStrategy == 'sequential':
-        label = 'Online DANSE [seq NU]'
+        label = 'WOLA-DANSE [seq NU]'
     elif nodeUpdatingStrategy == 'simultaneous':
-        label = 'Online DANSE [sim NU]'
+        label = 'WOLA-DANSE [sim NU]'
         wExt = []
         wExtTarget = []
         for k in range(nNodes):
@@ -149,16 +135,26 @@ def run_wola_danse(
                 (nPosFreqs, nSensorsPerNode, nIter),
                 dtype=np.complex128
             ))
-        lastExtFiltUp = -1
     if filterType == 'gevd':
         label += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
     nRyyUpdates = np.zeros(nNodes, dtype=int)
     nRnnUpdates = np.zeros(nNodes, dtype=int)
-    lastFusionVectorUpdate = -1 * np.ones(nNodes)
+
+    # Initialize fusion vectors
+    fusionVectTargets = [None for _ in range(nNodes)]
+    fusionVects = [None for _ in range(nNodes)]
+    for k in range(nNodes):
+        baseVect = np.zeros((nPosFreqs, sum(channelToNodeMap == k)))
+        baseVect[0, :] = 1
+        fusionVectTargets[k] = baseVect
+        fusionVects[k] = baseVect
+    lastFuVectUp = -1 * np.ones(nNodes)
+
     # Loop over frames
     for i in range(nIter - 1):
-        print(f'{label} iteration {i+1}/{nIter}')
+        if verbose:
+            print(f'{label} iteration {i+1}/{nIter}')
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
             (nPosFreqs, nNodes),
@@ -169,42 +165,57 @@ def run_wola_danse(
             dtype=np.complex128
         )
 
-        for q in range(nNodes):
-            # Define fusion vector
-            if nodeUpdatingStrategy == 'sequential':
-                fusionFilt = w[q][:, :yq.shape[1], i].conj()
-            elif nodeUpdatingStrategy == 'simultaneous':
-                # Deal with external target filters
-                currTime = i * hop / fs
-                if lastExtFiltUp == -1 or currTime - lastExtFiltUp >= upExtTargetFiltEvery:
-                    print(f'Updating external target filters at time {np.round(currTime, 3)} s...')
-                    # Update external target filters
-                    wExtTarget[q][:, i, :] = .5 * (wExtTarget[q][:, i, :] +\
-                        w[q][:, :yq.shape[1], i].conj())
-                    lastExtFiltUp = currTime
+        # Get current frame [necessary step because of some unexplained NumPy
+        # behaviour which make it so that:
+        # shape(yWola[i, :, channelToNodeMap == k]) = (Mk, nPosFreqs)
+        # instead of (nPosFreqs, Mk)]
+        yCurrFrame = yWola[i, :, :]
+        nCurrFrame = nWola[i, :, :]
+
+        # Update fusion vectors and perform fusion
+        for k in range(nNodes):
+            yk = yCurrFrame[:, channelToNodeMap == k]
+            nk = nCurrFrame[:, channelToNodeMap == k]
+
+            if ignoreFusionForSSNodes and yk.shape[1] == 1:
+                pass  # do not update the fusion vector for single-sensor nodes
+            else:
+                # Update target fusion vector
+                if i > startFusionExpAvgAfter:
+                    # Update using `beta_EXT`
+                    fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
+                        (1 - betaExt) * w[k][:, i, :yk.shape[1]]
                 else:
-                    # Do not update external target filters
-                    wExtTarget[q][:, i, :] = wExtTarget[q][:, i - 1, :]
-                
-                # Update external filters (effectively used)
-                wExt[q][:, i, :] = beta * wExt[:, i - 1, :] +\
-                    (1 - beta) * wExtTarget[:, i, :]
-                fusionFilt = wExt[q][:, i, :]
+                    # Update without `beta_EXT`
+                    fusionVectTargets[k] = w[k][:, i, :yk.shape[1]]
+
+                # Check if effective fusion vector is to be updated
+                if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
+                    fusionVects[k] = (1 - alpha) * fusionVects[k] +\
+                        alpha * fusionVectTargets[k]
+                    lastFuVectUp[k] = i
+
             # Perform fusion
-            yq = y_in[:, i, channelToNodeMap == q]
-            fusedSignals[:, q] = np.einsum('ij,ij->i', yq, fusionFilt)
-            nq = n_in[:, i, channelToNodeMap == q]
-            fusedSignalsNoiseOnly[:, q] = np.einsum('ij,ij->i', nq, fusionFilt)
-        
+            fusedSignals[:, k] = np.einsum(
+                'ij,ik->i',
+                yk,
+                fusionVects[k].conj()
+            )
+            fusedSignalsNoiseOnly[:, k] = np.einsum(
+                'ij,ik->i',
+                nk,
+                fusionVects[k].conj()
+            )
+
         # Loop over nodes
         for k in range(nNodes):
             # Get y tilde
             yTilde = np.concatenate((
-                y_in[:, i, channelToNodeMap == k],
+                yCurrFrame[:, channelToNodeMap == k],
                 fusedSignals[:, nodeIndices != k]
             ), axis=1)
             nTilde = np.concatenate((
-                n_in[:, i, channelToNodeMap == k],
+                nCurrFrame[:, channelToNodeMap == k],
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
 
@@ -212,8 +223,12 @@ def run_wola_danse(
             RyyCurr = np.einsum('ij,ik->ijk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->ijk', nTilde, nTilde.conj())
             # Update covariance matrices
-            Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-            Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            if i > startExpAvgAfter:
+                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
+                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            else:
+                Ryy[k] = RyyCurr
+                Rnn[k] = RnnCurr
             # Update counter
             nRyyUpdates[k] += 1
             nRnnUpdates[k] += 1
@@ -238,26 +253,36 @@ def run_wola_danse(
             if updateFilter:
                 # Compute filter
                 if filterType == 'regular':
-                    e = np.zeros(w[k].shape[1])
+                    e = np.zeros(w[k].shape[-1])
                     e[referenceSensorIdx] = 1  # selection vector
-                    for kappa in range(nPosFreqs):
-                        ryd = (Ryy[k][kappa, :, :] - Rnn[k][kappa, :, :]) @ e
-                        w[k][kappa, :, i + 1] =\
-                            np.linalg.inv(Ryy[k][kappa, :, :]) @ ryd
+                    w[k][:, i + 1, :] = np.linalg.inv(Ryy[k]) @ (Ryy[k] - Rnn[k]) @ e
                 elif filterType == 'gevd':
-                    raise NotImplementedError('not yet implemented for multiple frequency lines')
-                    sigma, Xmat = la.eigh(Ryy[k], Rnn[k])
-                    idx = np.flip(np.argsort(sigma))
-                    sigma = sigma[idx]
-                    Xmat = Xmat[:, idx]
-                    Qmat = np.linalg.inv(Xmat.T.conj())
-                    Dmat = np.zeros((Ryy[k].shape[0], Ryy[k].shape[0]))
-                    Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                    e = np.zeros(Ryy[k].shape[0])
+                    sigma = np.zeros((nPosFreqs, dimYtilde[k]))
+                    Xmat = np.zeros(
+                        (nPosFreqs, dimYtilde[k], dimYtilde[k]),
+                        dtype=complex
+                    )
+                    for kappa in range(nPosFreqs):
+                        sigmaCurr, XmatCurr = la.eigh(
+                            Ryy[k][kappa, :, :],
+                            Rnn[k][kappa, :, :]
+                        )
+                        indices = np.flip(np.argsort(sigmaCurr))
+                        sigma[kappa, :] = sigmaCurr[indices]
+                        Xmat[kappa, :, :] = XmatCurr[:, indices]
+                    Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0, 2, 1]))
+                    # GEVLs tensor
+                    Dmat = np.zeros((nPosFreqs, dimYtilde[k], dimYtilde[k]))
+                    for r in range(rank):
+                        Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
+                        
+                    e = np.zeros(dimYtilde[k])
                     e[:rank] = 1
-                    w[k][:, i + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
+                    Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
+                    wCurr = np.matmul(np.matmul(np.matmul(Xmat, Dmat), Qhermitian), e)
+                    w[k][:, i + 1, :] = wCurr
             else:
-                w[k][:, :, i + 1] = w[k][:, :, i]
+                w[k][:, i + 1, :] = w[k][:, i, :]
 
         # Update node index
         if nodeUpdatingStrategy == 'sequential':
@@ -267,34 +292,21 @@ def run_wola_danse(
         for k in range(nNodes):
             channelCount = np.zeros(nNodes, dtype=int)
             neighborCount = 0
-            for m in range(x_in.shape[-1]):
+            for m in range(nSensors):
                 # Node index corresponding to channel `m`
                 currNode = channelToNodeMap[m]
                 # Count channel index within node
                 c = channelCount[currNode]
                 if currNode == k:
-                    wNet[:, m, i + 1, k] = w[k][:, c, i + 1]
+                    wNet[m, i + 1, :, k] = w[k][:, i + 1, c]
                 else:
                     nChannels_k = np.sum(channelToNodeMap == k)
-                    gkq = w[k][:, nChannels_k + neighborCount, i + 1]
-                    wNet[:, m, i + 1, k] = w[currNode][:, c, i] * gkq
+                    gkq = w[k][:, i + 1, nChannels_k + neighborCount]
+                    wNet[m, i + 1, :, k] = w[currNode][:, i, c] * gkq
                 channelCount[currNode] += 1
                 
                 if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
                     neighborCount += 1
-
-    # Plot
-    if 0:
-        fig, axs = plt.subplots(1, 1)
-        fig.set_size_inches(8.5, 3.5)
-        for k in range(nNodes):
-            axs.plot(
-                np.abs(w[k][:, referenceSensorIdx, :]),
-                label=f'Node {k+1}'
-            )
-        axs.set_title('Online DANSE - Ref. sensor |w|')
-        axs.legend()
-        plt.show(block=False)
 
     return wNet
 

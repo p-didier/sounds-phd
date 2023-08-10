@@ -108,11 +108,16 @@ def run_wola_mwf(
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
             ) / np.sqrt(L)
+    # Get number of positive frequencies
+    nPosFreqs = L // 2 + 1
+    # Keep only positive frequencies (spare computations)
+    yWola = yWola[:, :nPosFreqs, :]
+    nWola = nWola[:, :nPosFreqs, :]
 
     # Initialize
-    w = np.zeros((nSensors, nIter, L, nSensors), dtype=np.complex128)
-    Ryy = np.zeros((L, nSensors, nSensors), dtype=np.complex128)
-    Rnn = np.zeros((L, nSensors, nSensors), dtype=np.complex128)
+    w = np.zeros((nSensors, nIter, nPosFreqs, nSensors), dtype=np.complex128)
+    Ryy = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+    Rnn = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
     
     if filterType == 'gevd':
         algLabel = 'GEVD-MWF'
@@ -142,17 +147,17 @@ def run_wola_mwf(
                 w[:, i + 1, :, :] = np.transpose(currw, (2, 0, 1))
 
             elif filterType == 'gevd':
-                Xmat = np.zeros((L, nSensors, nSensors), dtype=np.complex128)
-                sigma = np.zeros((L, nSensors))
+                Xmat = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+                sigma = np.zeros((nPosFreqs, nSensors))
                 # Looping over frequencies because of the GEVD
-                for kappa in range(L):
+                for kappa in range(nPosFreqs):
                     sigmaCurr, XmatCurr = la.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
                     indices = np.flip(np.argsort(sigmaCurr))
                     sigma[kappa, :] = sigmaCurr[indices]
                     Xmat[kappa, :, :] = XmatCurr[:, indices]
                 Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0, 2, 1]))
                 # GEVLs tensor
-                Dmat = np.zeros((L, nSensors, nSensors))
+                Dmat = np.zeros((nPosFreqs, nSensors, nSensors))
                 for r in range(rank):
                     Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
                 # LMMSE weights
