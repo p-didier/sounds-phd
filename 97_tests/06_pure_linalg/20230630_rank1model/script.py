@@ -46,8 +46,8 @@ class ScriptParameters:
         # 'gevddanse_sim_online'
         # 'mwf_wola',       # --------- vvvv WOLA vvvv
         # 'gevdmwf_wola',
-        # 'danse_wola',
-        'gevddanse_wola',
+        'danse_wola',
+        # 'gevddanse_wola',
         # 'danse_sim_wola',
         # 'gevddanse_sim_wola'
     ])
@@ -364,18 +364,12 @@ def compute_filter(
             'x': cleanSigs,
             'n': noiseOnlySigs,
             'referenceSensorIdx': 0,
-            'L': wolaParams.nfft,
             'channelToNodeMap': channelToNodeMap,
             'filterType': 'gevd' if 'gevd' in type else 'regular',
             'rank': rank,
             'verbose': verbose,
-            'startFusionExpAvgAfter': wolaParams.startFusionExpAvgAfter,
+            'p': wolaParams,
             'ignoreFusionForSSNodes': noSSfusion,
-            'startExpAvgAfter': wolaParams.startExpAvgAfter,
-            'beta': wolaParams.betaDanse,
-            'B': wolaParams.B,
-            'alpha': wolaParams.alpha,
-            'betaExt': wolaParams.betaExt
         }
         if 'sim' in type:
             kwargs['nodeUpdatingStrategy'] = 'simultaneous'
@@ -387,8 +381,6 @@ def compute_filter(
             kwargs['batchModeNetWideFilters'] = wBatchNetWide
         
         if 'wola' in type:
-            kwargs['R'] = wolaParams.hop
-            kwargs['windowType'] = wolaParams.winType
             w = run_wola_danse(**kwargs)
         elif 'online' in type:
             w = run_online_danse(**kwargs)

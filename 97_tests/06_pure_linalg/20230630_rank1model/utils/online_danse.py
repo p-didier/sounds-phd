@@ -43,21 +43,13 @@ def get_window(winType, nfft):
 def run_wola_danse(
         x: np.ndarray,
         n: np.ndarray,
+        p: WOLAparameters,
         channelToNodeMap,      
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
-        L=1024,
-        R=512,
-        windowType='sqrt-hann',  # `sqrt-hann` or `rect`
         referenceSensorIdx=0,
-        beta=0.99,  # exponential averaging constant
-        B=0,  # number of frames bw. consecutive updates of fusion vectors
-        alpha=0.5,  # exponential averaging constant for fusion vectors
-        betaExt=0.99,  # exponential averaging constant for external target filters
         ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
-        startExpAvgAfter=0,  # number of frames after which to start exponential averaging
-        startFusionExpAvgAfter=0, # same as above, for the fusion vectors
         verbose=False,
     ):
 
@@ -66,26 +58,26 @@ def run_wola_danse(
     # Get number of nodes
     nSensors = x.shape[1]
     # Get number of frames
-    nIter = x.shape[0] // R - 1
+    nIter = x.shape[0] // p.hop - 1
     # Get noisy signal (time-domain)
     y = x + n
 
     # Convert to WOLA domain
-    win = get_window(windowType, L)
-    yWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
-    nWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
+    win = get_window(p.winType, p.nfft)
+    yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     for m in range(nSensors):
         for i in range(nIter):
-            idxBegFrame = i * R
-            idxEndFrame = idxBegFrame + L
+            idxBegFrame = i * p.hop
+            idxEndFrame = idxBegFrame + p.nfft
             yWola[i, :, m] = np.fft.fft(
                 y[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(L)
+            ) / np.sqrt(p.nfft)
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(L)
+            ) / np.sqrt(p.nfft)
     # Get number of positive frequencies
-    nPosFreqs = L // 2 + 1
+    nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
     yWola = yWola[:, :nPosFreqs, :]
     nWola = nWola[:, :nPosFreqs, :]
@@ -96,7 +88,7 @@ def run_wola_danse(
     for k in range(nNodes):
         nSensorsPerNode = np.sum(channelToNodeMap == k)
         dimYtilde[k] = nSensorsPerNode + nNodes - 1
-        wCurr = np.zeros(
+        wCurr: np.ndarray = np.zeros(
             (nPosFreqs, nIter, dimYtilde[k]),
             dtype=np.complex128
         )
@@ -146,7 +138,7 @@ def run_wola_danse(
     fusionVects = [None for _ in range(nNodes)]
     for k in range(nNodes):
         baseVect = np.zeros((nPosFreqs, sum(channelToNodeMap == k)))
-        baseVect[0, :] = 1
+        baseVect[:, 0] = 1
         fusionVectTargets[k] = baseVect
         fusionVects[k] = baseVect
     lastFuVectUp = -1 * np.ones(nNodes)
@@ -174,25 +166,25 @@ def run_wola_danse(
 
         # Update fusion vectors and perform fusion
         for k in range(nNodes):
-            yk = yCurrFrame[:, channelToNodeMap == k]
-            nk = nCurrFrame[:, channelToNodeMap == k]
+            yk: np.ndarray = yCurrFrame[:, channelToNodeMap == k]
+            nk: np.ndarray = nCurrFrame[:, channelToNodeMap == k]
 
             if ignoreFusionForSSNodes and yk.shape[1] == 1:
                 pass  # do not update the fusion vector for single-sensor nodes
             else:
                 # Update target fusion vector
-                if i > startFusionExpAvgAfter:
+                if i > p.startFusionExpAvgAfter:
                     # Update using `beta_EXT`
-                    fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
-                        (1 - betaExt) * w[k][:, i, :yk.shape[1]]
+                    fusionVectTargets[k] = p.betaExt * fusionVectTargets[k] +\
+                        (1 - p.betaExt) * w[k][:, i, :yk.shape[1]]
                 else:
                     # Update without `beta_EXT`
                     fusionVectTargets[k] = w[k][:, i, :yk.shape[1]]
 
                 # Check if effective fusion vector is to be updated
-                if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
-                    fusionVects[k] = (1 - alpha) * fusionVects[k] +\
-                        alpha * fusionVectTargets[k]
+                if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= p.B:
+                    fusionVects[k] = (1 - p.alpha) * fusionVects[k] +\
+                        p.alpha * fusionVectTargets[k]
                     lastFuVectUp[k] = i
 
             # Perform fusion
@@ -210,11 +202,11 @@ def run_wola_danse(
         # Loop over nodes
         for k in range(nNodes):
             # Get y tilde
-            yTilde = np.concatenate((
+            yTilde: np.ndarray = np.concatenate((
                 yCurrFrame[:, channelToNodeMap == k],
                 fusedSignals[:, nodeIndices != k]
             ), axis=1)
-            nTilde = np.concatenate((
+            nTilde: np.ndarray = np.concatenate((
                 nCurrFrame[:, channelToNodeMap == k],
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
@@ -223,9 +215,9 @@ def run_wola_danse(
             RyyCurr = np.einsum('ij,ik->ijk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->ijk', nTilde, nTilde.conj())
             # Update covariance matrices
-            if i > startExpAvgAfter:
-                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+            if i > p.startExpAvgAfter:
+                Ryy[k] = p.betaDanse * Ryy[k] + (1 - p.betaDanse) * RyyCurr
+                Rnn[k] = p.betaDanse * Rnn[k] + (1 - p.betaDanse) * RnnCurr
             else:
                 Ryy[k] = RyyCurr
                 Rnn[k] = RnnCurr
@@ -233,7 +225,7 @@ def run_wola_danse(
             nRyyUpdates[k] += 1
             nRnnUpdates[k] += 1
 
-            # Check if filter ought to be updated
+            # Check if filter should be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
                 updateFilter = True
             elif nodeUpdatingStrategy == 'simultaneous':
@@ -255,7 +247,8 @@ def run_wola_danse(
                 if filterType == 'regular':
                     e = np.zeros(w[k].shape[-1])
                     e[referenceSensorIdx] = 1  # selection vector
-                    w[k][:, i + 1, :] = np.linalg.inv(Ryy[k]) @ (Ryy[k] - Rnn[k]) @ e
+                    w[k][:, i + 1, :] = np.linalg.inv(Ryy[k]) @\
+                        (Ryy[k] - Rnn[k]) @ e
                 elif filterType == 'gevd':
                     sigma = np.zeros((nPosFreqs, dimYtilde[k]))
                     Xmat = np.zeros(
@@ -314,19 +307,13 @@ def run_wola_danse(
 def run_online_danse(
         x: np.ndarray,
         n: np.ndarray,
+        p: WOLAparameters,
         channelToNodeMap,      
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
-        L=1024,
         referenceSensorIdx=0,
-        beta=0.99,  # exponential averaging constant
-        B=0,  # number of frames bw. consecutive updates of fusion vectors
-        alpha=0.5,  # exponential averaging constant for fusion vectors
-        betaExt=0.99,  # exponential averaging constant for external target filters
         batchModeNetWideFilters=None,
-        startExpAvgAfter=0, # number of frames after which to start exponential averaging
-        startFusionExpAvgAfter=0, # same as above, for the fusion vectors
         ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
         verbose=True,
     ):
@@ -338,7 +325,7 @@ def run_online_danse(
     nSensors = len(channelToNodeMap)
 
     # Number of frames
-    nIter = y.shape[0] // L
+    nIter = y.shape[0] // p.nfft
 
     # Initialize
     w = []
@@ -359,14 +346,6 @@ def run_online_danse(
             (dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
-        # Ryy.append(
-        #     np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k])) +\
-        #     1j * np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k]))
-        # )
-        # Rnn.append(
-        #     np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k])) +\
-        #     1j * np.random.uniform(0, 1000, (dimYtilde[k], dimYtilde[k]))
-        # )
 
     wNet = np.zeros(
         (nSensors, nIter, nNodes),
@@ -406,15 +385,15 @@ def run_online_danse(
     for i in range(nIter - 1):
         if verbose:
             print(f'{label} iteration {i+1}/{nIter}')
-        idxBegFrame = i * L
-        idxEndFrame = (i + 1) * L
+        idxBegFrame = i * p.nfft
+        idxEndFrame = (i + 1) * p.nfft
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
-            (L, nNodes),
+            (p.nfft, nNodes),
             dtype=np.complex128
         )
         fusedSignalsNoiseOnly = np.zeros(
-            (L, nNodes),
+            (p.nfft, nNodes),
             dtype=np.complex128
         )
         
@@ -429,18 +408,18 @@ def run_online_danse(
                 if batchModeNetWideFilters is None:
 
                     # Update target fusion vector
-                    if i > startFusionExpAvgAfter:
+                    if i > p.startFusionExpAvgAfter:
                         # Update using `beta_EXT`
-                        fusionVectTargets[k] = betaExt * fusionVectTargets[k] +\
-                            (1 - betaExt) * w[k][:yk.shape[1], i]
+                        fusionVectTargets[k] = p.betaExt * fusionVectTargets[k] +\
+                            (1 - p.betaExt) * w[k][:yk.shape[1], i]
                     else:
                         # Update without `beta_EXT`
                         fusionVectTargets[k] = w[k][:yk.shape[1], i]
 
                     # Check if effective fusion vector is to be updated
-                    if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= B:
-                        fusionVects[k] = (1 - alpha) * fusionVects[k] +\
-                            alpha * fusionVectTargets[k]
+                    if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= p.B:
+                        fusionVects[k] = (1 - p.alpha) * fusionVects[k] +\
+                            p.alpha * fusionVectTargets[k]
                         lastFuVectUp[k] = i
                 else:
                     # Compute index where the fusion filters are stored in the
@@ -467,10 +446,10 @@ def run_online_danse(
             RyyCurr = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
             RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
             # Update covariance matrices
-            if i > startExpAvgAfter:
+            if i > p.startExpAvgAfter:
                 # Using `beta`
-                Ryy[k] = beta * Ryy[k] + (1 - beta) * RyyCurr
-                Rnn[k] = beta * Rnn[k] + (1 - beta) * RnnCurr
+                Ryy[k] = p.betaDanse * Ryy[k] + (1 - p.betaDanse) * RyyCurr
+                Rnn[k] = p.betaDanse * Rnn[k] + (1 - p.betaDanse) * RnnCurr
             else:
                 # Without `beta`
                 Ryy[k] = RyyCurr
