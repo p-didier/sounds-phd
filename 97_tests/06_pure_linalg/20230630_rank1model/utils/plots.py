@@ -35,6 +35,7 @@ def plot_final(
         toPlot: dict,
         fs=16e3,
         L=1024,
+        R=512,
         avgAcrossNodesFlag=False,
         figTitleSuffix=None
     ):
@@ -51,10 +52,14 @@ def plot_final(
         else:
             lineStyle = allLineStyles[idxFilter]
 
+        flagBatchModeIncluded = False
         if 'online' in filterType or 'wola' in filterType:
             nTaus = toPlot[filterType].shape[2]
             # Plot as function of beta (== as function of tau)
-            xAxis = np.arange(0, toPlot[filterType].shape[1]) * L / fs
+            if 'online' in filterType:
+                xAxis = np.arange(0, toPlot[filterType].shape[1]) * L / fs
+            elif 'wola' in filterType:
+                xAxis = np.arange(0, toPlot[filterType].shape[1]) * R / fs
             for idxTau in range(nTaus):
                 if avgAcrossNodesFlag:
                     axes.fill_between(
@@ -86,7 +91,8 @@ def plot_final(
                             label=f'{filterType} $k=${k+1}',
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )
-        else:  # <-- batch-mode 
+        else:  # <-- batch-mode
+            flagBatchModeIncluded = True
             # Plot as function of signal duration
             if avgAcrossNodesFlag:  # Case where we have an average across nodes
                 # Add a patch of color to show the range of values across MC runs
@@ -119,8 +125,9 @@ def plot_final(
         ti += f' ({figTitleSuffix})'
     axes.set_title(ti)
     axes.grid(which='both')
-    axes.set_ylabel('Abs. diff. $\\Delta$ bw. filter and MF$\\cdot$SPF')
-    axes.set_xlim([np.amin(durations), np.amax(durations)])
+    axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
+    if flagBatchModeIncluded:
+        axes.set_xlim([np.amin(durations), np.amax(durations)])
     # Add secondary x-axis with beta values
     ax2 = axes.secondary_xaxis("top")
     ax2.set_xticks(axes.get_xticks())
@@ -131,15 +138,16 @@ def plot_final(
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf
     for idxFilter, filterType in enumerate(toPlot.keys()):
-        if 'online' in filterType or 'wola' in filterType:
+        if 'online' in filterType or 'wola' in filterType and\
+            flagBatchModeIncluded:
             idxStart = int(np.amin(durations) * fs // L)
             ymin = min(
                 ymin,
-                np.amin(np.mean(toPlot[filterType][:, idxStart:, :], axis=0))
+                np.amin(toPlot[filterType][:, idxStart:, :])
             )
             ymax = max(
                 ymax,
-                np.amax(np.mean(toPlot[filterType][:, idxStart:, :], axis=0))
+                np.amax(toPlot[filterType][:, idxStart:, :])
             )
         else:
             ymin = min(ymin, np.amin(toPlot[filterType]))
