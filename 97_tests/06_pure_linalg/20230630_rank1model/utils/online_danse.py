@@ -5,9 +5,7 @@
 
 import numpy as np
 import scipy.linalg as la
-from scipy.signal import stft
 from dataclasses import dataclass
-from matplotlib import pyplot as plt
 
 @dataclass
 class WOLAparameters:
@@ -20,9 +18,16 @@ class WOLAparameters:
     betaMwf: float = 0.99  # exponential averaging constant for MWF
     B: int = 0  # number of frames bw. consecutive updates of fusion vectors
     alpha: float = 1  # exponential averaging constant for fusion vectors
-    betaExt: float = 0.99  # exponential averaging constant for external target filters
+    betaExt: float = 0  # exponential averaging constant for external target filters
     startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
     startFusionExpAvgAfter: int = 0  # same as above, for the fusion vectors
+    #
+    singleFreqBinIndex: int = None  # if not None, consider only the freq. bin at this index for WOLA-DANSE
+    
+    def __post_init__(self):
+        if self.singleFreqBinIndex is not None:
+            if self.singleFreqBinIndex > self.nPosFreqs:
+                raise ValueError('singleFreqBinIndex cannot be larger than nPosFreqs')
 
 def get_window(winType, nfft):
     
@@ -72,15 +77,24 @@ def run_wola_danse(
             idxEndFrame = idxBegFrame + p.nfft
             yWola[i, :, m] = np.fft.fft(
                 y[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(p.nfft)
+            ) / np.sqrt(p.hop)
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(p.nfft)
+            ) / np.sqrt(p.hop)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
     yWola = yWola[:, :nPosFreqs, :]
     nWola = nWola[:, :nPosFreqs, :]
+    
+    # Special user request: single frequency bin study
+    if p.singleFreqBinIndex is not None:
+        print(f'/!\ /!\ /!\ WOLA-DANSE: single frequency bin study (index {p.singleFreqBinIndex})')
+        yWola = yWola[:, p.singleFreqBinIndex, :]
+        nWola = nWola[:, p.singleFreqBinIndex, :]
+        yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
+        nWola = np.expand_dims(nWola, axis=1)
+        nPosFreqs = 1
     
     # Initialize
     w = []
@@ -106,15 +120,17 @@ def run_wola_danse(
             dtype=np.complex128
         ))
     
+    # Initialize network-wide DANSE filters
     wNet = np.zeros(
         (nSensors, nIter, nPosFreqs, nNodes),
         dtype=np.complex128
     )
+    # Prepare for DANSE filter updates
     idxUpdatingNode = 0
     if nodeUpdatingStrategy == 'sequential':
-        label = 'WOLA-DANSE [seq NU]'
+        algLabel = 'WOLA-DANSE [seq NU]'
     elif nodeUpdatingStrategy == 'simultaneous':
-        label = 'WOLA-DANSE [sim NU]'
+        algLabel = 'WOLA-DANSE [sim NU]'
         wExt = []
         wExtTarget = []
         for k in range(nNodes):
@@ -128,7 +144,7 @@ def run_wola_danse(
                 dtype=np.complex128
             ))
     if filterType == 'gevd':
-        label += ' [GEVD]'
+        algLabel += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
     nRyyUpdates = np.zeros(nNodes, dtype=int)
     nRnnUpdates = np.zeros(nNodes, dtype=int)
@@ -138,7 +154,7 @@ def run_wola_danse(
     fusionVects = [None for _ in range(nNodes)]
     for k in range(nNodes):
         baseVect = np.zeros((nPosFreqs, sum(channelToNodeMap == k)))
-        baseVect[:, 0] = 1
+        baseVect[:, referenceSensorIdx] = 1  # select reference sensor
         fusionVectTargets[k] = baseVect
         fusionVects[k] = baseVect
     lastFuVectUp = -1 * np.ones(nNodes)
@@ -146,7 +162,8 @@ def run_wola_danse(
     # Loop over frames
     for i in range(nIter - 1):
         if verbose:
-            print(f'{label} iteration {i+1}/{nIter}')
+            print(f'{algLabel} iteration {i+1}/{nIter}')
+        
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
             (nPosFreqs, nNodes),
@@ -161,13 +178,13 @@ def run_wola_danse(
         # behaviour which make it so that:
         # shape(yWola[i, :, channelToNodeMap == k]) = (Mk, nPosFreqs)
         # instead of (nPosFreqs, Mk)]
-        yCurrFrame = yWola[i, :, :]
-        nCurrFrame = nWola[i, :, :]
+        yCurr = yWola[i, :, :]
+        nCurr = nWola[i, :, :]
 
         # Update fusion vectors and perform fusion
         for k in range(nNodes):
-            yk: np.ndarray = yCurrFrame[:, channelToNodeMap == k]
-            nk: np.ndarray = nCurrFrame[:, channelToNodeMap == k]
+            yk: np.ndarray = yCurr[:, channelToNodeMap == k]
+            nk: np.ndarray = nCurr[:, channelToNodeMap == k]
 
             if ignoreFusionForSSNodes and yk.shape[1] == 1:
                 pass  # do not update the fusion vector for single-sensor nodes
@@ -203,11 +220,11 @@ def run_wola_danse(
         for k in range(nNodes):
             # Get y tilde
             yTilde: np.ndarray = np.concatenate((
-                yCurrFrame[:, channelToNodeMap == k],
+                yCurr[:, channelToNodeMap == k],
                 fusedSignals[:, nodeIndices != k]
             ), axis=1)
             nTilde: np.ndarray = np.concatenate((
-                nCurrFrame[:, channelToNodeMap == k],
+                nCurr[:, channelToNodeMap == k],
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
 

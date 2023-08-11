@@ -3,9 +3,10 @@
 #
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
+import copy
 import numpy as np
 import scipy.linalg as la
-from .online_danse import get_window
+from .online_danse import get_window, WOLAparameters
 
 def run_online_mwf(
         x: np.ndarray,
@@ -79,10 +80,7 @@ def run_wola_mwf(
         n: np.ndarray,
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
-        L=1024,     # frame length
-        R=512,      # hop size
-        windowType='hann',
-        beta=0.99,  # exponential averaging constant
+        p: WOLAparameters=WOLAparameters(),
         verbose=True
     ):
     """Weighted OverLap-Add (WOLA) MWF."""
@@ -90,32 +88,43 @@ def run_wola_mwf(
     # Get number of nodes
     nSensors = x.shape[1]
     # Get number of frames
-    nIter = x.shape[0] // R - 1
+    nIter = x.shape[0] // p.hop - 1
     # Get noisy signal (time-domain)
     y = x + n
 
     # Compute WOLA domain signal
-    win = get_window(windowType, L)
-    yWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
-    nWola = np.zeros((nIter, L, nSensors), dtype=np.complex128)
+    win = get_window(p.winType, p.nfft)
+    yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     for m in range(nSensors):
         for i in range(nIter):
-            idxBegFrame = i * R
-            idxEndFrame = idxBegFrame + L
+            idxBegFrame = i * p.hop
+            idxEndFrame = idxBegFrame + p.nfft
             yWola[i, :, m] = np.fft.fft(
                 y[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(L)
+            ) / np.sqrt(p.hop)
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(L)
+            ) / np.sqrt(p.hop)
     # Get number of positive frequencies
-    nPosFreqs = L // 2 + 1
+    nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
     yWola = yWola[:, :nPosFreqs, :]
     nWola = nWola[:, :nPosFreqs, :]
 
+    # Special user request: single frequency bin study
+    if p.singleFreqBinIndex is not None:
+        print(f'/!\ /!\ /!\ WOLA-MWF: single frequency bin study (index {p.singleFreqBinIndex})')
+        yWola = yWola[:, p.singleFreqBinIndex, :]
+        nWola = nWola[:, p.singleFreqBinIndex, :]
+        yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
+        nWola = np.expand_dims(nWola, axis=1)
+        nPosFreqs = 1
+    
     # Initialize
     w = np.zeros((nSensors, nIter, nPosFreqs, nSensors), dtype=np.complex128)
+    for m in range(nSensors):
+        w[m, :, :, m] = 1  # initialize with identity matrix (selecting ref. sensor)
     Ryy = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
     Rnn = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
     
@@ -136,8 +145,12 @@ def run_wola_mwf(
         RyyCurr = np.einsum('ij,ik->ijk', yCurr, yCurr.conj())
         RnnCurr = np.einsum('ij,ik->ijk', nCurr, nCurr.conj())
         # Update covariance matrices
-        Ryy = beta * Ryy + (1 - beta) * RyyCurr
-        Rnn = beta * Rnn + (1 - beta) * RnnCurr
+        if i > p.startExpAvgAfter:
+            Ryy = p.betaMwf * Ryy + (1 - p.betaMwf) * RyyCurr
+            Rnn = p.betaMwf * Rnn + (1 - p.betaMwf) * RnnCurr
+        else:
+            Ryy = copy.deepcopy(RyyCurr)
+            Rnn = copy.deepcopy(RnnCurr)
         # Compute filter
         if np.linalg.matrix_rank(Ryy[0, :, :]) >= nSensors and\
             np.linalg.matrix_rank(Rnn[0, :, :]) >= nSensors:
@@ -166,7 +179,7 @@ def run_wola_mwf(
                 w[:, i + 1, :, :] = np.transpose(wCurr, (2, 0, 1))
                 
         else:
-            print(f'i = {i}: rank deficient covariance matrix/matrices')
+            print(f'i = {i}: rank deficient covariance matrix/matrices, skipping filter update')
             w[:, i + 1, :, :] = w[:, i, :, :]
         
     return w

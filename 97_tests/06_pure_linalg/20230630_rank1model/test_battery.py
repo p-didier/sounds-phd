@@ -20,8 +20,8 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 GLOBAL_SEED = 0  # Global seed for random number generator
 TMAX = 30  # [s] Maximum duration of the simulated data
 FS = 16000  # [Hz] Sampling frequency
-N_MC = 2  # Number of Monte Carlo repetitions
-N_MC_2 = 2  # Number of Monte Carlo repetitions for SC3
+N_MC = 5  # Number of Monte Carlo repetitions
+N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
     'gevdmwf_batch',  # GEVD-MWF (batch)
@@ -31,7 +31,7 @@ TO_COMPUTE = [
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 
 # Battery name
-BATTERY_NAME = 'rank1model_noBetaExt_noSSfusion'
+BATTERY_NAME = 'rank1model_fs8kHz'
 
 @dataclass
 class TestParameters:
@@ -209,6 +209,7 @@ def main():
         allOutputs=allOutputs
     )
 
+    print('ALL DONE.')
     stop = 1
 
 

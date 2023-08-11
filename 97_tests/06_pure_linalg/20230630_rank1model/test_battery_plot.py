@@ -13,10 +13,7 @@ from test_battery import TestOutput, TestParameters
 # Get current file folder
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
-RESULTS_FILE_NAME = 'rank1model.npz'
-RESULTS_FILE_NAME = 'rank1model_noBetaExt_fusionAtSSNodes.npz'
-RESULTS_FILE_NAME = 'rank1model_betaExt_fusionAtSSNodes.npz'
-RESULTS_FILE_NAME = 'rank1model_noBetaExt_noSSfusion.npz'
+RESULTS_FILE_NAME = 'rank1model_fs8kHz.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
@@ -71,6 +68,7 @@ def main():
     # Show figures
     plt.show(block=False)
 
+    print('ALL DONE.')
     stop = 1
 
 

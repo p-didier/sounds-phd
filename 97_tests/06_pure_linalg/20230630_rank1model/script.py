@@ -4,6 +4,8 @@
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
 import sys
+sys.path.append('..')
+
 import copy
 import resampy
 import numpy as np
@@ -14,19 +16,18 @@ from utils.plots import *
 from utils.online_mwf import *
 from utils.online_danse import *
 from dataclasses import dataclass, field
-sys.path.append('..')
 
 @dataclass
 class ScriptParameters:
     signalType: str = 'noise_real'  # 'speech', 'noise_real', 'noise_complex'
     # signalType: str = 'noise_complex'  # 'speech', 'noise_real', 'noise_complex'
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-    nSensors: int = 5
+    nSensors: int = 3
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
     durations: np.ndarray = np.logspace(np.log10(1), np.log10(30), 30)
-    fs: float = 16e3
+    fs: float = 8e3
     nMC: int = 1
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
     taus: list[float] = field(default_factory=lambda: [2.])
@@ -38,7 +39,7 @@ class ScriptParameters:
         # 'gevddanse_batch',
         # 'danse_sim_batch',
         # 'gevddanse_sim_batch',
-        'mwf_online',     # --------- vvvv ONLINE vvvv
+        # 'mwf_online',     # --------- vvvv ONLINE vvvv
         # 'gevdmwf_online',
         # 'danse_online',
         # 'gevddanse_online',
@@ -48,7 +49,7 @@ class ScriptParameters:
         # 'gevdmwf_wola',
         # 'danse_wola',
         # 'gevddanse_wola',
-        # 'danse_sim_wola',
+        'danse_sim_wola',
         # 'gevddanse_sim_wola'
     ])
     seed: int = 0
@@ -57,11 +58,11 @@ class ScriptParameters:
         hop=512,
         fs=fs,
         winType='rect',
-        betaExt=0.0,  # if ==0, no extra fusion vector relaxation
+        # betaExt=0.9,  # if ==0, no extra fusion vector relaxation
         startExpAvgAfter=2,  # frames
         startFusionExpAvgAfter=2,  # frames
-        # singleFreqBinIndex=None,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
-        singleFreqBinIndex=399,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
+        singleFreqBinIndex=None,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
+        # singleFreqBinIndex=399,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
     )
     # Booleans vvvv
     randomDelays: bool = False
@@ -340,10 +341,8 @@ def compute_filter(
             x=cleanSigs,
             n=noiseOnlySigs,
             filterType='regular',
-            L=wolaParams.nfft,
-            beta=wolaParams.betaMwf,
+            p=wolaParams,
             verbose=verbose,
-            singleFreqBinIndex=wolaParams.singleFreqBinIndex
         )
     elif type == 'gevdmwf_batch':
         sigma, Xmat = la.eigh(Ryy, Rnn)
@@ -370,10 +369,8 @@ def compute_filter(
             n=noiseOnlySigs,
             filterType='gevd',
             rank=rank,
-            L=wolaParams.nfft,
-            beta=wolaParams.betaMwf,
+            p=wolaParams,
             verbose=verbose,
-            singleFreqBinIndex=wolaParams.singleFreqBinIndex
         )
     elif 'danse' in type:
         kwargsBatch = {
@@ -736,6 +733,34 @@ def get_metrics(
             diffsPerCoefficient[k] = np.mean(np.abs(
                 currFilt - currBaseline[:, np.newaxis, :]
             ), axis=(0, -1))
+
+            # fig, axes = plt.subplots(3,1, sharex=True, sharey=True)
+            # fig.set_size_inches(8.5, 4.5)
+            # axes[0].loglog(np.squeeze(np.real(currFilt)).T)
+            # for ii in range(len(currBaseline)):
+            #     axes[0].hlines(
+            #         np.squeeze(np.real(currBaseline[ii])),
+            #         0, 1000, linestyle='--', color=f'C{ii}'
+            #     )
+            # axes[0].grid(True)
+            # axes[0].set_title('Real part')
+            # axes[1].loglog(np.squeeze(np.imag(currFilt)).T)
+            # for ii in range(len(currBaseline)):
+            #     axes[1].hlines(
+            #         np.squeeze(np.real(currBaseline[ii])),
+            #         0, 1000, linestyle='--', color=f'C{ii}'
+            #     )
+            # axes[1].grid(True)
+            # axes[1].set_title('Imaginary part')
+            # axes[2].loglog(np.squeeze(np.abs(currFilt)).T)
+            # for ii in range(len(currBaseline)):
+            #     axes[2].hlines(
+            #         np.squeeze(np.abs(currBaseline[ii])),
+            #         0, 1000, linestyle='--', color=f'C{ii}'
+            #     )
+            # axes[2].grid(True)
+            # axes[2].set_title('Magnitude')
+
         else:
             currBaseline = baseline[:, idxRef]
             if len(currFilt.shape) == 2:
@@ -774,19 +799,25 @@ def get_sigma_wola(x, params: WOLAparameters):
     
     win = get_window(params.winType, params.nfft)
     nIter = int((x.shape[0] - params.nfft) / params.hop) + 1
-    sigmas = np.zeros((nIter, params.nfft, x.shape[1]))
+    sigmasSquared = np.zeros((nIter, params.nfft, x.shape[1]))
     for i in range(nIter):
         idxStart = i * params.hop
         idxEnd = idxStart + params.nfft
         windowedChunk = x[idxStart:idxEnd, :] * win[:, np.newaxis]
         Chunk = np.fft.fft(windowedChunk, axis=0)
-        sigmas[i, :, :] = np.abs(Chunk) ** 2
+        sigmasSquared[i, :, :] = np.abs(Chunk) ** 2
+    
     # Only keep positive frequencies
-    sigmas = sigmas[:, :int(params.nfft / 2) + 1, :]
-    sigmaWOLA = np.mean(sigmas, axis=0)
+    sigmasSquared = sigmasSquared[:, :int(params.nfft / 2) + 1, :]
+
+    # Average over iterations and get actual sigma (not squared)
+    sigmaWOLA = np.sqrt(np.mean(sigmasSquared, axis=0))
     if params.singleFreqBinIndex is not None:
         sigmaWOLA = sigmaWOLA[params.singleFreqBinIndex, :]
         sigmaWOLA = sigmaWOLA[np.newaxis, :]
+    else:
+        sigmaWOLA = np.squeeze(sigmaWOLA)
+    
     return sigmaWOLA
 
 
