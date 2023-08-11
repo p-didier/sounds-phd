@@ -26,8 +26,8 @@ class ScriptParameters:
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    durations: np.ndarray = np.logspace(np.log10(1), np.log10(30), 30)
-    fs: float = 8e3
+    durations: np.ndarray = np.logspace(np.log10(1), np.log10(3), 30)
+    fs: float = 16e3
     nMC: int = 1
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
     taus: list[float] = field(default_factory=lambda: [2.])
@@ -332,8 +332,7 @@ def compute_filter(
             x=cleanSigs,
             n=noiseOnlySigs,
             filterType='regular',
-            L=wolaParams.nfft,
-            beta=wolaParams.betaMwf,
+            p=wolaParams,
             verbose=verbose
         )
     elif type == 'mwf_wola':
@@ -359,8 +358,7 @@ def compute_filter(
             n=noiseOnlySigs,
             filterType='gevd',
             rank=rank,
-            L=wolaParams.nfft,
-            beta=wolaParams.betaMwf,
+            p=wolaParams,
             verbose=verbose
         )
     elif type == 'gevdmwf_wola':

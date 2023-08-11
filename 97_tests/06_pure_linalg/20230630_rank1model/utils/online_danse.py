@@ -304,19 +304,25 @@ def run_wola_danse(
             neighborCount = 0
             for m in range(nSensors):
                 # Node index corresponding to channel `m`
-                currNode = channelToNodeMap[m]
+                currNetWideNodeIdx = channelToNodeMap[m]
                 # Count channel index within node
-                c = channelCount[currNode]
-                if currNode == k:
+                c = channelCount[currNetWideNodeIdx]
+                if currNetWideNodeIdx == k:
                     wNet[m, i + 1, :, k] = w[k][:, i + 1, c]
                 else:
                     nChannels_k = np.sum(channelToNodeMap == k)
                     gkq = w[k][:, i + 1, nChannels_k + neighborCount]
-                    wNet[m, i + 1, :, k] = w[currNode][:, i, c] * gkq
-                channelCount[currNode] += 1
+                    wNet[m, i + 1, :, k] =\
+                        fusionVects[currNetWideNodeIdx].T * gkq
+                channelCount[currNetWideNodeIdx] += 1
                 
-                if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
+                if currNetWideNodeIdx != k and\
+                    c == np.sum(channelToNodeMap == currNetWideNodeIdx) - 1:
                     neighborCount += 1
+
+        
+        if i == 10:
+            stop = 1
 
     return wNet
 

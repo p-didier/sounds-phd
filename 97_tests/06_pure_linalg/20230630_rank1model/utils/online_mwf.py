@@ -13,8 +13,7 @@ def run_online_mwf(
         n: np.ndarray,
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
-        L=1024,
-        beta=0.99,  # exponential averaging constant
+        p: WOLAparameters=WOLAparameters(),
         verbose=True
     ):
 
@@ -24,7 +23,7 @@ def run_online_mwf(
     nSensors = x.shape[1]
 
     # Number of frames
-    nIter = y.shape[0] // L
+    nIter = y.shape[0] // p.nfft
 
     # Initialize
     w = np.zeros((nSensors, nIter, nSensors), dtype=np.complex128)
@@ -39,8 +38,8 @@ def run_online_mwf(
     for i in range(nIter - 1):
         if verbose:
             print(f'Online {algLabel} iteration {i+1}/{nIter}')
-        idxBegFrame = i * L
-        idxEndFrame = (i + 1) * L
+        idxBegFrame = i * p.nfft
+        idxEndFrame = (i + 1) * p.nfft
         # Get current frame
         yCurr = y[idxBegFrame:idxEndFrame, :]
         nCurr = n[idxBegFrame:idxEndFrame, :]
@@ -49,8 +48,12 @@ def run_online_mwf(
         RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
         RnnCurr = np.einsum('ij,ik->jk', nCurr, nCurr.conj())
         # Update covariance matrices
-        Ryy = beta * Ryy + (1 - beta) * RyyCurr
-        Rnn = beta * Rnn + (1 - beta) * RnnCurr
+        if i > p.startExpAvgAfter:
+            Ryy = p.betaMwf * Ryy + (1 - p.betaMwf) * RyyCurr
+            Rnn = p.betaMwf * Rnn + (1 - p.betaMwf) * RnnCurr
+        else:
+            Ryy = copy.deepcopy(RyyCurr)
+            Rnn = copy.deepcopy(RnnCurr)
 
         # Compute filter
         if filterType == 'regular':
@@ -157,7 +160,8 @@ def run_wola_mwf(
 
             if filterType == 'regular':
                 currw = np.linalg.inv(Ryy) @ (Ryy - Rnn)
-                w[:, i + 1, :, :] = np.transpose(currw, (2, 0, 1))
+                for kk in range(nSensors):
+                    w[:, i + 1, :, kk] = currw[:, :, kk].T
 
             elif filterType == 'gevd':
                 Xmat = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
@@ -182,4 +186,6 @@ def run_wola_mwf(
             print(f'i = {i}: rank deficient covariance matrix/matrices, skipping filter update')
             w[:, i + 1, :, :] = w[:, i, :, :]
         
+        if i == 10:
+            stop = 1
     return w
