@@ -69,7 +69,7 @@ def plot_final(
                         color=baseColor,
                         alpha=0.15
                     )
-                    axes.loglog(
+                    axes.semilogy(
                         xAxis,
                         np.mean(toPlot[filterType][:, :, idxTau], axis=0),
                         f'{baseColor}-',
@@ -84,7 +84,7 @@ def plot_final(
                         #     color=baseColor,
                         #     alpha=0.15
                         # )
-                        axes.loglog(
+                        axes.semilogy(
                             xAxis,
                             np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
                             f'{baseColor}-',
@@ -103,7 +103,7 @@ def plot_final(
                     color=baseColor,
                     alpha=0.15
                 )
-                axes.loglog(
+                axes.semilogy(
                     durations,
                     np.mean(toPlot[filterType], axis=0),
                     f'{baseColor}o{lineStyle}',
@@ -111,7 +111,7 @@ def plot_final(
                 )
             else:  # Case where we have data per node and per MC run
                 for k in range(toPlot[filterType].shape[-1]):
-                    axes.loglog(
+                    axes.semilogy(
                         durations,
                         np.mean(toPlot[filterType][:, :, k], axis=0),
                         f'{baseColor}o{lineStyle}',

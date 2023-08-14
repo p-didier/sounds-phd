@@ -23,35 +23,35 @@ class ScriptParameters:
     # signalType: str = 'noise_complex'  # 'speech', 'noise_real', 'noise_complex'
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
     nSensors: int = 5
-    nNodes: int = 2
-    # Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
-    Mk: list[int] = field(default_factory=lambda: [1, 4])  # if None, randomly assign sensors to nodes
+    nNodes: int = 3
+    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
+    # Mk: list[int] = field(default_factory=lambda: [1, 4])  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    durations: np.ndarray = np.logspace(np.log10(1), np.log10(20), 30)
+    durations: np.ndarray = np.linspace(1, 20, 30)
     fs: float = 8e3
-    nMC: int = 1
-    exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
+    nMC: int = 10
+    exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate'
     taus: list[float] = field(default_factory=lambda: [2.])
     # taus: list[float] = field(default_factory=lambda: [2., 4., 8.])
     b: float = 0.1  # factor for determining beta from tau (online processing)
     toCompute: list[str] = field(default_factory=lambda: [
-        # 'mwf_batch',
-        # 'gevdmwf_batch',
+        'mwf_batch',
+        'gevdmwf_batch',
         # 'danse_batch',
         # 'gevddanse_batch',
-        # 'danse_sim_batch',
-        # 'gevddanse_sim_batch',
+        'danse_sim_batch',
+        'gevddanse_sim_batch',
         # 'mwf_online',     # --------- vvvv ONLINE vvvv
         # 'gevdmwf_online',
         # 'danse_online',
         # 'gevddanse_online',
         # 'danse_sim_online',
         # 'gevddanse_sim_online'
-        'mwf_wola',       # --------- vvvv WOLA vvvv
+        # 'mwf_wola',       # --------- vvvv WOLA vvvv
         # 'gevdmwf_wola',
         # 'danse_wola',
         # 'gevddanse_wola',
-        'danse_sim_wola',
+        # 'danse_sim_wola',
         # 'gevddanse_sim_wola'
     ])
     seed: int = 0
@@ -382,8 +382,6 @@ def compute_filter(
             'filterType': 'gevd' if 'gevd' in type else 'regular',
             'rank': rank,
             'verbose': verbose,
-            'p': wolaParams,
-            'ignoreFusionForSSNodes': noSSfusion,
         }
         if 'sim' in type:
             kwargsBatch['nodeUpdatingStrategy'] = 'simultaneous'
@@ -415,8 +413,8 @@ def run_danse(
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
-        refSensorIdx=0,
-        verbose=True
+        referenceSensorIdx=0,
+        verbose=True,
     ):
 
     maxIter = 100
@@ -432,7 +430,7 @@ def run_danse(
     for k in range(nNodes):
         nSensorsPerNode = np.sum(channelToNodeMap == k)
         wCurr = np.zeros((nSensorsPerNode + nNodes - 1, maxIter), dtype=myDtype)
-        wCurr[0, :] = 1
+        wCurr[referenceSensorIdx, :] = 1
         w.append(wCurr)
     idxNodes = np.arange(nNodes)
     idxUpdatingNode = 0
@@ -440,7 +438,7 @@ def run_danse(
 
     for k in range(nNodes):
         # Determine reference sensor index
-        idxRef = np.where(channelToNodeMap == k)[0][0]
+        idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
         wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
     # Run DANSE
     if nodeUpdatingStrategy == 'sequential':
@@ -487,7 +485,7 @@ def run_danse(
                 # Compute filter
                 if filterType == 'regular':
                     e = np.zeros(w[k].shape[0])
-                    e[refSensorIdx] = 1  # selection vector
+                    e[referenceSensorIdx] = 1  # selection vector
                     ryd = (Ryy - Rnn) @ e
                     w[k][:, iter + 1] = np.linalg.inv(Ryy) @ ryd
                 elif filterType == 'gevd':
@@ -499,7 +497,7 @@ def run_danse(
                     Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
                     Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
                     e = np.zeros(Ryy.shape[0])
-                    e[refSensorIdx] = 1
+                    e[referenceSensorIdx] = 1
                     w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
             else:
                 w[k][: , iter + 1] = w[k][:, iter]  # keep old filter
@@ -662,7 +660,22 @@ def get_filters(
                 currFiltsAll.append(
                     compute_filter(type=filterType, **kwargs)
                 )
-        
+            
+            if 'danse' in filterType:
+                # Ensure adequate array dimensions
+                maxNiter = np.amax([f.shape[1] for f in currFiltsAll])
+                for k in range(len(currFiltsAll)):
+                    if currFiltsAll[k].shape[1] < maxNiter:
+                        # Pad by repeating the converged value as many times
+                        # as needed to reach `maxNiter`
+                        toPad = currFiltsAll[k][:, -1, :]
+                        currFiltsAll[k] = np.concatenate((
+                            currFiltsAll[k],
+                            toPad[:, np.newaxis, :].repeat(
+                                maxNiter - currFiltsAll[k].shape[1],
+                                axis=1
+                            )
+                        ), axis=1)
         filters[filterType] = np.array(currFiltsAll)
 
     return filters
