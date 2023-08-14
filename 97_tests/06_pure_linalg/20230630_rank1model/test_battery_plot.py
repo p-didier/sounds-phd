@@ -13,19 +13,18 @@ from test_battery import TestOutput, TestParameters
 # Get current file folder
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
-RESULTS_FILE_NAME = 'rank1model_fs8kHz.npz'
+RESULTS_FILE_NAME = 'wola/fs8kHz_correct2/baseline_noBetaExt_GEVD.npz'
+# RESULTS_FILE_NAME = 'online/fs8kHz/rank1model.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
-TMAX = 30  # [s] Maximum duration of the simulated data
-TO_COMPUTE = [
-    'gevdmwf_batch',  # GEVD-MWF (batch)
-    'gevdmwf_online',  # GEVD-MWF (online) 
-    'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
-]
+TMAX = 10  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230809_tests'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230814_tests/correct2/baseline_gevd'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
+TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
+# Booleans
+SHOW_INDIV_RUN_LINES = True  # whether to show individual MC runs as light lines
 
 def main():
     """Main function (called by default when running script)."""
@@ -72,12 +71,19 @@ def main():
     stop = 1
 
 
-def generate_plots(baseColor, filterType, data, axes, xAxisBatch, taus):
+def generate_plots(
+        baseColor,
+        filterType,
+        data: np.ndarray,
+        axes: plt.Axes,
+        xAxisBatch,
+        taus,
+    ):
     """Generate plots."""
 
     lineStyles = ['-', '--', '-.', ':']
 
-    if 'online' in filterType:
+    if 'online' in filterType or 'wola' in filterType:
         xAxisOnline = np.linspace(
             start=0,
             stop=np.amax(xAxisBatch),
@@ -91,8 +97,17 @@ def generate_plots(baseColor, filterType, data, axes, xAxisBatch, taus):
                 color=baseColor,
                 alpha=0.15
             )
+            if SHOW_INDIV_RUN_LINES:
+                for ii in range(data.shape[0]):
+                    axes.semilogy(
+                        xAxisOnline,
+                        data[ii, :, idxTau],
+                        f'{baseColor}{lineStyles[idxTau]}',
+                        linewidth=0.5,
+                        alpha=0.1
+                    )
             idxLineStyles = idxTau % len(lineStyles)
-            axes.loglog(
+            axes.semilogy(
                 xAxisOnline,
                 np.mean(
                     data[:, :, idxTau],
@@ -110,7 +125,7 @@ def generate_plots(baseColor, filterType, data, axes, xAxisBatch, taus):
             color=baseColor,
             alpha=0.15
         )
-        axes.loglog(
+        axes.semilogy(
             xAxisBatch,
             np.mean(
                 data,
@@ -124,12 +139,15 @@ def generate_plots(baseColor, filterType, data, axes, xAxisBatch, taus):
 
 def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]:
     """Plot results for Type-1 and Type-2 test."""
+
+    labels = list(resAll[0].results.keys())
+    flagBatch = any(['batch' in label for label in labels])
     
     figs = []
     for res in resAll:
         fig, axes = plt.subplots(1,1)
         fig.set_size_inches(FIGSIZE)
-        for ii, filterType in enumerate(TO_COMPUTE):
+        for ii, filterType in enumerate(labels):
             xAxisOnline = generate_plots(
                 f'C{ii}',
                 filterType,
@@ -141,7 +159,8 @@ def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]
         axes.legend()
         axes.grid(True, which='both')
         axes.set_xlabel('Duration [s]')
-        axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+        if flagBatch:
+            axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
         # Adapt y-axis limits to the data
         ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline, xAxisBatch)
         axes.set_ylim([ymin, ymax])
@@ -160,12 +179,15 @@ def plot_results_mc_tests(
     ):
     """Plot results for Type-3 (full Monte-Carlo) tests."""
 
+    labels = list(res[0].results.keys())
+    flagBatch = any(['batch' in label for label in labels])
+
     fig, axes = plt.subplots(1,1)
     fig.set_size_inches(FIGSIZE)
     if indivRunsFig:
         for testOutput in res:
             if 'SEED' in testOutput.description:
-                for ii, filterType in enumerate(TO_COMPUTE):
+                for ii, filterType in enumerate(labels):
                     xAxisOnline = generate_plots(
                         f'C{ii}',
                         filterType,
@@ -176,8 +198,8 @@ def plot_results_mc_tests(
                     )
     else:  # average over all runs
         # Build data to plot
-        dataToPlot = dict([(filterType, None) for filterType in TO_COMPUTE])
-        for ii, filterType in enumerate(TO_COMPUTE):
+        dataToPlot = dict([(filterType, None) for filterType in labels])
+        for ii, filterType in enumerate(labels):
             # Combine all MC runs along one axis
             comb = res[0].results[filterType]
             for jj in range(len(res) - 1):
@@ -191,7 +213,7 @@ def plot_results_mc_tests(
             dataToPlot[filterType] = comb
         
         # Plot
-        for ii, filterType in enumerate(TO_COMPUTE):
+        for ii, filterType in enumerate(labels):
             xAxisOnline = generate_plots(
                 f'C{ii}',
                 filterType,
@@ -205,7 +227,8 @@ def plot_results_mc_tests(
     axes.legend()
     axes.grid(True, which='both')
     axes.set_xlabel('Duration [s]')
-    axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+    if flagBatch:
+        axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
     # Adapt y-axis limits to the data
     ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline, xAxisBatch)
     axes.set_ylim([ymin, ymax])
@@ -221,7 +244,7 @@ def compute_yaxis_limits(
     ):
     """Compute y-axis limits for plotting."""
     ymin, ymax = np.inf, -np.inf
-    for filterType in TO_COMPUTE:
+    for filterType in list(data.keys()):
         if 'online' in filterType:
             idxStart = np.argmin(np.abs(xAxisOnline - xAxisBatch[0]))
             ymin = min(

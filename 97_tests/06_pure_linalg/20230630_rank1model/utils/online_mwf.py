@@ -41,8 +41,8 @@ def run_online_mwf(
         idxBegFrame = i * p.nfft
         idxEndFrame = (i + 1) * p.nfft
         # Get current frame
-        yCurr = y[idxBegFrame:idxEndFrame, :]
-        nCurr = n[idxBegFrame:idxEndFrame, :]
+        yCurr: np.ndarray = y[idxBegFrame:idxEndFrame, :]
+        nCurr: np.ndarray = n[idxBegFrame:idxEndFrame, :]
 
         # Compute covariance matrices
         RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
@@ -117,7 +117,8 @@ def run_wola_mwf(
 
     # Special user request: single frequency bin study
     if p.singleFreqBinIndex is not None:
-        print(f'/!\ /!\ /!\ WOLA-MWF: single frequency bin study (index {p.singleFreqBinIndex})')
+        if verbose:
+            print(f'/!\ /!\ /!\ WOLA-MWF: single frequency bin study (index {p.singleFreqBinIndex})')
         yWola = yWola[:, p.singleFreqBinIndex, :]
         nWola = nWola[:, p.singleFreqBinIndex, :]
         yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
@@ -142,8 +143,8 @@ def run_wola_mwf(
             print(f'WOLA-based {algLabel} iteration {i+1}/{nIter}')
 
         # Get current frame
-        yCurr = yWola[i, :, :]
-        nCurr = nWola[i, :, :]
+        yCurr: np.ndarray = yWola[i, :, :]
+        nCurr: np.ndarray = nWola[i, :, :]
         # Compute covariance matrices
         RyyCurr = np.einsum('ij,ik->ijk', yCurr, yCurr.conj())
         RnnCurr = np.einsum('ij,ik->ijk', nCurr, nCurr.conj())
@@ -154,25 +155,43 @@ def run_wola_mwf(
         else:
             Ryy = copy.deepcopy(RyyCurr)
             Rnn = copy.deepcopy(RnnCurr)
+            
+        # Check if SCMs are full rank
+        updateFilter = True
+        if np.any(np.linalg.matrix_rank(Ryy) < nSensors):
+            if verbose:
+                print('Rank-deficient Ryy')
+            updateFilter = False
+        if np.any(np.linalg.matrix_rank(Rnn) < nSensors):
+            if verbose:
+                print('Rank-deficient Rnn')
+            updateFilter = False
+        
         # Compute filter
-        if np.linalg.matrix_rank(Ryy[0, :, :]) >= nSensors and\
-            np.linalg.matrix_rank(Rnn[0, :, :]) >= nSensors:
-
+        if updateFilter:
             if filterType == 'regular':
                 currw = np.linalg.inv(Ryy) @ (Ryy - Rnn)
                 for kk in range(nSensors):
                     w[:, i + 1, :, kk] = currw[:, :, kk].T
 
             elif filterType == 'gevd':
-                Xmat = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+                Xmat = np.zeros(
+                    (nPosFreqs, nSensors, nSensors),
+                    dtype=np.complex128
+                )
                 sigma = np.zeros((nPosFreqs, nSensors))
                 # Looping over frequencies because of the GEVD
                 for kappa in range(nPosFreqs):
-                    sigmaCurr, XmatCurr = la.eigh(Ryy[kappa, :, :], Rnn[kappa, :, :])
+                    sigmaCurr, XmatCurr = la.eigh(
+                        Ryy[kappa, :, :],
+                        Rnn[kappa, :, :]
+                    )
                     indices = np.flip(np.argsort(sigmaCurr))
                     sigma[kappa, :] = sigmaCurr[indices]
                     Xmat[kappa, :, :] = XmatCurr[:, indices]
-                Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0, 2, 1]))
+                Qmat = np.linalg.inv(
+                    np.transpose(Xmat.conj(), axes=[0, 2, 1])
+                )
                 # GEVLs tensor
                 Dmat = np.zeros((nPosFreqs, nSensors, nSensors))
                 for r in range(rank):
@@ -181,11 +200,7 @@ def run_wola_mwf(
                 Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
                 wCurr = np.matmul(np.matmul(Xmat, Dmat), Qhermitian)
                 w[:, i + 1, :, :] = np.transpose(wCurr, (2, 0, 1))
-                
         else:
-            print(f'i = {i}: rank deficient covariance matrix/matrices, skipping filter update')
             w[:, i + 1, :, :] = w[:, i, :, :]
-        
-        if i == 10:
-            stop = 1
+
     return w

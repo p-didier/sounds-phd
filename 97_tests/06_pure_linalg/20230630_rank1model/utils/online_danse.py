@@ -3,6 +3,7 @@
 #
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
+import copy
 import numpy as np
 import scipy.linalg as la
 from dataclasses import dataclass
@@ -89,7 +90,8 @@ def run_wola_danse(
     
     # Special user request: single frequency bin study
     if p.singleFreqBinIndex is not None:
-        print(f'/!\ /!\ /!\ WOLA-DANSE: single frequency bin study (index {p.singleFreqBinIndex})')
+        if verbose:
+            print(f'/!\ /!\ /!\ WOLA-DANSE: single frequency bin study (index {p.singleFreqBinIndex})')
         yWola = yWola[:, p.singleFreqBinIndex, :]
         nWola = nWola[:, p.singleFreqBinIndex, :]
         yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
@@ -119,12 +121,21 @@ def run_wola_danse(
             (nPosFreqs, dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
+        # Ryy.append(np.random.randn(
+        #     nPosFreqs, dimYtilde[k], dimYtilde[k]
+        # ))
+        # Rnn.append(np.random.randn(
+        #     nPosFreqs, dimYtilde[k], dimYtilde[k]
+        # ))
     
     # Initialize network-wide DANSE filters
     wNet = np.zeros(
         (nSensors, nIter, nPosFreqs, nNodes),
         dtype=np.complex128
     )
+    for k in range(nNodes):
+        idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
+        wNet[idxRef, :, :, k] = 1  # initialize with identity matrix (selecting ref. sensor)
     # Prepare for DANSE filter updates
     idxUpdatingNode = 0
     if nodeUpdatingStrategy == 'sequential':
@@ -146,13 +157,12 @@ def run_wola_danse(
     if filterType == 'gevd':
         algLabel += ' [GEVD]'
     nodeIndices = np.arange(nNodes)
-    nRyyUpdates = np.zeros(nNodes, dtype=int)
-    nRnnUpdates = np.zeros(nNodes, dtype=int)
 
     # Initialize fusion vectors
     fusionVectTargets = [None for _ in range(nNodes)]
     fusionVects = [None for _ in range(nNodes)]
     for k in range(nNodes):
+        # baseVect = np.ones((nPosFreqs, sum(channelToNodeMap == k)))
         baseVect = np.zeros((nPosFreqs, sum(channelToNodeMap == k)))
         baseVect[:, referenceSensorIdx] = 1  # select reference sensor
         fusionVectTargets[k] = baseVect
@@ -199,19 +209,19 @@ def run_wola_danse(
                     fusionVectTargets[k] = w[k][:, i, :yk.shape[1]]
 
                 # Check if effective fusion vector is to be updated
-                if lastFuVectUp[k] == -1 or i - lastFuVectUp[k] >= p.B:
+                if i - lastFuVectUp[k] >= p.B:
                     fusionVects[k] = (1 - p.alpha) * fusionVects[k] +\
                         p.alpha * fusionVectTargets[k]
                     lastFuVectUp[k] = i
 
             # Perform fusion
             fusedSignals[:, k] = np.einsum(
-                'ij,ik->i',
+                'ij,ij->i',
                 yk,
                 fusionVects[k].conj()
             )
             fusedSignalsNoiseOnly[:, k] = np.einsum(
-                'ij,ik->i',
+                'ij,ij->i',
                 nk,
                 fusionVects[k].conj()
             )
@@ -236,11 +246,8 @@ def run_wola_danse(
                 Ryy[k] = p.betaDanse * Ryy[k] + (1 - p.betaDanse) * RyyCurr
                 Rnn[k] = p.betaDanse * Rnn[k] + (1 - p.betaDanse) * RnnCurr
             else:
-                Ryy[k] = RyyCurr
-                Rnn[k] = RnnCurr
-            # Update counter
-            nRyyUpdates[k] += 1
-            nRnnUpdates[k] += 1
+                Ryy[k] = copy.deepcopy(RyyCurr)
+                Rnn[k] = copy.deepcopy(RnnCurr)
 
             # Check if filter should be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
@@ -249,14 +256,16 @@ def run_wola_danse(
                 updateFilter = True
             else:
                 updateFilter = False
+            
+            # Check if SCMs are full rank 
             if updateFilter:
-                # Check if Ryy is full rank
                 if np.any(np.linalg.matrix_rank(Ryy[k]) < dimYtilde[k]):
-                    print(f'Rank-deficient Ryy[{k}]')
+                    if verbose:
+                        print(f'Rank-deficient Ryy[{k}]')
                     updateFilter = False
-                # Check if Rnn is full rank
                 if np.any(np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]):
-                    print(f'Rank-deficient Rnn[{k}]')
+                    if verbose:
+                        print(f'Rank-deficient Rnn[{k}]')
                     updateFilter = False
             
             if updateFilter:
@@ -267,11 +276,11 @@ def run_wola_danse(
                     w[k][:, i + 1, :] = np.linalg.inv(Ryy[k]) @\
                         (Ryy[k] - Rnn[k]) @ e
                 elif filterType == 'gevd':
-                    sigma = np.zeros((nPosFreqs, dimYtilde[k]))
                     Xmat = np.zeros(
                         (nPosFreqs, dimYtilde[k], dimYtilde[k]),
-                        dtype=complex
+                        dtype=np.complex128
                     )
+                    sigma = np.zeros((nPosFreqs, dimYtilde[k]))
                     for kappa in range(nPosFreqs):
                         sigmaCurr, XmatCurr = la.eigh(
                             Ryy[k][kappa, :, :],
@@ -280,16 +289,20 @@ def run_wola_danse(
                         indices = np.flip(np.argsort(sigmaCurr))
                         sigma[kappa, :] = sigmaCurr[indices]
                         Xmat[kappa, :, :] = XmatCurr[:, indices]
-                    Qmat = np.linalg.inv(np.transpose(Xmat.conj(), axes=[0, 2, 1]))
+                    Qmat = np.linalg.inv(
+                        np.transpose(Xmat.conj(), axes=[0, 2, 1])
+                    )
                     # GEVLs tensor
                     Dmat = np.zeros((nPosFreqs, dimYtilde[k], dimYtilde[k]))
                     for r in range(rank):
                         Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
-                        
                     e = np.zeros(dimYtilde[k])
                     e[:rank] = 1
                     Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
-                    wCurr = np.matmul(np.matmul(np.matmul(Xmat, Dmat), Qhermitian), e)
+                    wCurr = np.matmul(np.matmul(
+                        np.matmul(Xmat, Dmat),
+                        Qhermitian
+                    ), e)
                     w[k][:, i + 1, :] = wCurr
             else:
                 w[k][:, i + 1, :] = w[k][:, i, :]
@@ -313,16 +326,12 @@ def run_wola_danse(
                     nChannels_k = np.sum(channelToNodeMap == k)
                     gkq = w[k][:, i + 1, nChannels_k + neighborCount]
                     wNet[m, i + 1, :, k] =\
-                        fusionVects[currNetWideNodeIdx].T * gkq
+                        fusionVects[currNetWideNodeIdx][:, c] * gkq
                 channelCount[currNetWideNodeIdx] += 1
                 
                 if currNetWideNodeIdx != k and\
                     c == np.sum(channelToNodeMap == currNetWideNodeIdx) - 1:
                     neighborCount += 1
-
-        
-        if i == 10:
-            stop = 1
 
     return wNet
 

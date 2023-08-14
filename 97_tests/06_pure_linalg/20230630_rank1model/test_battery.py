@@ -18,20 +18,27 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Global variables
 GLOBAL_SEED = 0  # Global seed for random number generator
-TMAX = 30  # [s] Maximum duration of the simulated data
-FS = 16000  # [Hz] Sampling frequency
-N_MC = 5  # Number of Monte Carlo repetitions
-N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
+TMAX = 10  # [s] Maximum duration of the simulated data
+FS = 8000  # [Hz] Sampling frequency
+N_MC = 10  # Number of Monte Carlo repetitions
+N_MC_2 = 10  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
-    'gevdmwf_batch',  # GEVD-MWF (batch)
-    'gevdmwf_online',  # GEVD-MWF (online) 
-    'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
+    # 'gevdmwf_batch',  # GEVD-MWF (batch)
+    # 'gevdmwf_online',  # GEVD-MWF (online) 
+    # 'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
+    'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
+    'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
+    # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
+    # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
+TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
 
-# Battery name
-BATTERY_NAME = 'rank1model_fs8kHz'
+# Export parameters
+BATTERY_NAME = 'baseline_noBetaExt_GEVD'
+EXPORT_FOLDER = 'results\\wola\\fs8kHz_correct2'
+# EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass
 class TestParameters:
@@ -97,7 +104,8 @@ def main():
     # Set random seed
     np.random.seed(GLOBAL_SEED)
     # Prepare seeds for Monte Carlo repetitions, without replacement
-    batteryOfSeeds = np.random.choice(range(9999), N_MC_2, replace=False)
+    batteryOfSeeds = np.arange(N_MC_2)
+    # batteryOfSeeds = np.random.choice(range(9999), N_MC_2, replace=False)
     
     # Create battery of tests
     battery = TestBattery(
@@ -136,9 +144,6 @@ def main():
         ]
     )
 
-    # Signal durations to test (for batch mode -- online mode only considers
-    # the largest duration)
-    durations = np.logspace(np.log10(1), np.log10(TMAX), 30)
 
     # Prepare output
     print(f'Running battery of tests "{battery.name}"...')
@@ -147,26 +152,29 @@ def main():
     allOutputs = []
     
     # Run battery of tests
+    durations = np.logspace(np.log10(1), np.log10(TMAX), 30)  # Signal
+    # durations to test (for batch mode -- online mode only considers
+    # the largest duration)
+    commonKwargs = {
+        'toCompute': TO_COMPUTE,
+        'durations': durations,
+        'fs': FS,
+        'exportFigures': False,
+        'nMC': N_MC,
+        'verbose': False,
+        'taus': TAUS,
+    }
     for test in battery.tests:
-        commonKwargs = {
-            'toCompute': TO_COMPUTE,
-            'durations': durations,
-            'fs': FS,
-            'exportFigures': False,
-            'nMC': N_MC,
-            'verbose': False,
-        }
         if isinstance(test.parameters, list):
             print(f'- Running battery of tests "{test.name}"...')
             for ii, parameters in enumerate(test.parameters):
-                print(f'-- Running test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, M={parameters.M})...')
+                print(f'-- Running "{test.name}" test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, M={parameters.M})...')
                 # Run test
                 res = run_test(
                 ScriptParameters(
                     nSensors=parameters.M,
                     nNodes=parameters.K,
                     seed=parameters.seed,
-                    taus=TAUS,
                     Mk=parameters.Mk,
                     **commonKwargs
                 ))
@@ -187,7 +195,6 @@ def main():
                 nSensors=test.parameters.M,
                 nNodes=test.parameters.K,
                 seed=test.parameters.seed,
-                taus=TAUS,
                 Mk=test.parameters.Mk,
                 **commonKwargs
             ))
@@ -202,15 +209,15 @@ def main():
             )
 
     # Export results
-    if not os.path.exists(f'{FILE_FOLDER}/results'):
-        os.makedirs(f'{FILE_FOLDER}/results')
+    fullExportFolder = f'{FILE_FOLDER}/{EXPORT_FOLDER}'
+    if not os.path.exists(fullExportFolder):
+        os.makedirs(fullExportFolder)
     np.savez_compressed(
-        f'{FILE_FOLDER}/results/{battery.name}.npz',
+        f'{fullExportFolder}/{battery.name}.npz',
         allOutputs=allOutputs
     )
 
     print('ALL DONE.')
-    stop = 1
 
 
 if __name__ == '__main__':

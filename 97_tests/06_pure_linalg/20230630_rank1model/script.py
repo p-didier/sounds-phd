@@ -22,15 +22,17 @@ class ScriptParameters:
     signalType: str = 'noise_real'  # 'speech', 'noise_real', 'noise_complex'
     # signalType: str = 'noise_complex'  # 'speech', 'noise_real', 'noise_complex'
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-    nSensors: int = 3
-    nNodes: int = 3
-    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
+    nSensors: int = 5
+    nNodes: int = 2
+    # Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
+    Mk: list[int] = field(default_factory=lambda: [1, 4])  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    durations: np.ndarray = np.logspace(np.log10(1), np.log10(3), 30)
-    fs: float = 16e3
+    durations: np.ndarray = np.logspace(np.log10(1), np.log10(20), 30)
+    fs: float = 8e3
     nMC: int = 1
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/20230807_tests'
     taus: list[float] = field(default_factory=lambda: [2.])
+    # taus: list[float] = field(default_factory=lambda: [2., 4., 8.])
     b: float = 0.1  # factor for determining beta from tau (online processing)
     toCompute: list[str] = field(default_factory=lambda: [
         # 'mwf_batch',
@@ -57,12 +59,14 @@ class ScriptParameters:
         nfft=1024,
         hop=512,
         fs=fs,
-        winType='rect',
-        # betaExt=0.9,  # if ==0, no extra fusion vector relaxation
+        # B=10,
+        # alpha=0.5,
+        # winType='rect',
+        # betaExt=.7,  # if ==0, no extra fusion vector relaxation
         startExpAvgAfter=2,  # frames
         startFusionExpAvgAfter=2,  # frames
-        singleFreqBinIndex=None,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
-        # singleFreqBinIndex=399,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
+        # singleFreqBinIndex=None,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
+        singleFreqBinIndex=99,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
     )
     # Booleans vvvv
     randomDelays: bool = False
@@ -143,8 +147,7 @@ def main(p: ScriptParameters=ScriptParameters()):
         metricsData = dict(toDict)
 
         for idxMC in range(p.nMC):
-            if p.verbose:
-                print(f'Running Monte-Carlo iteration {idxMC+1}/{p.nMC}')
+            print(f'Running Monte-Carlo iteration {idxMC+1}/{p.nMC}')
 
             # Get scalings
             scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
@@ -630,9 +633,13 @@ def get_filters(
             # & (nTaus, nSensors, nIters, nFrequencies, nNodes) for 'wola'
             for idxTau in range(len(taus)):
                 # Set beta based on tau
+                if 'online' in filterType:
+                    normFact = kwargs['wolaParams'].nfft
+                else:
+                    normFact = kwargs['wolaParams'].hop
                 kwargs['wolaParams'].betaMwf = np.exp(
-                    np.log(b) / (taus[idxTau] *\
-                        kwargs['wolaParams'].fs / kwargs['wolaParams'].nfft)
+                    np.log(b) /\
+                        (taus[idxTau] * kwargs['wolaParams'].fs / normFact)
                 )
                 kwargs['wolaParams'].betaDanse = kwargs['wolaParams'].betaMwf
 
@@ -710,7 +717,7 @@ def get_metrics(
         else:  # MWF case
             if computeForComparisonWithDANSE:
                 if channelToNodeMap[k] == currNode:
-                    idxRef = np.where(channelToNodeMap == channelToNodeMap[m])[0][0]
+                    idxRef = np.where(channelToNodeMap == channelToNodeMap[k])[0][0]
                     if 'online' in filterType:
                         currFilt = filters[:, :, idxRef]
                     elif 'wola' in filterType:
