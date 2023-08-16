@@ -171,13 +171,15 @@ def main():
                 print(f'-- Running "{test.name}" test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, M={parameters.M})...')
                 # Run test
                 res = run_test(
-                ScriptParameters(
-                    nSensors=parameters.M,
-                    nNodes=parameters.K,
-                    seed=parameters.seed,
-                    Mk=parameters.Mk,
-                    **commonKwargs
-                ))
+                    p=ScriptParameters(
+                        nSensors=parameters.M,
+                        nNodes=parameters.K,
+                        seed=parameters.seed,
+                        Mk=parameters.Mk,
+                        **commonKwargs
+                    ),
+                    pathToYaml=None
+                )
                 # Save output
                 allOutputs.append(
                     TestOutput(
@@ -191,13 +193,16 @@ def main():
             print(f'- Running test "{test.name}"...')
 
             # Run test
-            res = run_test(ScriptParameters(
-                nSensors=test.parameters.M,
-                nNodes=test.parameters.K,
-                seed=test.parameters.seed,
-                Mk=test.parameters.Mk,
-                **commonKwargs
-            ))
+            res = run_test(
+                p=ScriptParameters(
+                    nSensors=test.parameters.M,
+                    nNodes=test.parameters.K,
+                    seed=test.parameters.seed,
+                    Mk=test.parameters.Mk,
+                    **commonKwargs
+                ),
+                pathToYaml=None
+            )
             # Save output
             allOutputs.append(
                 TestOutput(

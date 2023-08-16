@@ -14,7 +14,8 @@ def run_online_mwf(
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         p: WOLAparameters=WOLAparameters(),
-        verbose=True
+        verbose=True,
+        vad=None
     ):
 
     # Get noisy signal (time-domain)

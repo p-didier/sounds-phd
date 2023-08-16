@@ -1,0 +1,41 @@
+Mk: null
+b: 0.1
+maxDuration: 10.0
+nDurationsBatch: 30
+exportFigures: true
+exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate
+fs: 8000.0
+ignoreFusionForSSNodes: true
+nMC: 10
+nNodes: 3
+nSensors: 5
+randomDelays: false
+seed: 0
+selfNoisePower: 1
+showDeltaPerNode: false
+signalType: speech
+targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
+taus:
+- 2.0
+toCompute: 
+- mwf_batch
+- gevdmwf_batch
+- danse_sim_batch
+- gevddanse_sim_batch
+useBatchModeFusionVectorsInOnlineDanse: false
+useVAD: true
+verbose: true
+wolaParams:
+  B: 0
+  alpha: 1
+  betaDanse: 0.99
+  betaExt: 0.9
+  betaMwf: 0.99
+  fs: 8000.0
+  hop: 512
+  nPosFreqs: 513
+  nfft: 1024
+  singleFreqBinIndex: 99
+  startExpAvgAfter: 2
+  startFusionExpAvgAfter: 2
+  winType: sqrt-hann
