@@ -13,14 +13,14 @@ from test_battery import TestOutput, TestParameters
 # Get current file folder
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
-RESULTS_FILE_NAME = 'wola/fs8kHz_correct2/baseline_noBetaExt_GEVD.npz'
+RESULTS_FILE_NAME = 'wola/fs8kHz_correct2/baseline_betaExt0p9_GEVD_15s.npz'
 # RESULTS_FILE_NAME = 'online/fs8kHz/rank1model.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
-TMAX = 10  # [s] Maximum duration of the simulated data
+TMAX = 15  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230814_tests/correct2/baseline_gevd'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230814_tests/correct2/baseline_gevd_betaExt0p9_15s'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
 # Booleans
@@ -161,6 +161,8 @@ def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]
         axes.set_xlabel('Duration [s]')
         if flagBatch:
             axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+        else:
+            axes.set_xlim([0, np.amax(xAxisOnline)])
         # Adapt y-axis limits to the data
         ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline, xAxisBatch)
         axes.set_ylim([ymin, ymax])
@@ -229,6 +231,8 @@ def plot_results_mc_tests(
     axes.set_xlabel('Duration [s]')
     if flagBatch:
         axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+    else:
+        axes.set_xlim([0, np.amax(xAxisOnline)])
     # Adapt y-axis limits to the data
     ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline, xAxisBatch)
     axes.set_ylim([ymin, ymax])

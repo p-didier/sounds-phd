@@ -18,7 +18,7 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Global variables
 GLOBAL_SEED = 0  # Global seed for random number generator
-TMAX = 10  # [s] Maximum duration of the simulated data
+TMAX = 15  # [s] Maximum duration of the simulated data
 FS = 8000  # [Hz] Sampling frequency
 N_MC = 10  # Number of Monte Carlo repetitions
 N_MC_2 = 10  # Number of Monte Carlo repetitions for SC3
@@ -36,7 +36,7 @@ TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
 
 # Export parameters
-BATTERY_NAME = 'baseline_noBetaExt_GEVD'
+BATTERY_NAME = 'baseline_betaExt0p9_GEVD_15s'
 EXPORT_FOLDER = 'results\\wola\\fs8kHz_correct2'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 

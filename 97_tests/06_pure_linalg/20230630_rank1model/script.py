@@ -62,7 +62,7 @@ class ScriptParameters:
         # B=10,
         # alpha=0.5,
         # winType='rect',
-        # betaExt=.7,  # if ==0, no extra fusion vector relaxation
+        betaExt=.9,  # if ==0, no extra fusion vector relaxation
         startExpAvgAfter=2,  # frames
         startFusionExpAvgAfter=2,  # frames
         # singleFreqBinIndex=None,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
