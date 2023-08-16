@@ -1,3 +1,4 @@
+import os
 import copy
 import resampy
 import numpy as np
@@ -6,6 +7,7 @@ from numba import njit
 import scipy.linalg as la
 from utils.online_mwf import *
 from utils.online_danse import *
+from script import ScriptParameters
 
 
 def compute_filter(
@@ -27,9 +29,21 @@ def compute_filter(
     acoustic sensor and actuator networks" - 2022
     """
 
+    if vad is None:
+        nSamples = cleanSigs.shape[0]
+        Ryy = 1 / nSamples * noisySignals.T.conj() @ noisySignals
+        Rnn = 1 / nSamples * noiseOnlySigs.T.conj() @ noiseOnlySigs
+    else:
+        # Include VAD knowledge in batch-mode estimates of `Ryy` and `Rnn`.
+        # Only keep frames where all sensors VADs are active.
+        vadBool = np.all(vad.astype(bool), axis=1)
+        Ryy = 1 / np.sum(vadBool) *\
+            noisySignals[vadBool, :].T.conj() @ noisySignals[vadBool, :]
+        Rnn = 1 / np.sum(~vadBool) *\
+            noisySignals[~vadBool, :].T.conj() @ noisySignals[~vadBool, :]
+
     nSensors = cleanSigs.shape[1]
-    Ryy = noisySignals.T.conj() @ noisySignals
-    Rnn = noiseOnlySigs.T.conj() @ noiseOnlySigs
+
     if type == 'mwf_batch':
         RyyInv = np.linalg.inv(Ryy)
         if np.iscomplex(cleanSigs).any():
@@ -97,6 +111,7 @@ def compute_filter(
             'filterType': 'gevd' if 'gevd' in type else 'regular',
             'rank': rank,
             'verbose': verbose,
+            'vad': vad
         }
         if 'sim' in type:
             kwargsBatch['nodeUpdatingStrategy'] = 'simultaneous'
@@ -107,7 +122,6 @@ def compute_filter(
         kwargsOnline = copy.deepcopy(kwargsBatch)
         kwargsOnline['p'] = wolaParams
         kwargsOnline['ignoreFusionForSSNodes'] = noSSfusion
-        kwargsOnline['vad'] = vad
     
         if batchFusionInOnline:
             wBatchNetWide = run_danse(**kwargsBatch)
@@ -131,6 +145,7 @@ def run_danse(
         nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
         referenceSensorIdx=0,
         verbose=True,
+        vad=None
     ):
 
     maxIter = 100
@@ -177,18 +192,25 @@ def run_danse(
             
         for k in range(nNodes):
             # Get y tilde
-            yTilde = np.concatenate((
+            yTilde: np.ndarray = np.concatenate((
                 y[:, channelToNodeMap == k],
                 fusedSignals[:, idxNodes != k]
             ), axis=1)
-            nTilde = np.concatenate((
+            nTilde: np.ndarray = np.concatenate((
                 n[:, channelToNodeMap == k],
                 fusedSignalsNoiseOnly[:, idxNodes != k]
             ), axis=1)
 
             # Compute covariance matrices
-            Ryy = yTilde.T @ yTilde.conj()
-            Rnn = nTilde.T @ nTilde.conj()
+            if vad is None:
+                Ryy = 1 / yTilde.shape[0] * yTilde.T @ yTilde.conj()
+                Rnn = 1 / nTilde.shape[0] * nTilde.T @ nTilde.conj()
+            else:
+                vadBool = np.all(vad.astype(bool), axis=1)
+                Ryy = 1 / np.sum(vadBool) *\
+                    yTilde[vadBool, :].T @ yTilde[vadBool, :].conj()
+                Rnn = 1 / np.sum(~vadBool) *\
+                    yTilde[~vadBool, :].T @ yTilde[~vadBool, :].conj()
             
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
                 updateFilter = True
@@ -261,18 +283,17 @@ def run_danse(
 
 
 def get_clean_signals(
-        targetSignalSpeechFile,
-        nSensors,
-        dur,
+        p: ScriptParameters,
         scalings,
         fsTarget,
-        sigType='speech',
-        randomDelays=False,
         maxDelay=0.1
     ):
+
+    dur = np.amax(p.durations)
     # Load target signal
-    if sigType == 'speech':
-        latentSignal, fs = sf.read(targetSignalSpeechFile)
+    vad = None
+    if p.signalType == 'speech':
+        latentSignal, fs = sf.read(p.targetSignalSpeechFile)
         if fs != fsTarget:
             # Resample
             latentSignal = resampy.resample(
@@ -282,27 +303,63 @@ def get_clean_signals(
             )
         # Truncate
         latentSignal = latentSignal[:int(dur * fsTarget)]
-    elif sigType == 'noise_real':
-        # Generate noise signal (real-valued)
-        latentSignal = np.random.normal(size=int(dur * fsTarget))
-    elif sigType == 'noise_complex':
-        # Generate noise signal (complex-valued)
-        latentSignal = np.random.normal(size=int(dur * fsTarget)) +\
-            1j * np.random.normal(size=int(dur * fsTarget))
-    # Normalize power
-    latentSignal /= np.sqrt(np.mean(np.abs(latentSignal) ** 2))
+        if p.useVAD:
+            # Get VAD
+            vad = get_vad(
+                x=latentSignal,
+                tw=p.VADwinLength,
+                eFactdB=p.VADenergyDecrease_dB,
+                fs=fsTarget,
+                loadIfPossible=p.loadVadIfPossible,
+                vadFilesFolder=p.vadFilesFolder
+            )
+            # Normalize power (including VAD)
+            latentSignal /= get_power(
+                latentSignal[np.squeeze(vad).astype(bool)]
+            )
+        else:
+            # Normalize power
+            latentSignal /= get_power(latentSignal)
+    elif 'noise' in p.signalType:
+        if 'real' in p.signalType:
+            # Generate noise signal (real-valued)
+            latentSignal = np.random.normal(size=int(dur * fsTarget))
+        elif 'complex' in p.signalType:
+            # Generate noise signal (complex-valued)
+            latentSignal = np.random.normal(size=int(dur * fsTarget)) +\
+                1j * np.random.normal(size=int(dur * fsTarget))
+        
+        if 'interrupt' in p.signalType:
+            # Add `p.interruptionDuration`-long interruptions every
+            # `p.interruptionPeriod` seconds 
+            nInterruptions = int(dur / p.interruptionPeriod)
+            vad = np.ones((latentSignal.shape[0], 1))
+            for k in range(nInterruptions):
+                idxStart = int(k * p.interruptionPeriod * fsTarget)
+                idxEnd = int(idxStart + p.interruptionDuration * fsTarget)
+                latentSignal[idxStart:idxEnd] = 0
+                vad[idxStart:idxEnd, 0] = 0
+            # Normalize power (using VAD)
+            latentSignal /= get_power(latentSignal[np.squeeze(vad).astype(bool)])
+        else:
+            # Normalize power
+            latentSignal /= get_power(latentSignal)
     
     # Generate clean signals
-    mat = np.tile(latentSignal, (nSensors, 1)).T
+    mat = np.tile(latentSignal, (p.nSensors, 1)).T
     # Random scalings
     cleanSigs = mat @ np.diag(scalings)  # rank-1 matrix (scalings only)
     # Random delays
-    if randomDelays:
-        for n in range(nSensors):
+    if p.randomDelays:
+        for n in range(p.nSensors):
             delay = np.random.randint(0, int(maxDelay * fsTarget))
             cleanSigs[:, n] = np.roll(cleanSigs[:, n], delay)
 
-    return cleanSigs, latentSignal
+    return cleanSigs, latentSignal, vad
+
+
+def get_power(x):
+    return np.sqrt(np.mean(np.abs(x) ** 2))
 
 
 def get_filters(
@@ -328,7 +385,6 @@ def get_filters(
         'verbose': verbose,
         'batchFusionInOnline': batchFusionInOnline,
         'noSSfusion': noSSfusion,
-        'vad': vad
     }
     filters = {}
     for filterType in toCompute:
@@ -344,6 +400,7 @@ def get_filters(
             kwargs['noisySignals'] = noisySignals
             kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
             kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
+            kwargs['vad'] = vad[:nSamples, :] if vad is not None else None
             currFiltsAll = []
             # ^^^ shape: (nTaus, nSensors, nIters, nNodes) for 'online'
             # & (nTaus, nSensors, nIters, nFrequencies, nNodes) for 'wola'
@@ -374,6 +431,7 @@ def get_filters(
                 kwargs['noisySignals'] = noisySignals
                 kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
                 kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
+                kwargs['vad'] = vad[:nSamples, :] if vad is not None else None
 
                 currFiltsAll.append(
                     compute_filter(type=filterType, **kwargs)
@@ -529,7 +587,7 @@ def get_sigma_wola(x, params: WOLAparameters):
     return sigmaWOLA
 
 
-def get_vad(x, tw, eFactdB, Fs):
+def get_vad(x, tw, eFactdB, fs, loadIfPossible=False, vadFilesFolder=''):
     """
     Oracle Voice Activity Detection (VAD) function. Returns the
     oracle VAD for a given speech (+ background noise) signal <x>.
@@ -537,26 +595,53 @@ def get_vad(x, tw, eFactdB, Fs):
     
     Parameters
     ----------
-    -x [N*1 float vector, -] - Time-domain signal.
-    -tw [float, s] - VAD window length.
-    -eFactdB [float] - Energy factor for threshold, in dB.
-    -Fs [int, samples/s] - Sampling frequency.
-    
+    x : [N x 1] np.ndarray (float)
+        Signal.
+    tw : int
+        Window length in samples.
+    eFactdB : float
+        Energy factor [dB].
+    fs : float
+        Sampling frequency in Hz.
+    loadIfPossible : bool
+        If True, try to load VAD from file.
+    vadFilesFolder : str
+        Folder where VAD files are stored.
+
     Returns
     -------
-    -oVAD [N*1 binary vector] - Oracle VAD corresponding to <x>.
-
-    (c) Paul Didier - 13-Sept-2021
-    SOUNDS ETN - KU Leuven ESAT STADIUS
-    ------------------------------------
+    vad : [N x 1] np.ndarray (bool or int [0 or 1])
+        VAD.
     """
+
+    # Compute VAD filename
+    vadFilename = f'{vadFilesFolder}/vad_{array_id(x)}_eFactdB_{dot_to_p(np.round(eFactdB, 1))}_Nw_{dot_to_p(np.round(tw, 3))}_fs_{dot_to_p(fs)}.npy'
+    # Check if VAD can be loaded from file
+    if loadIfPossible and os.path.isfile(vadFilename):
+        # Load VAD from file
+        print(f'Loading VAD from file {vadFilename}')
+        vad = np.load(vadFilename)
+    else:
+        # Compute VAD
+        vad, _ = oracleVAD(
+            x,
+            tw=tw,
+            eFactdB=eFactdB,
+            fs=fs
+        )
+        np.save(vadFilename, vad)
+
+    return vad
+
+    
+def oracleVAD(x, tw=0.02, eFactdB=20, fs=16000):
 
     # Number of samples
     n = len(x)
 
     # VAD window length
     if tw > 0:
-        Nw = int(tw * Fs)
+        Nw = int(tw * fs)
     else:
         Nw = 1
 
@@ -582,7 +667,7 @@ def get_vad(x, tw, eFactdB, Fs):
             oVAD[ii, ch] = compute_VAD(x[idxBeg:idxEnd, ch], thrs)
 
     # Time vector
-    t = np.arange(n) / Fs
+    t = np.arange(n) / fs
 
     return oVAD, t
 
@@ -604,3 +689,48 @@ def compute_VAD(chunk_x,thrs):
     else:
         VADout = 0
     return VADout
+
+
+
+
+def array_id(
+        a: np.ndarray, *,
+        include_dtype=False,
+        include_shape=False,
+        algo = 'xxhash'
+    ):
+    """
+    Computes a unique ID for a numpy array.
+    From: https://stackoverflow.com/a/64756069
+
+    Parameters
+    ----------
+    a : np.ndarray
+        The array to compute the ID for.
+    include_dtype : bool, optional
+        Whether to include the dtype in the ID.
+    include_shape : bool, optional
+    """
+    data = bytes()
+    if include_dtype:
+        data += str(a.dtype).encode('ascii')
+    data += b','
+    if include_shape:
+        data += str(a.shape).encode('ascii')
+    data += b','
+    data += a.tobytes()
+    if algo == 'sha256':
+        import hashlib
+        return hashlib.sha256(data).hexdigest().upper()
+    elif algo == 'xxhash':
+        import xxhash
+        return xxhash.xxh3_64(data).hexdigest().upper()
+    else:
+        assert False, algo
+
+
+def dot_to_p(x):
+    """
+    Converts a float to a string with a 'p' instead of a '.'.
+    """
+    return str(x).replace('.', 'p')

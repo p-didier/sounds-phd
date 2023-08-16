@@ -17,9 +17,13 @@ from _general_fcts.class_methods.dataclass_methods import *
 
 @dataclass
 class ScriptParameters:
-    signalType: str = 'speech'  # 'speech', 'noise_real', 'noise_complex'
+    signalType: str = 'speech'  
+    # ^^^ 'speech', 'noise_real', 'noise_complex', ...
+    #     ... 'interrupt_noise_real', 'interrupt_noise_complex'.
+    interruptionDuration: float = 0.1  # seconds
+    interruptionPeriod: float = 0.5  # seconds
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-    nSensors: int = 5
+    nSensors: int = 3
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
@@ -47,6 +51,8 @@ class ScriptParameters:
         startFusionExpAvgAfter=2,  # frames
         singleFreqBinIndex=99,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
     )
+    VADwinLength: float = 0.02  # seconds
+    VADenergyDecrease_dB: float = 10  # dB
     # Booleans vvvv
     randomDelays: bool = False
     showDeltaPerNode: bool = False
@@ -55,12 +61,21 @@ class ScriptParameters:
     exportFigures: bool = True
     verbose: bool = True
     useVAD: bool = True  # use VAD for online processing of nonsstationary signals
+    loadVadIfPossible: bool = True  # if True, load VAD from file if possible
+    # Strings vvvv
+    vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
 
     def __post_init__(self):
         if any(['wola' in t for t in self.toCompute]) and\
             'complex' in self.signalType:
                 raise ValueError('WOLA not implemented for complex-valued signals')
-        self.durations = np.linspace(1, self.maxDuration, self.nDurationsBatch)
+        self.durations = np.linspace(
+            self.minDuration,
+            self.maxDuration,
+            self.nDurationsBatch
+        )
+        if self.minDuration <= self.interruptionDuration:
+            raise ValueError('`minDuration` should be > `interruptionDuration`')
 
 # Global parameters
 PATH_TO_YAML = f'{Path(__file__).parent.absolute()}\\yaml\\script_parameters.yaml'
@@ -145,29 +160,24 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
             # Get clean signals
             nSamplesMax = int(np.amax(p.durations) * wolaParamsCurr.fs)
-            cleanSigs, _ = get_clean_signals(
-                p.targetSignalSpeechFile,
-                p.nSensors,
-                np.amax(p.durations),
+            cleanSigs, _, vad = get_clean_signals(
+                p,
                 scalings,
                 wolaParamsCurr.fs,
-                sigType=p.signalType,
-                randomDelays=p.randomDelays,
                 maxDelay=0.1
             )
-            if p.signalType == 'speech':
-                # Get VAD
-                VADwinLength = 20e-3     # [s] VAD window length  FIXME: this should be a parameter
-                VADenergyDecrease_dB = 30  # HARDCODED FIXME: this should be a parameter
-                vad, _ = get_vad(
-                    x=cleanSigs,
-                    tw=VADwinLength,
-                    eFactdB=VADenergyDecrease_dB,
-                    Fs=wolaParamsCurr.fs
+            if vad is not None:
+                sigma_sr = np.sqrt(
+                    np.mean(
+                        np.abs(
+                            cleanSigs[np.squeeze(vad).astype(bool), :]
+                        ) ** 2,
+                        axis=0
+                    )
                 )
-                stop = 1
-            sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
-            sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)
+            else:
+                sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+            sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)  # TODO: implement for VAD cases
 
             # Generate noise signals
             sigma_nr = np.zeros(p.nSensors)
@@ -214,7 +224,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 batchFusionInOnline=p.useBatchModeFusionVectorsInOnlineDanse,
                 noSSfusion=p.ignoreFusionForSSNodes,
                 verbose=p.verbose,
-                # vad=vad if p.signalType == 'speech' else None
+                vad=vad
             )
 
             # Compute metrics
@@ -268,9 +278,11 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         
         if p.exportFigures:
             # Plot results
-            figTitleSuffix = f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
+            figTitleSuffix = ''
+            if any(['danse' in t for t in p.toCompute]):
+                figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
             if wolaParamsCurr.singleFreqBinIndex is not None and\
-                any('wola' in t for t in p.toCompute):
+                any(['wola' in t for t in p.toCompute]):
                 figTitleSuffix += f", WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin"
             fig = plot_final(
                 p.durations,
