@@ -1,10 +1,10 @@
 
 import ast
+import copy
 import yaml
 import json, os
 import numpy as np
 import pickle, gzip
-from copy import copy
 from pathlib import Path
 from pathlib import PurePath
 import dataclass_wizard as dcw
@@ -71,8 +71,8 @@ def load(self, foldername: str, silent=False, dataType='pkl'):
         pathToAlternativeFile = f'{foldername}/{type(self).__name__}{altExtension}'
         if Path(pathToAlternativeFile).is_file():
             print(f'The file\n"{pathToFile}"\ndoes not exist. Loading\n"{pathToAlternativeFile}"\ninstead.')
-            pathToFile = copy(pathToAlternativeFile)
-            baseExtension = copy(altExtension)
+            pathToFile = copy.deepcopy(pathToAlternativeFile)
+            baseExtension = copy.deepcopy(altExtension)
         else:
             raise ValueError(f'Import issue, file\n"{pathToFile}"\nnot found (with either possible extensions).')
 
@@ -176,7 +176,7 @@ def load_from_json(path_to_json_file, mycls):
     mycls_surrog = dcw.fromdict(c, d)
 
     # Fill in a new correct instance of the desired dataclass
-    mycls_out = copy.copy(mycls)
+    mycls_out = copy.deepcopy.copy.deepcopy(mycls)
     for field in fields(mycls_surrog):
         a = getattr(mycls_surrog, field.name)
         if field.type is list:
@@ -304,6 +304,10 @@ def load_from_yaml(path, myDataclass):
 
     # myDataclass = dcw.fromdict(myDataclass, d)
     myDataclass = _load_into_dataclass(d, myDataclass)
+    
+    # If there is a __post_init__ method, call it
+    if hasattr(myDataclass, '__post_init__'):
+        myDataclass.__post_init__()
 
     return myDataclass
 
