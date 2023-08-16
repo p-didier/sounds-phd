@@ -1,32 +1,38 @@
 Mk: null
 b: 0.1
-minDuration: 1
-maxDuration: 10.0
-nDurationsBatch: 10  # linearly spaced from `minDuration to maxDuration
+minDuration: 2
+maxDuration: 20.0
+nDurationsBatch: 30  # linearly spaced from `minDuration to maxDuration
 exportFigures: true
 exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate
 fs: 8000.0
 ignoreFusionForSSNodes: true
 nMC: 10
-nNodes: 3
+nNodes: 2
 nSensors: 5
 randomDelays: false
 seed: 0
-selfNoisePower: 1
+selfNoisePower: 0.1
 showDeltaPerNode: false
 # signalType: speech
 # signalType: noise_complex
 signalType: interrupt_noise_complex
-interruptionDuration: 0.1  # [s]
-interruptionPeriod: 0.2    # [s]
+interruptionDuration: 0.5  # [s]
+interruptionPeriod: 1    # [s]
 targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
 taus:
 - 2.0
+- 4.0
+- 8.0
 toCompute: 
-- mwf_batch
+# - mwf_batch
 - gevdmwf_batch
-- danse_sim_batch
-- gevddanse_sim_batch
+# - danse_sim_batch
+# - gevddanse_sim_batch
+# - mwf_online
+- gevdmwf_online
+# - danse_sim_online
+# - gevddanse_sim_online
 useBatchModeFusionVectorsInOnlineDanse: false
 useVAD: true
 VADwinLength: 0.02

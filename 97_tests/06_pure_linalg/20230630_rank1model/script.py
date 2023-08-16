@@ -74,8 +74,8 @@ class ScriptParameters:
             self.maxDuration,
             self.nDurationsBatch
         )
-        if self.minDuration <= self.interruptionDuration:
-            raise ValueError('`minDuration` should be > `interruptionDuration`')
+        if self.minDuration <= self.interruptionPeriod:
+            raise ValueError('`minDuration` should be > `interruptionPeriod`')
 
 # Global parameters
 PATH_TO_YAML = f'{Path(__file__).parent.absolute()}\\yaml\\script_parameters.yaml'
@@ -113,9 +113,6 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             idxStart = int(np.sum(p.Mk[:k]))
             idxEnd = idxStart + p.Mk[k]
             channelToNodeMap[idxStart:idxEnd] = k
-
-    # Set rng state back to original after the random assignment of sensors
-    np.random.set_state(rngState)
 
     if isinstance(p.wolaParams.betaExt, (float, int)):
         p.wolaParams.betaExt = np.array([p.wolaParams.betaExt])
@@ -292,7 +289,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 L=wolaParamsCurr.nfft,
                 R=wolaParamsCurr.hop,
                 avgAcrossNodesFlag=not p.showDeltaPerNode,
-                figTitleSuffix=figTitleSuffix,
+                figTitleSuffix=figTitleSuffix if len(figTitleSuffix) > 0 else None,
+                vad=vad
             )
 
             if p.exportFolder is not None:

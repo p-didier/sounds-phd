@@ -348,6 +348,7 @@ def run_online_danse(
         batchModeNetWideFilters=None,
         ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
         verbose=True,
+        vad=None
     ):
 
     # Get noisy signal (time-domain)
@@ -369,6 +370,8 @@ def run_online_danse(
         w.append(wCurr)
     Ryy = []
     Rnn = []
+    RyyCurr = []
+    RnnCurr = []
     for k in range(nNodes):
         Ryy.append(np.zeros(
             (dimYtilde[k], dimYtilde[k]),
@@ -378,6 +381,16 @@ def run_online_danse(
             (dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
+        RyyCurr.append(np.zeros(
+            (dimYtilde[k], dimYtilde[k]),
+            dtype=np.complex128
+        ))
+        RnnCurr.append(np.zeros(
+            (dimYtilde[k], dimYtilde[k]),
+            dtype=np.complex128
+        ))
+    nUpdatesRyy = np.zeros(nNodes, dtype=int)
+    nUpdatesRnn = np.zeros(nNodes, dtype=int)
 
     wNet = np.zeros(
         (nSensors, nIter, nNodes),
@@ -419,6 +432,12 @@ def run_online_danse(
             print(f'{label} iteration {i+1}/{nIter}')
         idxBegFrame = i * p.nfft
         idxEndFrame = (i + 1) * p.nfft
+        # Get VAD for current frame
+        if vad is not None:
+            vadCurr = vad[idxBegFrame:idxEndFrame]
+            # Convert to single boolean value
+            vadCurr = np.any(vadCurr.astype(bool))
+        
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
             (p.nfft, nNodes),
@@ -473,19 +492,35 @@ def run_online_danse(
                 n[idxBegFrame:idxEndFrame, channelToNodeMap == k],
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
-
-            # Compute covariance matrices
-            RyyCurr = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
-            RnnCurr = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
+            
+            if vad is not None:
+                # Compute covariance matrices following VAD
+                if vadCurr:
+                    RyyCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
+                    nUpdatesRyy[k] += 1
+                else:
+                    RnnCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
+                    nUpdatesRnn[k] += 1
+                # Condition to start exponential averaging
+                startExpAvgCond = nUpdatesRyy[k] > 1 and nUpdatesRnn[k] > 1
+            else:
+                # Compute covariance matrices
+                RyyCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
+                RnnCurr[k] = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
+                # Condition to start exponential averaging
+                startExpAvgCond = i > p.startExpAvgAfter
+            
             # Update covariance matrices
-            if i > p.startExpAvgAfter:
+            if startExpAvgCond:
                 # Using `beta`
-                Ryy[k] = p.betaDanse * Ryy[k] + (1 - p.betaDanse) * RyyCurr
-                Rnn[k] = p.betaDanse * Rnn[k] + (1 - p.betaDanse) * RnnCurr
+                Ryy[k] = p.betaDanse * Ryy[k] +\
+                    (1 - p.betaDanse) * RyyCurr[k]
+                Rnn[k] = p.betaDanse * Rnn[k] +\
+                    (1 - p.betaDanse) * RnnCurr[k]
             else:
                 # Without `beta`
-                Ryy[k] = RyyCurr
-                Rnn[k] = RnnCurr
+                Ryy[k] = copy.deepcopy(RyyCurr[k])
+                Rnn[k] = copy.deepcopy(RnnCurr[k])
 
             # Check if filter ought to be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:

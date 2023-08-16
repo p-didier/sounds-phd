@@ -30,6 +30,10 @@ def run_online_mwf(
     w = np.zeros((nSensors, nIter, nSensors), dtype=np.complex128)
     Ryy = np.zeros((nSensors, nSensors), dtype=np.complex128)
     Rnn = np.zeros((nSensors, nSensors), dtype=np.complex128)
+    RyyCurr = np.zeros((nSensors, nSensors), dtype=np.complex128)
+    RnnCurr = np.zeros((nSensors, nSensors), dtype=np.complex128)
+    nUpdatesRyy = 0
+    nUpdatesRnn = 0
     
     if filterType == 'gevd':
         algLabel = 'GEVD-MWF'
@@ -44,37 +48,62 @@ def run_online_mwf(
         # Get current frame
         yCurr: np.ndarray = y[idxBegFrame:idxEndFrame, :]
         nCurr: np.ndarray = n[idxBegFrame:idxEndFrame, :]
+        # Get VAD for current frame
+        if vad is not None:
+            vadCurr = vad[idxBegFrame:idxEndFrame]
+            # Convert to single boolean value
+            vadCurr = np.any(vadCurr.astype(bool))
 
-        # Compute covariance matrices
-        RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
-        RnnCurr = np.einsum('ij,ik->jk', nCurr, nCurr.conj())
         # Update covariance matrices
-        if i > p.startExpAvgAfter:
+        if vad is not None:
+            # Compute covariance matrices following VAD
+            if vadCurr:
+                RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
+                nUpdatesRyy += 1
+            else:
+                RnnCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
+                nUpdatesRnn += 1
+            updateFilter = nUpdatesRnn > 0 and nUpdatesRyy > 0
+            # Condition to start exponential averaging
+            startExpAvgCond = nUpdatesRnn > 0 and nUpdatesRyy > 0
+        else:
+            # Compute covariance matrices using oracle noise knowledge
+            RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
+            RnnCurr = np.einsum('ij,ik->jk', nCurr, nCurr.conj())
+            updateFilter = True
+            # Condition to start exponential averaging
+            startExpAvgCond = i > p.startExpAvgAfter
+        
+        if startExpAvgCond:
             Ryy = p.betaMwf * Ryy + (1 - p.betaMwf) * RyyCurr
             Rnn = p.betaMwf * Rnn + (1 - p.betaMwf) * RnnCurr
         else:
+            print(f'i={i}, not yet starting exponential averaging')
             Ryy = copy.deepcopy(RyyCurr)
             Rnn = copy.deepcopy(RnnCurr)
 
-        # Compute filter
-        if filterType == 'regular':
-            for m in range(nSensors):
-                e = np.zeros(nSensors)
-                e[m] = 1
-                w[:, i + 1, m] = np.linalg.inv(Ryy) @ (Ryy - Rnn) @ e
-        elif filterType == 'gevd':
-            sigma, Xmat = la.eigh(Ryy, Rnn)
-            idx = np.flip(np.argsort(sigma))
-            sigma = sigma[idx]
-            Xmat = Xmat[:, idx]
-            Qmat = np.linalg.inv(Xmat.T.conj())
-            Dmat = np.zeros((nSensors, nSensors))
-            Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-            myMat = Xmat @ Dmat @ Qmat.T.conj()
-            for m in range(nSensors):
-                e = np.zeros(nSensors)
-                e[m] = 1  # selection vector for the ref. sensor index
-                w[:, i + 1, m] = myMat @ e
+        if updateFilter:
+            # Compute filter
+            if filterType == 'regular':
+                for m in range(nSensors):
+                    e = np.zeros(nSensors)
+                    e[m] = 1
+                    w[:, i + 1, m] = np.linalg.inv(Ryy) @ (Ryy - Rnn) @ e
+            elif filterType == 'gevd':
+                sigma, Xmat = la.eigh(Ryy, Rnn)
+                idx = np.flip(np.argsort(sigma))
+                sigma = sigma[idx]
+                Xmat = Xmat[:, idx]
+                Qmat = np.linalg.inv(Xmat.T.conj())
+                Dmat = np.zeros((nSensors, nSensors))
+                Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
+                myMat = Xmat @ Dmat @ Qmat.T.conj()
+                for m in range(nSensors):
+                    e = np.zeros(nSensors)
+                    e[m] = 1  # selection vector for the ref. sensor index
+                    w[:, i + 1, m] = myMat @ e
+        else:
+            w[:, i + 1, :] = w[:, i, :]
     
     return w
 

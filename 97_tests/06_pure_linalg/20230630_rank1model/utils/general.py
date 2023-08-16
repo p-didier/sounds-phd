@@ -334,8 +334,8 @@ def get_clean_signals(
             # `p.interruptionPeriod` seconds 
             nInterruptions = int(dur / p.interruptionPeriod)
             vad = np.ones((latentSignal.shape[0], 1))
-            for k in range(nInterruptions):
-                idxStart = int(k * p.interruptionPeriod * fsTarget)
+            for k in range(nInterruptions - 1):
+                idxStart = int((k + 1) * p.interruptionPeriod * fsTarget)
                 idxEnd = int(idxStart + p.interruptionDuration * fsTarget)
                 latentSignal[idxStart:idxEnd] = 0
                 vad[idxStart:idxEnd, 0] = 0

@@ -37,7 +37,8 @@ def plot_final(
         L=1024,
         R=512,
         avgAcrossNodesFlag=False,
-        figTitleSuffix=None
+        figTitleSuffix=None,
+        vad=None
     ):
     """Plot the final results of the MC runs, for each filter type."""
 
@@ -61,6 +62,8 @@ def plot_final(
             elif 'wola' in filterType:
                 xAxis = np.arange(0, toPlot[filterType].shape[1]) * R / fs
             for idxTau in range(nTaus):
+                ls = allLineStyles[idxTau % len(allLineStyles)]
+                tauLeg = f'($\\tau={taus[idxTau]}$ s)'
                 if avgAcrossNodesFlag:
                     axes.fill_between(
                         xAxis,
@@ -72,23 +75,16 @@ def plot_final(
                     axes.semilogy(
                         xAxis,
                         np.mean(toPlot[filterType][:, :, idxTau], axis=0),
-                        f'{baseColor}-',
-                        label=filterType
+                        f'{baseColor}{ls}',
+                        label=f'{filterType} {tauLeg}',
                     )
                 else:
                     for k in range(toPlot[filterType].shape[-1]):
-                        # axes.fill_between(
-                        #     xAxis,
-                        #     np.amin(toPlot[filterType][:, :, idxTau, k], axis=0),
-                        #     np.amax(toPlot[filterType][:, :, idxTau, k], axis=0),
-                        #     color=baseColor,
-                        #     alpha=0.15
-                        # )
                         axes.semilogy(
                             xAxis,
                             np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
-                            f'{baseColor}-',
-                            label=f'{filterType} $k=${k+1}',
+                            f'{baseColor}{ls}',
+                            label=f'{filterType} $k=${k+1} {tauLeg}',
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )
         else:  # <-- batch-mode
@@ -118,16 +114,42 @@ def plot_final(
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )
+    
+    # Add VAD if provided
+    if vad is not None:
+        axesRight = axes.twinx()
+        axesRight.plot(
+            np.linspace(0, np.amax(durations), len(vad)),
+            vad,
+            'k--',
+            linewidth=0.5,
+            zorder=-1
+        )
+        axesRight.set_ylabel('VAD (-)')
+        axesRight.set_yticks([0, 1])
+        axesRight.set_zorder(-1)  # put the VAD behind the other plots
+        axes.set_frame_on(False)  # remove the frame of the main axes
+        # Set `axes` grid only to horizontal lines
+        axes.grid(axis='y', which='both')
+        # Add grid to `axesRight` only to vertical lines
+        axesRight.set_xticks(axes.get_xticks())
+        axesRight.grid(axis='x', which='major')
+        # Ensure the grid is behind the other plots
+        axesRight.set_axisbelow(True)
+    else:
+        axes.grid(which='both')
+
     axes.set_xlabel('Signal duration (s)', loc='left')
     axes.legend(loc='lower left')
     ti = f'{nMC} MC runs'
     if figTitleSuffix is not None:
         ti += f' ({figTitleSuffix})'
     axes.set_title(ti)
-    axes.grid(which='both')
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
     if flagBatchModeIncluded:
         axes.set_xlim([np.amin(durations), np.amax(durations)])
+    else:
+        axes.set_xlim([0, np.amax(xAxis)])
     # Add secondary x-axis with beta values
     ax2 = axes.secondary_xaxis("top")
     ax2.set_xticks(axes.get_xticks())
@@ -138,7 +160,7 @@ def plot_final(
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf
     for idxFilter, filterType in enumerate(toPlot.keys()):
-        if 'online' in filterType or 'wola' in filterType and\
+        if ('online' in filterType or 'wola' in filterType) and\
             flagBatchModeIncluded:
             idxStart = int(np.amin(durations) * fs // L)
             ymin = min(
@@ -157,7 +179,6 @@ def plot_final(
     # # Round to the nearest power of 10
     # ymax = 10 ** np.ceil(np.log10(ymax))
     # ymin = 10 ** np.floor(np.log10(ymin))
-    axes.set_ylim([ymin, ymax])
     plt.show(block=False)
 
     return fig
