@@ -22,17 +22,17 @@ interruptionPeriod: 1    # [s]
 targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
 taus:
 - 2.0
-- 4.0
-- 8.0
+# - 4.0
+# - 8.0
 toCompute: 
-# - mwf_batch
+- mwf_batch
 - gevdmwf_batch
 # - danse_sim_batch
 # - gevddanse_sim_batch
-# - mwf_online
+- mwf_online
 - gevdmwf_online
-# - danse_sim_online
-# - gevddanse_sim_online
+- danse_sim_online
+- gevddanse_sim_online
 useBatchModeFusionVectorsInOnlineDanse: false
 useVAD: true
 VADwinLength: 0.02

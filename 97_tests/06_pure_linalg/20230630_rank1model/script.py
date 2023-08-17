@@ -298,7 +298,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                     fname = f'{p.exportFolder}/diff'
                 else:
                     fname = f'{p.exportFolder}/betas'
-                fname += f'_betaExt_0p{int(betaExtCurr * 1000)}'
+                fname += f'_betaExt_0p{int(betaExtCurr * 1e3)}'
                 for t in p.toCompute:
                     fname += f'_{t}'
                 if not Path(p.exportFolder).is_dir():

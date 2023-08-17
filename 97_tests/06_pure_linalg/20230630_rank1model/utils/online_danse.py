@@ -396,6 +396,9 @@ def run_online_danse(
         (nSensors, nIter, nNodes),
         dtype=np.complex128
     )
+    for k in range(nNodes):
+        idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
+        wNet[idxRef, :, k] = 1  # initialize with identity matrix (selecting ref. sensor)
     idxUpdatingNode = 0
     if nodeUpdatingStrategy == 'sequential':
         label = 'Online DANSE [seq NU]'

@@ -44,15 +44,10 @@ def plot_final(
 
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
     fig, axes = plt.subplots(1, 1)
-    fig.set_size_inches(8.5, 3.5)
+    fig.set_size_inches(8.5, 4.5)
     allLineStyles = ['-', '--', '-.', ':']
     for idxFilter, filterType in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
-        if idxFilter > len(allLineStyles):
-            lineStyle = np.random.choice(allLineStyles)
-        else:
-            lineStyle = allLineStyles[idxFilter]
-
         flagBatchModeIncluded = False
         if 'online' in filterType or 'wola' in filterType:
             nTaus = toPlot[filterType].shape[2]
@@ -102,7 +97,7 @@ def plot_final(
                 axes.semilogy(
                     durations,
                     np.mean(toPlot[filterType], axis=0),
-                    f'{baseColor}o{lineStyle}',
+                    f'{baseColor}o-',
                     label=filterType
                 )
             else:  # Case where we have data per node and per MC run
@@ -110,7 +105,7 @@ def plot_final(
                     axes.semilogy(
                         durations,
                         np.mean(toPlot[filterType][:, :, k], axis=0),
-                        f'{baseColor}o{lineStyle}',
+                        f'{baseColor}o-',
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )
@@ -140,7 +135,7 @@ def plot_final(
         axes.grid(which='both')
 
     axes.set_xlabel('Signal duration (s)', loc='left')
-    axes.legend(loc='lower left')
+    axes.legend(loc='upper right', fontsize='small')
     ti = f'{nMC} MC runs'
     if figTitleSuffix is not None:
         ti += f' ({figTitleSuffix})'

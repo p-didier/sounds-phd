@@ -28,6 +28,8 @@ def run_online_mwf(
 
     # Initialize
     w = np.zeros((nSensors, nIter, nSensors), dtype=np.complex128)
+    for m in range(nSensors):
+        w[m, :, m] = 1  # initialize with identity matrix (selecting ref. sensor)
     Ryy = np.zeros((nSensors, nSensors), dtype=np.complex128)
     Rnn = np.zeros((nSensors, nSensors), dtype=np.complex128)
     RyyCurr = np.zeros((nSensors, nSensors), dtype=np.complex128)
