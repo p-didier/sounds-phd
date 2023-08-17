@@ -3,32 +3,9 @@
 #
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
-import copy
 import numpy as np
 import scipy.linalg as la
-from dataclasses import dataclass
-
-@dataclass
-class WOLAparameters:
-    nfft: int = 1024
-    hop: int = 512
-    nPosFreqs: int = int(nfft / 2 + 1)
-    winType: str = 'sqrt-hann'  # sqrt-hann | rect
-    fs: int = 16000  # [Hz]
-    betaDanse: float = 0.99  # exponential averaging constant
-    betaMwf: float = 0.99  # exponential averaging constant for MWF
-    B: int = 0  # number of frames bw. consecutive updates of fusion vectors
-    alpha: float = 1  # exponential averaging constant for fusion vectors
-    betaExt: float = 0  # exponential averaging constant for external target filters
-    startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
-    startFusionExpAvgAfter: int = 0  # same as above, for the fusion vectors
-    #
-    singleFreqBinIndex: int = None  # if not None, consider only the freq. bin at this index for WOLA-DANSE
-    
-    def __post_init__(self):
-        if self.singleFreqBinIndex is not None:
-            if self.singleFreqBinIndex > self.nPosFreqs:
-                raise ValueError('singleFreqBinIndex cannot be larger than nPosFreqs')
+from .online_common import *
 
 def get_window(winType, nfft):
     
@@ -57,6 +34,7 @@ def run_wola_danse(
         referenceSensorIdx=0,
         ignoreFusionForSSNodes=False,  # if True, fusion vectors are not updated for single-sensor nodes
         verbose=False,
+        vad=None
     ):
 
     # Get number of nodes
@@ -72,6 +50,7 @@ def run_wola_danse(
     win = get_window(p.winType, p.nfft)
     yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    vadFramewise = np.zeros((nIter, nSensors), dtype=bool)
     for m in range(nSensors):
         for i in range(nIter):
             idxBegFrame = i * p.hop
@@ -82,6 +61,14 @@ def run_wola_danse(
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
             ) / np.sqrt(p.hop)
+            # Get VAD for current frame
+            if vad is not None:
+                vadCurr = vad[idxBegFrame:idxEndFrame]
+                # Convert to single boolean value (True if at least 50% of the frame is active)
+                vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
+    # Convert to single boolean value
+    if vad is not None:
+        vadFramewise = np.any(vadFramewise, axis=1)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
@@ -112,6 +99,8 @@ def run_wola_danse(
         w.append(wCurr)
     Ryy = []
     Rnn = []
+    RyyCurr = []
+    RnnCurr = []
     for k in range(nNodes):
         Ryy.append(np.zeros(
             (nPosFreqs, dimYtilde[k], dimYtilde[k]),
@@ -121,12 +110,22 @@ def run_wola_danse(
             (nPosFreqs, dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
+        RyyCurr.append(np.zeros(
+            (nPosFreqs, dimYtilde[k], dimYtilde[k]),
+            dtype=np.complex128
+        ))
+        RnnCurr.append(np.zeros(
+            (nPosFreqs, dimYtilde[k], dimYtilde[k]),
+            dtype=np.complex128
+        ))
         # Ryy.append(np.random.randn(
         #     nPosFreqs, dimYtilde[k], dimYtilde[k]
         # ))
         # Rnn.append(np.random.randn(
         #     nPosFreqs, dimYtilde[k], dimYtilde[k]
         # ))
+    nUpdatesRyy = np.zeros(nNodes, dtype=int)
+    nUpdatesRnn = np.zeros(nNodes, dtype=int)
     
     # Initialize network-wide DANSE filters
     wNet = np.zeros(
@@ -238,16 +237,24 @@ def run_wola_danse(
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
 
-            # Compute covariance matrices
-            RyyCurr = np.einsum('ij,ik->ijk', yTilde, yTilde.conj())
-            RnnCurr = np.einsum('ij,ik->ijk', nTilde, nTilde.conj())
+            
             # Update covariance matrices
-            if i > p.startExpAvgAfter:
-                Ryy[k] = p.betaDanse * Ryy[k] + (1 - p.betaDanse) * RyyCurr
-                Rnn[k] = p.betaDanse * Rnn[k] + (1 - p.betaDanse) * RnnCurr
-            else:
-                Ryy[k] = copy.deepcopy(RyyCurr)
-                Rnn[k] = copy.deepcopy(RnnCurr)
+            Ryy[k], Rnn[k], RyyCurr[k], RnnCurr[k],\
+                updateFilter, nUpdatesRyy[k], nUpdatesRnn[k] = update_cov_mats(
+                p,
+                vadCurr,
+                yTilde,
+                nTilde,
+                nUpdatesRyy[k],
+                nUpdatesRnn[k],
+                i,
+                Ryy[k],
+                Rnn[k],
+                RyyCurr[k],
+                RnnCurr[k],
+                wolaMode=True,
+                danseMode=True
+            )
 
             # Check if filter should be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
@@ -267,8 +274,14 @@ def run_wola_danse(
                     if verbose:
                         print(f'Rank-deficient Rnn[{k}]')
                     updateFilter = False
-            
+
             if updateFilter:
+                w[k][:, i + 1, :] = update_filter(
+                    Ryy[k],
+                    Rnn[k],
+                    filterType=filterType,
+                    rank=rank
+                )
                 # Compute filter
                 if filterType == 'regular':
                     e = np.zeros(w[k].shape[-1])
@@ -496,34 +509,22 @@ def run_online_danse(
                 fusedSignalsNoiseOnly[:, nodeIndices != k]
             ), axis=1)
             
-            if vad is not None:
-                # Compute covariance matrices following VAD
-                if vadCurr:
-                    RyyCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
-                    nUpdatesRyy[k] += 1
-                else:
-                    RnnCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
-                    nUpdatesRnn[k] += 1
-                # Condition to start exponential averaging
-                startExpAvgCond = nUpdatesRyy[k] > 1 and nUpdatesRnn[k] > 1
-            else:
-                # Compute covariance matrices
-                RyyCurr[k] = np.einsum('ij,ik->jk', yTilde, yTilde.conj())
-                RnnCurr[k] = np.einsum('ij,ik->jk', nTilde, nTilde.conj())
-                # Condition to start exponential averaging
-                startExpAvgCond = i > p.startExpAvgAfter
-            
             # Update covariance matrices
-            if startExpAvgCond:
-                # Using `beta`
-                Ryy[k] = p.betaDanse * Ryy[k] +\
-                    (1 - p.betaDanse) * RyyCurr[k]
-                Rnn[k] = p.betaDanse * Rnn[k] +\
-                    (1 - p.betaDanse) * RnnCurr[k]
-            else:
-                # Without `beta`
-                Ryy[k] = copy.deepcopy(RyyCurr[k])
-                Rnn[k] = copy.deepcopy(RnnCurr[k])
+            Ryy[k], Rnn[k], RyyCurr[k], RnnCurr[k],\
+                updateFilter, nUpdatesRyy[k], nUpdatesRnn[k] = update_cov_mats(
+                p,
+                vadCurr,
+                yTilde,
+                nTilde,
+                nUpdatesRyy[k],
+                nUpdatesRnn[k],
+                i,
+                Ryy[k],
+                Rnn[k],
+                RyyCurr[k],
+                RnnCurr[k],
+                danseMode=True
+            )
 
             # Check if filter ought to be updated
             if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
@@ -543,23 +544,13 @@ def run_online_danse(
                     updateFilter = False
 
             if updateFilter:
-                # Compute filter
-                if filterType == 'regular':
-                    e = np.zeros(dimYtilde[k])
-                    e[referenceSensorIdx] = 1  # selection vector
-                    ryd = (Ryy[k] - Rnn[k]) @ e
-                    w[k][:, i + 1] = np.linalg.inv(Ryy[k]) @ ryd
-                elif filterType == 'gevd':
-                    sigma, Xmat = la.eigh(Ryy[k], Rnn[k])
-                    idx = np.flip(np.argsort(sigma))
-                    sigma = sigma[idx]
-                    Xmat = Xmat[:, idx]
-                    Qmat = np.linalg.inv(Xmat.T.conj())
-                    Dmat = np.zeros((Ryy[k].shape[0], Ryy[k].shape[0]))
-                    Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                    e = np.zeros(Ryy[k].shape[0])
-                    e[:rank] = 1
-                    w[k][:, i + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
+                w[k][:, i + 1] = update_filter(
+                    Ryy[k],
+                    Rnn[k],
+                    filterType=filterType,
+                    rank=rank,
+                    referenceSensorIdx=referenceSensorIdx
+                )
             else:
                 w[k][:, i + 1] = w[k][:, i]
 
@@ -581,7 +572,6 @@ def run_online_danse(
                     wNet[m, i + 1, k] = w[currNode][cIdx, i + 1]
                 else:  # neighbor node channel
                     gkq = w[k][Mk + neighborCount, i + 1]
-                    # wNet[m, i + 1, k] = w[currNode][cIdx, i] * gkq
                     wNet[m, i + 1, k] = fusionVects[currNode][cIdx] * gkq
                     # If we have reached the last channel of the current 
                     # neighbor node, increment neighbor count

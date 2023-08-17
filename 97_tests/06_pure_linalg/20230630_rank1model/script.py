@@ -280,7 +280,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
             if wolaParamsCurr.singleFreqBinIndex is not None and\
                 any(['wola' in t for t in p.toCompute]):
-                figTitleSuffix += f", WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin"
+                figTitleSuffix += f" [WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin]"
             fig = plot_final(
                 p.durations,
                 p.taus,

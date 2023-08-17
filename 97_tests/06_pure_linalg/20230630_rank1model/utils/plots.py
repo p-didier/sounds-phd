@@ -44,7 +44,7 @@ def plot_final(
 
     nMC = toPlot[list(toPlot.keys())[0]].shape[0]
     fig, axes = plt.subplots(1, 1)
-    fig.set_size_inches(8.5, 4.5)
+    fig.set_size_inches(8.5, 4)
     allLineStyles = ['-', '--', '-.', ':']
     for idxFilter, filterType in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
@@ -136,21 +136,29 @@ def plot_final(
 
     axes.set_xlabel('Signal duration (s)', loc='left')
     axes.legend(loc='upper right', fontsize='small')
-    ti = f'{nMC} MC runs'
+    if nMC == 1:
+        ti = '1 MC run'
+    else:
+        ti = f'{nMC} MC runs'
     if figTitleSuffix is not None:
-        ti += f' ({figTitleSuffix})'
+        ti += f' {figTitleSuffix}'
     axes.set_title(ti)
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
     if flagBatchModeIncluded:
         axes.set_xlim([np.amin(durations), np.amax(durations)])
     else:
         axes.set_xlim([0, np.amax(xAxis)])
-    # Add secondary x-axis with beta values
-    ax2 = axes.secondary_xaxis("top")
-    ax2.set_xticks(axes.get_xticks())
-    xTicks2 = np.round(axes.get_xticks() * fs / L).astype(int)
-    ax2.set_xticklabels(xTicks2)
-    ax2.set_xlabel('Iteration index (-)', loc='left')
+    
+    if 'online' in filterType or 'wola' in filterType:
+        # Add secondary x-axis with iterations
+        ax2 = axes.secondary_xaxis("top")
+        ax2.set_xticks(axes.get_xticks())
+        if 'online' in filterType:
+            xTicks2 = np.round(axes.get_xticks() * fs / L).astype(int)
+        elif 'wola' in filterType:
+            xTicks2 = np.round(axes.get_xticks() * fs / R).astype(int)
+        ax2.set_xticklabels(xTicks2)
+        ax2.set_xlabel('Iteration index (-)', loc='left')
     fig.tight_layout()
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf

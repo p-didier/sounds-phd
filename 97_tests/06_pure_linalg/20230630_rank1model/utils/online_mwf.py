@@ -7,6 +7,7 @@ import copy
 import numpy as np
 import scipy.linalg as la
 from .online_danse import get_window, WOLAparameters
+from .online_common import *
 
 def run_online_mwf(
         x: np.ndarray,
@@ -50,60 +51,38 @@ def run_online_mwf(
         # Get current frame
         yCurr: np.ndarray = y[idxBegFrame:idxEndFrame, :]
         nCurr: np.ndarray = n[idxBegFrame:idxEndFrame, :]
+
         # Get VAD for current frame
         if vad is not None:
             vadCurr = vad[idxBegFrame:idxEndFrame]
             # Convert to single boolean value
             vadCurr = np.any(vadCurr.astype(bool))
+        else:
+            vadCurr = None
 
         # Update covariance matrices
-        if vad is not None:
-            # Compute covariance matrices following VAD
-            if vadCurr:
-                RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
-                nUpdatesRyy += 1
-            else:
-                RnnCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
-                nUpdatesRnn += 1
-            updateFilter = nUpdatesRnn > 0 and nUpdatesRyy > 0
-            # Condition to start exponential averaging
-            startExpAvgCond = nUpdatesRnn > 0 and nUpdatesRyy > 0
-        else:
-            # Compute covariance matrices using oracle noise knowledge
-            RyyCurr = np.einsum('ij,ik->jk', yCurr, yCurr.conj())
-            RnnCurr = np.einsum('ij,ik->jk', nCurr, nCurr.conj())
-            updateFilter = True
-            # Condition to start exponential averaging
-            startExpAvgCond = i > p.startExpAvgAfter
-        
-        if startExpAvgCond:
-            Ryy = p.betaMwf * Ryy + (1 - p.betaMwf) * RyyCurr
-            Rnn = p.betaMwf * Rnn + (1 - p.betaMwf) * RnnCurr
-        else:
-            print(f'i={i}, not yet starting exponential averaging')
-            Ryy = copy.deepcopy(RyyCurr)
-            Rnn = copy.deepcopy(RnnCurr)
+        Ryy, Rnn, RyyCurr, RnnCurr,\
+            updateFilter, nUpdatesRyy, nUpdatesRnn = update_cov_mats(
+            p,
+            vadCurr,
+            yCurr,
+            nCurr,
+            nUpdatesRyy,
+            nUpdatesRnn,
+            i,
+            Ryy,
+            Rnn,
+            RyyCurr,
+            RnnCurr
+        )
 
         if updateFilter:
-            # Compute filter
-            if filterType == 'regular':
-                for m in range(nSensors):
-                    e = np.zeros(nSensors)
-                    e[m] = 1
-                    w[:, i + 1, m] = np.linalg.inv(Ryy) @ (Ryy - Rnn) @ e
-            elif filterType == 'gevd':
-                sigma, Xmat = la.eigh(Ryy, Rnn)
-                idx = np.flip(np.argsort(sigma))
-                sigma = sigma[idx]
-                Xmat = Xmat[:, idx]
-                Qmat = np.linalg.inv(Xmat.T.conj())
-                Dmat = np.zeros((nSensors, nSensors))
-                Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                myMat = Xmat @ Dmat @ Qmat.T.conj()
-                for m in range(nSensors):
-                    e = np.zeros(nSensors)
-                    e[m] = 1  # selection vector for the ref. sensor index
-                    w[:, i + 1, m] = myMat @ e
+            w[:, i + 1, :] = update_filter(
+                Ryy,
+                Rnn,
+                filterType=filterType,
+                rank=rank
+            )
         else:
             w[:, i + 1, :] = w[:, i, :]
     
@@ -116,7 +95,8 @@ def run_wola_mwf(
         filterType='regular',  # 'regular' or 'gevd'
         rank=1,
         p: WOLAparameters=WOLAparameters(),
-        verbose=True
+        verbose=True,
+        vad=None
     ):
     """Weighted OverLap-Add (WOLA) MWF."""
 
@@ -131,6 +111,7 @@ def run_wola_mwf(
     win = get_window(p.winType, p.nfft)
     yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    vadFramewise = np.zeros((nIter, nSensors), dtype=bool)
     for m in range(nSensors):
         for i in range(nIter):
             idxBegFrame = i * p.hop
@@ -141,6 +122,14 @@ def run_wola_mwf(
             nWola[i, :, m] = np.fft.fft(
                 n[idxBegFrame:idxEndFrame, m] * win
             ) / np.sqrt(p.hop)
+            # Get VAD for current frame
+            if vad is not None:
+                vadCurr = vad[idxBegFrame:idxEndFrame]
+                # Convert to single boolean value (True if at least 50% of the frame is active)
+                vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
+    # Convert to single boolean value
+    if vad is not None:
+        vadFramewise = np.any(vadFramewise, axis=1)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
@@ -163,6 +152,10 @@ def run_wola_mwf(
         w[m, :, :, m] = 1  # initialize with identity matrix (selecting ref. sensor)
     Ryy = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
     Rnn = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+    RyyCurr = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+    RnnCurr = np.zeros((nPosFreqs, nSensors, nSensors), dtype=np.complex128)
+    nUpdatesRyy = 0
+    nUpdatesRnn = 0
     
     if filterType == 'gevd':
         algLabel = 'GEVD-MWF'
@@ -177,61 +170,42 @@ def run_wola_mwf(
         # Get current frame
         yCurr: np.ndarray = yWola[i, :, :]
         nCurr: np.ndarray = nWola[i, :, :]
-        # Compute covariance matrices
-        RyyCurr = np.einsum('ij,ik->ijk', yCurr, yCurr.conj())
-        RnnCurr = np.einsum('ij,ik->ijk', nCurr, nCurr.conj())
-        # Update covariance matrices
-        if i > p.startExpAvgAfter:
-            Ryy = p.betaMwf * Ryy + (1 - p.betaMwf) * RyyCurr
-            Rnn = p.betaMwf * Rnn + (1 - p.betaMwf) * RnnCurr
-        else:
-            Ryy = copy.deepcopy(RyyCurr)
-            Rnn = copy.deepcopy(RnnCurr)
-            
+
+        Ryy, Rnn, RyyCurr, RnnCurr,\
+            updateFilter, nUpdatesRyy, nUpdatesRnn = update_cov_mats(
+            p,
+            vadFramewise[i],
+            yCurr,
+            nCurr,
+            nUpdatesRyy,
+            nUpdatesRnn,
+            i,
+            Ryy,
+            Rnn,
+            RyyCurr,
+            RnnCurr,
+            wolaMode=True
+        )
+
         # Check if SCMs are full rank
-        updateFilter = True
-        if np.any(np.linalg.matrix_rank(Ryy) < nSensors):
-            if verbose:
-                print('Rank-deficient Ryy')
-            updateFilter = False
-        if np.any(np.linalg.matrix_rank(Rnn) < nSensors):
-            if verbose:
-                print('Rank-deficient Rnn')
-            updateFilter = False
-        
+        if updateFilter:
+            if np.any(np.linalg.matrix_rank(Ryy) < nSensors):
+                if verbose:
+                    print('Rank-deficient Ryy')
+                updateFilter = False
+            if np.any(np.linalg.matrix_rank(Rnn) < nSensors):
+                if verbose:
+                    print('Rank-deficient Rnn')
+                updateFilter = False
+
         # Compute filter
         if updateFilter:
-            if filterType == 'regular':
-                currw = np.linalg.inv(Ryy) @ (Ryy - Rnn)
-                for kk in range(nSensors):
-                    w[:, i + 1, :, kk] = currw[:, :, kk].T
-
-            elif filterType == 'gevd':
-                Xmat = np.zeros(
-                    (nPosFreqs, nSensors, nSensors),
-                    dtype=np.complex128
-                )
-                sigma = np.zeros((nPosFreqs, nSensors))
-                # Looping over frequencies because of the GEVD
-                for kappa in range(nPosFreqs):
-                    sigmaCurr, XmatCurr = la.eigh(
-                        Ryy[kappa, :, :],
-                        Rnn[kappa, :, :]
-                    )
-                    indices = np.flip(np.argsort(sigmaCurr))
-                    sigma[kappa, :] = sigmaCurr[indices]
-                    Xmat[kappa, :, :] = XmatCurr[:, indices]
-                Qmat = np.linalg.inv(
-                    np.transpose(Xmat.conj(), axes=[0, 2, 1])
-                )
-                # GEVLs tensor
-                Dmat = np.zeros((nPosFreqs, nSensors, nSensors))
-                for r in range(rank):
-                    Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
-                # LMMSE weights
-                Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
-                wCurr = np.matmul(np.matmul(Xmat, Dmat), Qhermitian)
-                w[:, i + 1, :, :] = np.transpose(wCurr, (2, 0, 1))
+            w[:, i + 1, :, :] = update_filter(
+                Ryy,
+                Rnn,
+                filterType=filterType,
+                rank=rank
+            )
         else:
             w[:, i + 1, :, :] = w[:, i, :, :]
 
