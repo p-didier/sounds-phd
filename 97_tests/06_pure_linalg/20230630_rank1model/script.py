@@ -172,9 +172,13 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                         axis=0
                     )
                 )
+                sigma_sr_wola = get_sigma_wola(
+                    cleanSigs[np.squeeze(vad).astype(bool), :],
+                    wolaParamsCurr
+                )
             else:
                 sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
-            sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)  # TODO: implement for VAD cases
+                sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)
 
             # Generate noise signals
             sigma_nr = np.zeros(p.nSensors)

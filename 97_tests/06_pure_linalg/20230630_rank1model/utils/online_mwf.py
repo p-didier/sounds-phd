@@ -111,7 +111,7 @@ def run_wola_mwf(
     win = get_window(p.winType, p.nfft)
     yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
-    vadFramewise = np.zeros((nIter, nSensors), dtype=bool)
+    vadFramewise = np.full((nIter, nSensors), fill_value=None)
     for m in range(nSensors):
         for i in range(nIter):
             idxBegFrame = i * p.hop
@@ -128,8 +128,7 @@ def run_wola_mwf(
                 # Convert to single boolean value (True if at least 50% of the frame is active)
                 vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
     # Convert to single boolean value
-    if vad is not None:
-        vadFramewise = np.any(vadFramewise, axis=1)
+    vadFramewise = np.any(vadFramewise, axis=1)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
@@ -186,17 +185,6 @@ def run_wola_mwf(
             RnnCurr,
             wolaMode=True
         )
-
-        # Check if SCMs are full rank
-        if updateFilter:
-            if np.any(np.linalg.matrix_rank(Ryy) < nSensors):
-                if verbose:
-                    print('Rank-deficient Ryy')
-                updateFilter = False
-            if np.any(np.linalg.matrix_rank(Rnn) < nSensors):
-                if verbose:
-                    print('Rank-deficient Rnn')
-                updateFilter = False
 
         # Compute filter
         if updateFilter:

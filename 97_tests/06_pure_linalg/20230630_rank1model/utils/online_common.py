@@ -41,6 +41,21 @@ def update_cov_mats(
         wolaMode=False,
         danseMode=False
     ):
+
+    # # Check rank of Ryy and Rnn
+    # ryyFR = np.all(np.linalg.matrix_rank(Ryy) == Ryy.shape[-1])
+    # rnnFR = np.all(np.linalg.matrix_rank(Rnn) == Rnn.shape[-1])
+    # if not ryyFR and rnnFR:
+    #     # If Rnn is full rank but Ryy is not, update Ryy only
+    #     updateRyy, updateRnn = True, False
+    # elif ryyFR and not rnnFR:
+    #     # If Ryy is full rank but Rnn is not, update Rnn only
+    #     updateRyy, updateRnn = False, True
+    # else:
+    #     # If both are full rank, update both
+    #     updateRyy, updateRnn = True, True
+    updateRyy, updateRnn = True, True
+
     # Initialize
     einSumOp = 'ij,ik->jk'
     if wolaMode:
@@ -71,17 +86,31 @@ def update_cov_mats(
         startExpAvgCondRyy = i > p.startExpAvgAfter
         startExpAvgCondRnn = i > p.startExpAvgAfter
     
-    if startExpAvgCondRyy:
-        Ryy = beta * Ryy + (1 - beta) * RyyCurr
+    if updateRyy:
+        if startExpAvgCondRyy:
+            Ryy = beta * Ryy + (1 - beta) * RyyCurr
+        else:
+            print(f'i={i}, not yet starting exponential averaging for Ryy')
+            Ryy = copy.deepcopy(RyyCurr)
     else:
-        print(f'i={i}, not yet starting exponential averaging for Ryy')
-        Ryy = copy.deepcopy(RyyCurr)
+        print(f'i={i}, not updating Ryy (already full rank while Rnn is not)')
     
-    if startExpAvgCondRnn:
-        Rnn = beta * Rnn + (1 - beta) * RnnCurr
+    if updateRnn:
+        if startExpAvgCondRnn:
+            Rnn = beta * Rnn + (1 - beta) * RnnCurr
+        else:
+            print(f'i={i}, not yet starting exponential averaging for Rnn')
+            Rnn = copy.deepcopy(RnnCurr)
     else:
-        print(f'i={i}, not yet starting exponential averaging for Rnn')
-        Rnn = copy.deepcopy(RnnCurr)
+        print(f'i={i}, not updating Rnn (already full rank while Ryy is not)')
+
+    if updateFilter:  # Check rank of updated covariance matrices
+        if np.any(np.linalg.matrix_rank(Ryy) < Ryy.shape[-1]) or\
+            np.any(np.linalg.matrix_rank(Rnn) < Rnn.shape[-1]):
+            updateFilter = False
+            print(f'i={i}, not updating filter (rank deficient covariance matrices)')
+        # else:
+        #     print(f'i={i}, updating filter')
 
     return Ryy, Rnn, RyyCurr, RnnCurr, updateFilter, nUpdatesRyy, nUpdatesRnn
 
@@ -100,14 +129,17 @@ def update_filter(
         bigW = np.linalg.inv(Ryy) @ (Ryy - Rnn)
         if wolaMode:
             if referenceSensorIdx is None:
-                return np.swapaxes(bigW, 0, 1)
+                return np.transpose(bigW, (2, 0, 1))
+                # return np.swapaxes(bigW, 0, 1)
             else:
-                return bigW[:, :, referenceSensorIdx]
+                # return bigW[:, :, referenceSensorIdx]
+                return bigW[:, referenceSensorIdx, :]
         else:
             if referenceSensorIdx is None:
                 return bigW
             else:
                 return bigW[:, referenceSensorIdx]
+                # return bigW[referenceSensorIdx , :]
     elif filterType == 'gevd':
         if wolaMode:
             nBins = Ryy.shape[0]
@@ -135,7 +167,8 @@ def update_filter(
             if referenceSensorIdx is None:
                 return np.transpose(bigW, (2, 0, 1))
             else:
-                return bigW[:, :, referenceSensorIdx]
+                # return bigW[:, :, referenceSensorIdx]
+                return bigW[:, referenceSensorIdx, :]
         else:
             sigma, Xmat = la.eigh(Ryy, Rnn)
             idx = np.flip(np.argsort(sigma))
@@ -149,3 +182,4 @@ def update_filter(
             else:
                 w = Xmat @ Dmat @ Qmat.T.conj()
                 return w[:, referenceSensorIdx]
+                # return w[referenceSensorIdx, :]

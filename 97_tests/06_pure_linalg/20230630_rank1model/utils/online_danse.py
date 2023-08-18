@@ -50,7 +50,7 @@ def run_wola_danse(
     win = get_window(p.winType, p.nfft)
     yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
-    vadFramewise = np.zeros((nIter, nSensors), dtype=bool)
+    vadFramewise = np.full((nIter, nSensors), fill_value=None)
     for m in range(nSensors):
         for i in range(nIter):
             idxBegFrame = i * p.hop
@@ -67,8 +67,7 @@ def run_wola_danse(
                 # Convert to single boolean value (True if at least 50% of the frame is active)
                 vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
     # Convert to single boolean value
-    if vad is not None:
-        vadFramewise = np.any(vadFramewise, axis=1)
+    vadFramewise = np.any(vadFramewise, axis=1)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
@@ -242,7 +241,7 @@ def run_wola_danse(
             Ryy[k], Rnn[k], RyyCurr[k], RnnCurr[k],\
                 updateFilter, nUpdatesRyy[k], nUpdatesRnn[k] = update_cov_mats(
                 p,
-                vadCurr,
+                vadFramewise[i],
                 yTilde,
                 nTilde,
                 nUpdatesRyy[k],
@@ -256,23 +255,15 @@ def run_wola_danse(
                 danseMode=True
             )
 
-            # Check if filter should be updated
-            if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
-                updateFilter = True
-            elif nodeUpdatingStrategy == 'simultaneous':
-                updateFilter = True
-            else:
-                updateFilter = False
-            
-            # Check if SCMs are full rank 
+            # Check if filter should be updated according to the 
+            # node updating strategy
             if updateFilter:
-                if np.any(np.linalg.matrix_rank(Ryy[k]) < dimYtilde[k]):
-                    if verbose:
-                        print(f'Rank-deficient Ryy[{k}]')
-                    updateFilter = False
-                if np.any(np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]):
-                    if verbose:
-                        print(f'Rank-deficient Rnn[{k}]')
+                if nodeUpdatingStrategy == 'sequential' and\
+                    k == idxUpdatingNode:
+                    updateFilter = True
+                elif nodeUpdatingStrategy == 'simultaneous':
+                    updateFilter = True
+                else:
                     updateFilter = False
 
             if updateFilter:
@@ -280,43 +271,9 @@ def run_wola_danse(
                     Ryy[k],
                     Rnn[k],
                     filterType=filterType,
-                    rank=rank
+                    rank=rank,
+                    referenceSensorIdx=referenceSensorIdx
                 )
-                # Compute filter
-                if filterType == 'regular':
-                    e = np.zeros(w[k].shape[-1])
-                    e[referenceSensorIdx] = 1  # selection vector
-                    w[k][:, i + 1, :] = np.linalg.inv(Ryy[k]) @\
-                        (Ryy[k] - Rnn[k]) @ e
-                elif filterType == 'gevd':
-                    Xmat = np.zeros(
-                        (nPosFreqs, dimYtilde[k], dimYtilde[k]),
-                        dtype=np.complex128
-                    )
-                    sigma = np.zeros((nPosFreqs, dimYtilde[k]))
-                    for kappa in range(nPosFreqs):
-                        sigmaCurr, XmatCurr = la.eigh(
-                            Ryy[k][kappa, :, :],
-                            Rnn[k][kappa, :, :]
-                        )
-                        indices = np.flip(np.argsort(sigmaCurr))
-                        sigma[kappa, :] = sigmaCurr[indices]
-                        Xmat[kappa, :, :] = XmatCurr[:, indices]
-                    Qmat = np.linalg.inv(
-                        np.transpose(Xmat.conj(), axes=[0, 2, 1])
-                    )
-                    # GEVLs tensor
-                    Dmat = np.zeros((nPosFreqs, dimYtilde[k], dimYtilde[k]))
-                    for r in range(rank):
-                        Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
-                    e = np.zeros(dimYtilde[k])
-                    e[:rank] = 1
-                    Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
-                    wCurr = np.matmul(np.matmul(
-                        np.matmul(Xmat, Dmat),
-                        Qhermitian
-                    ), e)
-                    w[k][:, i + 1, :] = wCurr
             else:
                 w[k][:, i + 1, :] = w[k][:, i, :]
 
@@ -326,25 +283,31 @@ def run_wola_danse(
         
         # Compute network-wide filters
         for k in range(nNodes):
+            Mk = np.sum(channelToNodeMap == k)
             channelCount = np.zeros(nNodes, dtype=int)
             neighborCount = 0
             for m in range(nSensors):
                 # Node index corresponding to channel `m`
-                currNetWideNodeIdx = channelToNodeMap[m]
+                currNwIdx = channelToNodeMap[m]
                 # Count channel index within node
-                c = channelCount[currNetWideNodeIdx]
-                if currNetWideNodeIdx == k:
-                    wNet[m, i + 1, :, k] = w[k][:, i + 1, c]
-                else:
-                    nChannels_k = np.sum(channelToNodeMap == k)
-                    gkq = w[k][:, i + 1, nChannels_k + neighborCount]
+                cIdx = channelCount[currNwIdx]
+                if currNwIdx == k:  # current node channel
+                    wNet[m, i + 1, :, k] = w[currNwIdx][:, i + 1, cIdx]
+                else:  # neighbor node channel
+                    gkq = w[k][:, i + 1, Mk + neighborCount]
                     wNet[m, i + 1, :, k] =\
-                        fusionVects[currNetWideNodeIdx][:, c] * gkq
-                channelCount[currNetWideNodeIdx] += 1
+                        fusionVects[currNwIdx][:, cIdx] * gkq
+                    # If we have reached the last channel of the current 
+                    # neighbor node, increment neighbor count
+                    if cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
+                        neighborCount += 1
+                channelCount[currNwIdx] += 1
                 
-                if currNetWideNodeIdx != k and\
-                    c == np.sum(channelToNodeMap == currNetWideNodeIdx) - 1:
-                    neighborCount += 1
+                # if currNwIdx != k and\
+                #     cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
+                #     neighborCount += 1
+        if updateFilter:
+            stop = 1
 
     return wNet
 
@@ -453,6 +416,8 @@ def run_online_danse(
             vadCurr = vad[idxBegFrame:idxEndFrame]
             # Convert to single boolean value
             vadCurr = np.any(vadCurr.astype(bool))
+        else:
+            vadCurr = None
         
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
@@ -565,18 +530,18 @@ def run_online_danse(
             neighborCount = 0
             for m in range(nSensors):
                 # Node index corresponding to channel `m`
-                currNode = channelToNodeMap[m]
+                currNwIdx = channelToNodeMap[m]
                 # Channel index within node
-                cIdx = channelCount[currNode]
-                if currNode == k:  # current node channel
-                    wNet[m, i + 1, k] = w[currNode][cIdx, i + 1]
+                cIdx = channelCount[currNwIdx]
+                if currNwIdx == k:  # current node channel
+                    wNet[m, i + 1, k] = w[currNwIdx][cIdx, i + 1]
                 else:  # neighbor node channel
                     gkq = w[k][Mk + neighborCount, i + 1]
-                    wNet[m, i + 1, k] = fusionVects[currNode][cIdx] * gkq
+                    wNet[m, i + 1, k] = fusionVects[currNwIdx][cIdx] * gkq
                     # If we have reached the last channel of the current 
                     # neighbor node, increment neighbor count
-                    if cIdx == np.sum(channelToNodeMap == currNode) - 1:
+                    if cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
                         neighborCount += 1
-                channelCount[currNode] += 1
+                channelCount[currNwIdx] += 1
 
     return wNet
