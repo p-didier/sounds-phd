@@ -60,21 +60,27 @@ def update_cov_mats(
             nUpdatesRnn += 1
         updateFilter = nUpdatesRnn > 0 and nUpdatesRyy > 0
         # Condition to start exponential averaging
-        startExpAvgCond = nUpdatesRnn > 0 and nUpdatesRyy > 0
+        startExpAvgCondRyy = nUpdatesRyy > 0
+        startExpAvgCondRnn = nUpdatesRnn > 0
     else:
         # Compute covariance matrices using oracle noise knowledge
         RyyCurr = 1 / p.nfft * np.einsum(einSumOp, yCurr, yCurr.conj())
         RnnCurr = 1 / p.nfft * np.einsum(einSumOp, nCurr, nCurr.conj())
         updateFilter = True
         # Condition to start exponential averaging
-        startExpAvgCond = i > p.startExpAvgAfter
+        startExpAvgCondRyy = i > p.startExpAvgAfter
+        startExpAvgCondRnn = i > p.startExpAvgAfter
     
-    if startExpAvgCond:
+    if startExpAvgCondRyy:
         Ryy = beta * Ryy + (1 - beta) * RyyCurr
+    else:
+        print(f'i={i}, not yet starting exponential averaging for Ryy')
+        Ryy = copy.deepcopy(RyyCurr)
+    
+    if startExpAvgCondRnn:
         Rnn = beta * Rnn + (1 - beta) * RnnCurr
     else:
-        print(f'i={i}, not yet starting exponential averaging')
-        Ryy = copy.deepcopy(RyyCurr)
+        print(f'i={i}, not yet starting exponential averaging for Rnn')
         Rnn = copy.deepcopy(RnnCurr)
 
     return Ryy, Rnn, RyyCurr, RnnCurr, updateFilter, nUpdatesRyy, nUpdatesRnn
@@ -96,9 +102,7 @@ def update_filter(
             if referenceSensorIdx is None:
                 return np.swapaxes(bigW, 0, 1)
             else:
-                raise NotImplementedError('referenceSensorIdx not implemented for WOLA mode')
-                w = np.swapaxes(bigW, 0, 1)
-                return w[:, :, referenceSensorIdx]
+                return bigW[:, :, referenceSensorIdx]
         else:
             if referenceSensorIdx is None:
                 return bigW
@@ -131,9 +135,7 @@ def update_filter(
             if referenceSensorIdx is None:
                 return np.transpose(bigW, (2, 0, 1))
             else:
-                raise NotImplementedError('referenceSensorIdx not implemented for WOLA mode')
-                w = np.transpose(bigW, (2, 0, 1))
-                return w[:, :, referenceSensorIdx]
+                return bigW[:, :, referenceSensorIdx]
         else:
             sigma, Xmat = la.eigh(Ryy, Rnn)
             idx = np.flip(np.argsort(sigma))
