@@ -48,7 +48,6 @@ def plot_final(
     allLineStyles = ['-', '--', '-.', ':']
     for idxFilter, filterType in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
-        flagBatchModeIncluded = False
         if 'online' in filterType or 'wola' in filterType:
             nTaus = toPlot[filterType].shape[2]
             # Plot as function of beta (== as function of tau)
@@ -83,7 +82,6 @@ def plot_final(
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )
         else:  # <-- batch-mode
-            flagBatchModeIncluded = True
             # Plot as function of signal duration
             if avgAcrossNodesFlag:  # Case where we have an average across nodes
                 # Add a patch of color to show the range of values across MC runs
@@ -144,6 +142,7 @@ def plot_final(
         ti += f' {figTitleSuffix}'
     axes.set_title(ti)
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
+    flagBatchModeIncluded = any(['batch' in t for t in toPlot.keys()])
     if flagBatchModeIncluded:
         axes.set_xlim([np.amin(durations), np.amax(durations)])
     else:
@@ -179,9 +178,7 @@ def plot_final(
             ymax = max(ymax, np.amax(toPlot[filterType]))
     ymin *= 0.9
     ymax *= 1.1
-    # # Round to the nearest power of 10
-    # ymax = 10 ** np.ceil(np.log10(ymax))
-    # ymin = 10 ** np.floor(np.log10(ymin))
+    axes.set_ylim([ymin, ymax])
     plt.show(block=False)
 
     return fig
