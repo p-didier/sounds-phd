@@ -72,9 +72,11 @@ class ScriptParameters:
         self.durations = np.linspace(
             self.minDuration,
             self.maxDuration,
-            self.nDurationsBatch
+            self.nDurationsBatch,
+            endpoint=True
         )
-        if self.minDuration <= self.interruptionPeriod:
+        if 'interrupt' in self.signalType and\
+            self.minDuration <= self.interruptionPeriod:
             raise ValueError('`minDuration` should be > `interruptionPeriod`')
 
 # Global parameters
@@ -154,7 +156,11 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             print(f'Running Monte-Carlo iteration {idxMC+1}/{p.nMC}')
 
             # Get scalings
-            scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
+            if 'complex' in p.signalType:
+                scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
+                    1j * np.random.uniform(low=0.5, high=1, size=p.nSensors)
+            else:
+                scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
             # Get clean signals
             nSamplesMax = int(np.amax(p.durations) * wolaParamsCurr.fs)
             cleanSigs, _, vad = get_clean_signals(
@@ -280,7 +286,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         if p.exportFigures:
             # Plot results
             figTitleSuffix = ''
-            if any(['danse' in t for t in p.toCompute]):
+            if any([('danse' in t) and (('online' in t) or ('wola' in t))\
+                    for t in p.toCompute]):
                 figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
             if wolaParamsCurr.singleFreqBinIndex is not None and\
                 any(['wola' in t for t in p.toCompute]):

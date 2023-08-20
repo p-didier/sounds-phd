@@ -31,16 +31,16 @@ def compute_filter(
 
     if vad is None:
         nSamples = cleanSigs.shape[0]
-        Ryy = 1 / nSamples * noisySignals.T.conj() @ noisySignals
-        Rnn = 1 / nSamples * noiseOnlySigs.T.conj() @ noiseOnlySigs
+        Ryy = 1 / nSamples * noisySignals.T @ noisySignals.conj()
+        Rnn = 1 / nSamples * noiseOnlySigs.T @ noiseOnlySigs.conj()
     else:
         # Include VAD knowledge in batch-mode estimates of `Ryy` and `Rnn`.
         # Only keep frames where all sensors VADs are active.
         vadBool = np.all(vad.astype(bool), axis=1)
         Ryy = 1 / np.sum(vadBool) *\
-            noisySignals[vadBool, :].T.conj() @ noisySignals[vadBool, :]
+            noisySignals[vadBool, :].T @ noisySignals[vadBool, :].conj()
         Rnn = 1 / np.sum(~vadBool) *\
-            noisySignals[~vadBool, :].T.conj() @ noisySignals[~vadBool, :]
+            noisySignals[~vadBool, :].T @ noisySignals[~vadBool, :].conj()
 
     nSensors = cleanSigs.shape[1]
 
@@ -475,19 +475,25 @@ def get_metrics(
     # Compute FAS + SPF (baseline)
     if 'wola' in filterType:
         nBins = sigma_nr.shape[0]  # number of frequency bins
-        baseline = np.zeros((nSensors, nSensors, nBins))
+        if np.any(np.iscomplex(filters)):
+            baseline = np.zeros((nSensors, nSensors, nBins), dtype=np.complex128)
+        else:
+            baseline = np.zeros((nSensors, nSensors, nBins))
         for m in range(nSensors):
             rtf = scalings / scalings[m]
-            hs = np.sum(rtf ** 2) * sigma_sr[:, m] ** 2
-            spf = hs / (hs + sigma_nr[:, m] ** 2)  # spectral post-filter
-            baseline[:, m, :] = np.outer(rtf / (rtf.T @ rtf), spf)  # FAS BF + spectral post-filter
+            hs = (rtf.T.conj() @ rtf) * sigma_sr[:, m] ** 2
+            spf = hs / (hs + sigma_nr[:, m] ** 2)  # spectral post-filter (real-valued)
+            baseline[:, m, :] = np.outer(rtf / (rtf.T.conj() @ rtf), spf)  # FAS BF + spectral post-filter
     else:
-        baseline = np.zeros((nSensors, nSensors))
+        if np.any(np.iscomplex(filters)):
+            baseline = np.zeros((nSensors, nSensors), dtype=np.complex128)
+        else:
+            baseline = np.zeros((nSensors, nSensors))
         for m in range(nSensors):
             rtf = scalings / scalings[m]
-            hs = np.sum(rtf ** 2) * sigma_sr[m] ** 2
-            spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter
-            baseline[:, m] = rtf / (rtf.T @ rtf) * spf  # FAS BF + spectral post-filter
+            hs = (rtf.T.conj() @ rtf) * sigma_sr[m] ** 2
+            spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter (real-valued)
+            baseline[:, m] = rtf / (rtf.T.conj() @ rtf) * spf  # FAS BF + spectral post-filter
 
     # Compute difference between normalized estimated filters
     # and normalized expected filters

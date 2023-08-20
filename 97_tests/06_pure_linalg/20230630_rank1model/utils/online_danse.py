@@ -302,12 +302,6 @@ def run_wola_danse(
                     if cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
                         neighborCount += 1
                 channelCount[currNwIdx] += 1
-                
-                # if currNwIdx != k and\
-                #     cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
-                #     neighborCount += 1
-        if updateFilter:
-            stop = 1
 
     return wNet
 
