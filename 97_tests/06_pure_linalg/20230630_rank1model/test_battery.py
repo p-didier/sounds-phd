@@ -11,6 +11,7 @@ from typing import Union
 from dataclasses import dataclass
 from script import main as run_test
 from script import ScriptParameters
+from utils.online_common import WOLAparameters
 
 
 # Get current file folder
@@ -18,10 +19,10 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 
 # Global variables
 GLOBAL_SEED = 0  # Global seed for random number generator
-TMAX = 15  # [s] Maximum duration of the simulated data
+TMAX = 20  # [s] Maximum duration of the simulated data
 FS = 8000  # [Hz] Sampling frequency
-N_MC = 10  # Number of Monte Carlo repetitions
-N_MC_2 = 10  # Number of Monte Carlo repetitions for SC3
+N_MC = 1  # Number of Monte Carlo repetitions
+N_MC_2 = 1  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
     # 'gevdmwf_batch',  # GEVD-MWF (batch)
@@ -32,12 +33,19 @@ TO_COMPUTE = [
     # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
     # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
+BETA_EXT = 0.7  # External exponential averaging factor
+B = 20  # Number of blocks between updates of fusion vectors in WOLA
+# SINGLE_FREQ_BIN_INDEX = None  # Index of the frequency bin to use for WOLA (if None: consider all bins)
+SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if None: consider all bins)
+# SIGNAL_TYPE = 'noise_complex'  # Type of input signal
+SIGNAL_TYPE = 'noise_real'  # Type of input signal
+NOISE_POWER = 1  # [W] Noise power
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
+# TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
 
 # Export parameters
-BATTERY_NAME = 'baseline_betaExt0p9_GEVD_15s'
-EXPORT_FOLDER = 'results\\wola\\fs8kHz_correct2'
+BATTERY_NAME = 'Beq20'
+EXPORT_FOLDER = 'results\\wola\\forPhDSU20230823\\indiv_tests'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass
@@ -144,7 +152,6 @@ def main():
         ]
     )
 
-
     # Prepare output
     print(f'Running battery of tests "{battery.name}"...')
     print(f'Description: {battery.description}')
@@ -152,17 +159,27 @@ def main():
     allOutputs = []
     
     # Run battery of tests
-    durations = np.logspace(np.log10(1), np.log10(TMAX), 30)  # Signal
     # durations to test (for batch mode -- online mode only considers
     # the largest duration)
     commonKwargs = {
         'toCompute': TO_COMPUTE,
-        'durations': durations,
+        'maxDuration': TMAX,
         'fs': FS,
         'exportFigures': False,
         'nMC': N_MC,
         'verbose': False,
         'taus': TAUS,
+        'signalType': SIGNAL_TYPE,
+        'wolaParams': WOLAparameters(
+            betaExt=BETA_EXT,
+            fs=FS,
+            B=B,
+            alpha=1,
+            startExpAvgAfter=2,
+            startFusionExpAvgAfter=2,
+            singleFreqBinIndex=SINGLE_FREQ_BIN_INDEX
+        ),
+        'selfNoisePower': NOISE_POWER
     }
     for test in battery.tests:
         if isinstance(test.parameters, list):
@@ -219,10 +236,10 @@ def main():
         os.makedirs(fullExportFolder)
     np.savez_compressed(
         f'{fullExportFolder}/{battery.name}.npz',
-        allOutputs=allOutputs
+        allOutputs=allOutputs,
     )
 
-    print('ALL DONE.')
+    print(f'ALL DONE ({os.path.basename(__file__)}).')
 
 
 if __name__ == '__main__':

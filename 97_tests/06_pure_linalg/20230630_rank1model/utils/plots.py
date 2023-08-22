@@ -133,7 +133,20 @@ def plot_final(
         axes.grid(which='both')
 
     axes.set_xlabel('Signal duration (s)', loc='left')
-    axes.legend(loc='upper right', fontsize='small')
+    # Decide whether to place legend in plot or not
+    maxLenInnerLegend = 14  # HARDCODED  HARDCODED  HARDCODED
+    if any([len(t) > maxLenInnerLegend for t in toPlot.keys()]):
+        # Place legend outside plot
+        axes.legend(
+            loc='upper left',
+            fontsize='small',
+            bbox_to_anchor=(1.05, 1)
+        )
+    else:
+        axes.legend(
+            loc='upper right',
+            fontsize='small'
+        )
     if nMC == 1:
         ti = '1 MC run'
     else:

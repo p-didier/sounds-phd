@@ -35,7 +35,8 @@ toCompute:
 # - mwf_online
 - gevdmwf_online
 # - danse_sim_online
-- gevddanse_sim_online
+- gevddanse_online
+# - gevddanse_sim_online
 # - mwf_wola
 # - gevdmwf_wola
 # - danse_sim_wola
@@ -48,6 +49,7 @@ verbose: true
 wolaParams:
   B: 0
   alpha: 1
+  # betaExt: 0.0
   betaExt: 0.9
   fs: 8000.0
   hop: 512

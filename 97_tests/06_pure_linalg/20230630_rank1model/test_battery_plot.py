@@ -7,24 +7,27 @@ import os
 import sys
 import functools
 import numpy as np
+from test_battery import *
 import matplotlib.pyplot as plt
-from test_battery import TestOutput, TestParameters
 
 # Get current file folder
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
-RESULTS_FILE_NAME = 'wola/fs8kHz_correct2/baseline_betaExt0p9_GEVD_15s.npz'
-# RESULTS_FILE_NAME = 'online/fs8kHz/rank1model.npz'
+# RESULTS_FILE_NAME = 'online/forPhDSU20230823/betaExt0p6.npz'
+RESULTS_FILE_NAME = 'wola/forPhDSU20230823/indiv_tests/Beq20.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
-TMAX = 15  # [s] Maximum duration of the simulated data
+TMAX = 20  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230814_tests/correct2/baseline_gevd_betaExt0p9_15s'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/indiv_tests/Beq20'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
+# TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
 # Booleans
-SHOW_INDIV_RUN_LINES = True  # whether to show individual MC runs as light lines
+# SHOW_RESULTS_RANGE = True  # whether to show the range of y-axis values as a shaded area
+SHOW_RESULTS_RANGE = False  # whether to show the range of y-axis values as a shaded area
+# SHOW_INDIV_RUN_LINES = True  # whether to show individual MC runs as light lines
+SHOW_INDIV_RUN_LINES = False  # whether to show individual MC runs as light lines
 
 def main():
     """Main function (called by default when running script)."""
@@ -36,7 +39,8 @@ def main():
     results = npz['allOutputs']
 
     # Signal durations tested
-    durations = np.logspace(np.log10(1), np.log10(TMAX), 30)
+    # durations = np.logspace(np.log10(1), np.log10(TMAX), 30)
+    durations = np.linspace(1, TMAX, 30)
     
     # Plot results for Type-1/2 tests
     figs = plot_results(
@@ -67,7 +71,8 @@ def main():
     # Show figures
     plt.show(block=False)
 
-    print('ALL DONE.')
+    # Get name of current file
+    print(f'ALL DONE ({os.path.basename(__file__)}).')
     stop = 1
 
 
@@ -90,13 +95,14 @@ def generate_plots(
             num=data.shape[1]
         )
         for idxTau in range(len(taus)):
-            axes.fill_between(
-                xAxisOnline,
-                np.amin(data[:, :, idxTau], axis=0),
-                np.amax(data[:, :, idxTau], axis=0),
-                color=baseColor,
-                alpha=0.15
-            )
+            if SHOW_RESULTS_RANGE:
+                axes.fill_between(
+                    xAxisOnline,
+                    np.amin(data[:, :, idxTau], axis=0),
+                    np.amax(data[:, :, idxTau], axis=0),
+                    color=baseColor,
+                    alpha=0.15
+                )
             if SHOW_INDIV_RUN_LINES:
                 for ii in range(data.shape[0]):
                     axes.semilogy(
@@ -118,13 +124,14 @@ def generate_plots(
             )
     else:
         xAxisOnline = None
-        axes.fill_between(
-            xAxisBatch,
-            np.amin(data, axis=0),
-            np.amax(data, axis=0),
-            color=baseColor,
-            alpha=0.15
-        )
+        if SHOW_RESULTS_RANGE:
+            axes.fill_between(
+                xAxisBatch,
+                np.amin(data, axis=0),
+                np.amax(data, axis=0),
+                color=baseColor,
+                alpha=0.15
+            )
         axes.semilogy(
             xAxisBatch,
             np.mean(
@@ -140,6 +147,8 @@ def generate_plots(
 def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]:
     """Plot results for Type-1 and Type-2 test."""
 
+    # Check if batch-mode is included in the test outputs (this will impact
+    # the y-axis limits of the plots)
     labels = list(resAll[0].results.keys())
     flagBatch = any(['batch' in label for label in labels])
     
@@ -161,10 +170,12 @@ def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]
         axes.set_xlabel('Duration [s]')
         if flagBatch:
             axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+            # Adapt y-axis limits to the data
+            ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline, xAxisBatch)
         else:
             axes.set_xlim([0, np.amax(xAxisOnline)])
-        # Adapt y-axis limits to the data
-        ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline, xAxisBatch)
+            # Adapt y-axis limits to the data
+            ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline)
         axes.set_ylim([ymin, ymax])
         axes.set_title(f'$K={res.parameters.K}$, $M={res.parameters.M}$, $M_k={res.parameters.Mk}$ ({res.results[filterType].shape[0]} MC runs)')
         fig.set_label(res.name)
@@ -231,10 +242,12 @@ def plot_results_mc_tests(
     axes.set_xlabel('Duration [s]')
     if flagBatch:
         axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
+        # Adapt y-axis limits to the data
+        ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline, xAxisBatch)
     else:
         axes.set_xlim([0, np.amax(xAxisOnline)])
-    # Adapt y-axis limits to the data
-    ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline, xAxisBatch)
+        # Adapt y-axis limits to the data
+        ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline)
     axes.set_ylim([ymin, ymax])
     fig.set_label('test3')
 
@@ -249,7 +262,8 @@ def compute_yaxis_limits(
     """Compute y-axis limits for plotting."""
     ymin, ymax = np.inf, -np.inf
     for filterType in list(data.keys()):
-        if 'online' in filterType:
+        if ('online' in filterType) or ('wola' in filterType) and\
+            xAxisBatch is not None:
             idxStart = np.argmin(np.abs(xAxisOnline - xAxisBatch[0]))
             ymin = min(
                 ymin,
@@ -260,8 +274,8 @@ def compute_yaxis_limits(
                 np.amax(np.mean(data[filterType][:, idxStart:, :], axis=0))
             )
         else:
-            ymin = min(ymin, np.amin(data[filterType]))
-            ymax = max(ymax, np.amax(data[filterType]))
+            ymin = min(ymin, np.amin(np.mean(data[filterType], axis=0)))
+            ymax = max(ymax, np.amax(np.mean(data[filterType], axis=0)))
     # Add some margin
     ymin *= 0.9
     ymax *= 1.1

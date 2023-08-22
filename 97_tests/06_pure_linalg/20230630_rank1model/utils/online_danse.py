@@ -495,11 +495,13 @@ def run_online_danse(
             if updateFilter:
                 # Check if Ryy is full rank
                 if np.linalg.matrix_rank(Ryy[k]) < dimYtilde[k]:
-                    print(f'Rank-deficient Ryy[{k}]')
+                    if verbose:
+                        print(f'Rank-deficient Ryy[{k}]')
                     updateFilter = False
                 # Check if Rnn is full rank
                 if np.linalg.matrix_rank(Rnn[k]) < dimYtilde[k]:
-                    print(f'Rank-deficient Rnn[{k}]')
+                    if verbose:
+                        print(f'Rank-deficient Rnn[{k}]')
                     updateFilter = False
 
             if updateFilter:

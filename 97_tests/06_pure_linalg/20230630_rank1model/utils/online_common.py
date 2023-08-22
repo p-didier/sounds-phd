@@ -39,7 +39,8 @@ def update_cov_mats(
         RyyCurr,
         RnnCurr,
         wolaMode=False,
-        danseMode=False
+        danseMode=False,
+        verbose=False,
     ):
 
     # # Check rank of Ryy and Rnn
@@ -90,25 +91,28 @@ def update_cov_mats(
         if startExpAvgCondRyy:
             Ryy = beta * Ryy + (1 - beta) * RyyCurr
         else:
-            print(f'i={i}, not yet starting exponential averaging for Ryy')
+            if verbose:
+                print(f'i={i}, not yet starting exponential averaging for Ryy')
             Ryy = copy.deepcopy(RyyCurr)
-    else:
+    elif verbose:
         print(f'i={i}, not updating Ryy (already full rank while Rnn is not)')
     
     if updateRnn:
         if startExpAvgCondRnn:
             Rnn = beta * Rnn + (1 - beta) * RnnCurr
         else:
-            print(f'i={i}, not yet starting exponential averaging for Rnn')
+            if verbose:
+                print(f'i={i}, not yet starting exponential averaging for Rnn')
             Rnn = copy.deepcopy(RnnCurr)
-    else:
+    elif verbose:
         print(f'i={i}, not updating Rnn (already full rank while Ryy is not)')
 
     if updateFilter:  # Check rank of updated covariance matrices
         if np.any(np.linalg.matrix_rank(Ryy) < Ryy.shape[-1]) or\
             np.any(np.linalg.matrix_rank(Rnn) < Rnn.shape[-1]):
             updateFilter = False
-            print(f'i={i}, not updating filter (rank deficient covariance matrices)')
+            if verbose:
+                print(f'i={i}, not updating filter (rank deficient covariance matrices)')
         # else:
         #     print(f'i={i}, updating filter')
 

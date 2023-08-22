@@ -11,77 +11,11 @@ import numpy as np
 from pathlib import Path
 from utils.plots import *
 from utils.general import *
-from dataclasses import dataclass, field
 sys.path.append('C:\\Users\\pdidier\\Dropbox\\PC\\Documents\\sounds-phd')
 from _general_fcts.class_methods.dataclass_methods import *
 
-@dataclass
-class ScriptParameters:
-    signalType: str = 'speech'  
-    # ^^^ 'speech', 'noise_real', 'noise_complex', ...
-    #     ... 'interrupt_noise_real', 'interrupt_noise_complex'.
-    interruptionDuration: float = 0.1  # seconds
-    interruptionPeriod: float = 0.5  # seconds
-    targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
-    nSensors: int = 3
-    nNodes: int = 3
-    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
-    selfNoisePower: float = 1
-    minDuration: float = 1
-    maxDuration: float = 10
-    nDurationsBatch: int = 30
-    fs: float = 8e3
-    nMC: int = 10
-    exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate'
-    taus: list[float] = field(default_factory=lambda: [2.])
-    b: float = 0.1  # factor for determining beta from tau (online processing)
-    toCompute: list[str] = field(default_factory=lambda: [
-        'mwf_batch',
-        'gevdmwf_batch',
-        'danse_sim_batch',
-        'gevddanse_sim_batch',
-    ])
-    seed: int = 0
-    wolaParams: WOLAparameters = WOLAparameters(
-        nfft=1024,
-        hop=512,
-        fs=fs,
-        betaExt=.9,  # if ==0, no extra fusion vector relaxation
-        startExpAvgAfter=2,  # frames
-        startFusionExpAvgAfter=2,  # frames
-        singleFreqBinIndex=99,  # if not None, only consider the freq. bin at this index in WOLA-DANSE
-    )
-    VADwinLength: float = 0.02  # seconds
-    VADenergyDecrease_dB: float = 10  # dB
-    # Booleans vvvv
-    randomDelays: bool = False
-    showDeltaPerNode: bool = False
-    useBatchModeFusionVectorsInOnlineDanse: bool = False
-    ignoreFusionForSSNodes: bool = True  # in DANSE, ignore fusion vector for single-sensor nodes
-    exportFigures: bool = True
-    verbose: bool = True
-    useVAD: bool = True  # use VAD for online processing of nonsstationary signals
-    loadVadIfPossible: bool = True  # if True, load VAD from file if possible
-    # Strings vvvv
-    vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
-
-    def __post_init__(self):
-        if any(['wola' in t for t in self.toCompute]) and\
-            'complex' in self.signalType:
-                raise ValueError('WOLA not implemented for complex-valued signals')
-        self.durations = np.linspace(
-            self.minDuration,
-            self.maxDuration,
-            self.nDurationsBatch,
-            endpoint=True
-        )
-        if 'interrupt' in self.signalType and\
-            self.minDuration <= self.interruptionPeriod:
-            raise ValueError('`minDuration` should be > `interruptionPeriod`')
-
 # Global parameters
 PATH_TO_YAML = f'{Path(__file__).parent.absolute()}\\yaml\\script_parameters.yaml'
-
 
 def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
     """Main function (called by default when running script)."""
@@ -317,8 +251,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 fig.savefig(f'{fname}.png', dpi=300, bbox_inches='tight')
         
             # Wait for button press to close the figures
-            plt.waitforbuttonpress()
-            plt.close('all')
+            # plt.waitforbuttonpress()
+            # plt.close('all')
 
     return metricsData
 

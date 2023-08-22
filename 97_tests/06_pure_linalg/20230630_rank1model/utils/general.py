@@ -7,7 +7,67 @@ from numba import njit
 import scipy.linalg as la
 from utils.online_mwf import *
 from utils.online_danse import *
-from script import ScriptParameters
+from dataclasses import dataclass, field
+
+@dataclass
+class ScriptParameters:
+    signalType: str = 'speech'  
+    # ^^^ 'speech', 'noise_real', 'noise_complex', ...
+    #     ... 'interrupt_noise_real', 'interrupt_noise_complex'.
+    interruptionDuration: float = 0.1  # seconds
+    interruptionPeriod: float = 0.5  # seconds
+    targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
+    nSensors: int = 3
+    nNodes: int = 3
+    Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
+    selfNoisePower: float = 1
+    minDuration: float = 1
+    maxDuration: float = 10
+    nDurationsBatch: int = 30
+    fs: float = 8e3
+    nMC: int = 10
+    exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate'
+    taus: list[float] = field(default_factory=lambda: [2.])
+    b: float = 0.1  # factor for determining beta from tau (online processing)
+    toCompute: list[str] = field(default_factory=lambda: [
+        'mwf_batch',
+        'gevdmwf_batch',
+        'danse_sim_batch',
+        'gevddanse_sim_batch',
+    ])
+    seed: int = 0
+    wolaParams: WOLAparameters = WOLAparameters(
+        fs=fs,
+    )
+    VADwinLength: float = 0.02  # seconds
+    VADenergyDecrease_dB: float = 10  # dB
+    # Booleans vvvv
+    randomDelays: bool = False
+    showDeltaPerNode: bool = False
+    useBatchModeFusionVectorsInOnlineDanse: bool = False
+    ignoreFusionForSSNodes: bool = True  # in DANSE, ignore fusion vector for single-sensor nodes
+    exportFigures: bool = True
+    verbose: bool = True
+    useVAD: bool = True  # use VAD for online processing of nonsstationary signals
+    loadVadIfPossible: bool = True  # if True, load VAD from file if possible
+    # Strings vvvv
+    vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
+
+    def __post_init__(self):
+        if any(['wola' in t for t in self.toCompute]) and\
+            'complex' in self.signalType:
+                raise ValueError('WOLA not implemented for complex-valued signals')
+        self.durations = np.linspace(
+            self.minDuration,
+            self.maxDuration,
+            self.nDurationsBatch,
+            endpoint=True
+        )
+        if self.wolaParams.fs != self.fs:
+            self.wolaParams.fs = self.fs
+        if 'interrupt' in self.signalType and\
+            self.minDuration <= self.interruptionPeriod:
+            raise ValueError('`minDuration` should be > `interruptionPeriod`')
 
 
 def compute_filter(
@@ -587,6 +647,7 @@ def get_sigma_wola(x, params: WOLAparameters):
 
     # Average over iterations and get actual sigma (not squared)
     sigmaWOLA = np.sqrt(np.mean(sigmasSquared, axis=0))
+    # Adapt array dimensions
     if params.singleFreqBinIndex is not None:
         sigmaWOLA = sigmaWOLA[params.singleFreqBinIndex, :]
         sigmaWOLA = sigmaWOLA[np.newaxis, :]
