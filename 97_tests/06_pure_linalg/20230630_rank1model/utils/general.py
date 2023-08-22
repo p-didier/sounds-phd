@@ -593,11 +593,35 @@ def get_metrics(
         if 'wola' in filterType:
             currBaseline = baseline[:, idxRef, :]
             # Average over nodes and frequency bins, keeping iteration index
+            if 0:
+                import matplotlib.pyplot as plt
+                for kk in range(nFilters):
+                    fig, axes = plt.subplots(1,1)
+                    fig.set_size_inches(8.5, 3.5)
+                    idxRef = np.where(channelToNodeMap == channelToNodeMap[kk])[0][0]
+                    for m in range(nSensors):
+                        axes.hlines(np.abs(baseline[m, idxRef, :]), 0, currFilt.shape[1], f'C{m}', label=f'Coefficient {m+1}')
+                        axes.plot(np.abs(filters[m, :, :, idxRef]), f'C{m}--')
+                    plt.legend()
+                    axes.set_title(f'Node {kk+1}')
+            
             diffsPerCoefficient[k] = np.mean(np.abs(
                 currFilt - currBaseline[:, np.newaxis, :]
             ), axis=(0, -1))
         else:
-            currBaseline = baseline[:, idxRef]
+            currBaseline = baseline[:, idxRef]            
+            if 0:
+                import matplotlib.pyplot as plt
+                for kk in range(nFilters):
+                    fig, axes = plt.subplots(1,1)
+                    fig.set_size_inches(8.5, 3.5)
+                    idxRef = np.where(channelToNodeMap == channelToNodeMap[kk])[0][0]
+                    for m in range(nSensors):
+                        axes.hlines(np.abs(baseline[m, idxRef]), 0, currFilt.shape[1], f'C{m}', label=f'Coefficient {m+1}')
+                        axes.plot(np.abs(filters[m, :, idxRef]), f'C{m}--')
+                    plt.legend()
+                    axes.set_title(f'Node {kk+1}')
+            
             if len(currFilt.shape) == 2:
                 # Average over nodes, keeping iteration index
                 diffsPerCoefficient[k] = np.mean(np.abs(

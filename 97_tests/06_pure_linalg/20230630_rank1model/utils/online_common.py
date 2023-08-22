@@ -15,8 +15,8 @@ class WOLAparameters:
     B: int = 0  # number of frames bw. consecutive updates of fusion vectors
     alpha: float = 1  # exponential averaging constant for fusion vectors
     betaExt: float = 0  # exponential averaging constant for external target filters
-    startExpAvgAfter: int = 0  # number of frames after which to start exponential averaging
-    startFusionExpAvgAfter: int = 0  # same as above, for the fusion vectors
+    startExpAvgAfter: int = -1  # idx of frame after which to start exponential averaging
+    startFusionExpAvgAfter: int = -1  # same as above, for the fusion vectors
     #
     singleFreqBinIndex: int = None  # if not None, consider only the freq. bin at this index for WOLA-DANSE
     
@@ -41,6 +41,8 @@ def update_cov_mats(
         wolaMode=False,
         danseMode=False,
         verbose=False,
+        Mk=1,
+        skipExpAvg=False,
     ):
 
     # # Check rank of Ryy and Rnn
@@ -62,17 +64,21 @@ def update_cov_mats(
     if wolaMode:
         einSumOp = 'ij,ik->ijk'
     beta = p.betaMwf
-    if danseMode:
+    # In DANSE, update the top-left Mk x Mk block of Ryy with betaDanse,
+    # the rest with betaExt
+    if danseMode:  
+        # beta = np.full((Ryy.shape[-1], Ryy.shape[-1]), fill_value=p.betaExt)
+        # beta[:Mk, :Mk] = p.betaDanse
         beta = p.betaDanse
     
     # Update covariance matrices
     if vadCurr is not None:
         # Compute covariance matrices following VAD
         if vadCurr:
-            RyyCurr = 1 / p.nfft * np.einsum(einSumOp, yCurr, yCurr.conj())
+            RyyCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
             nUpdatesRyy += 1
         else:
-            RnnCurr = 1 / p.nfft * np.einsum(einSumOp, yCurr, yCurr.conj())
+            RnnCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
             nUpdatesRnn += 1
         updateFilter = nUpdatesRnn > 0 and nUpdatesRyy > 0
         # Condition to start exponential averaging
@@ -80,15 +86,17 @@ def update_cov_mats(
         startExpAvgCondRnn = nUpdatesRnn > 0
     else:
         # Compute covariance matrices using oracle noise knowledge
-        RyyCurr = 1 / p.nfft * np.einsum(einSumOp, yCurr, yCurr.conj())
-        RnnCurr = 1 / p.nfft * np.einsum(einSumOp, nCurr, nCurr.conj())
+        RyyCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
+        RnnCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, nCurr, nCurr.conj())
+        nUpdatesRyy += 1
+        nUpdatesRnn += 1
         updateFilter = True
         # Condition to start exponential averaging
         startExpAvgCondRyy = i > p.startExpAvgAfter
         startExpAvgCondRnn = i > p.startExpAvgAfter
     
     if updateRyy:
-        if startExpAvgCondRyy:
+        if startExpAvgCondRyy and not skipExpAvg:
             Ryy = beta * Ryy + (1 - beta) * RyyCurr
         else:
             if verbose:
@@ -98,7 +106,7 @@ def update_cov_mats(
         print(f'i={i}, not updating Ryy (already full rank while Rnn is not)')
     
     if updateRnn:
-        if startExpAvgCondRnn:
+        if startExpAvgCondRnn and not skipExpAvg:
             Rnn = beta * Rnn + (1 - beta) * RnnCurr
         else:
             if verbose:
@@ -110,9 +118,10 @@ def update_cov_mats(
     if updateFilter:  # Check rank of updated covariance matrices
         if np.any(np.linalg.matrix_rank(Ryy) < Ryy.shape[-1]) or\
             np.any(np.linalg.matrix_rank(Rnn) < Rnn.shape[-1]):
+        # if nUpdatesRyy < 10 or nUpdatesRnn < 10:
             updateFilter = False
-            if verbose:
-                print(f'i={i}, not updating filter (rank deficient covariance matrices)')
+            # if verbose:
+            print(f'i={i}, not updating filter (rank deficient covariance matrices)')
         # else:
         #     print(f'i={i}, updating filter')
 
@@ -136,8 +145,8 @@ def update_filter(
                 return np.transpose(bigW, (2, 0, 1))
                 # return np.swapaxes(bigW, 0, 1)
             else:
-                # return bigW[:, :, referenceSensorIdx]
-                return bigW[:, referenceSensorIdx, :]
+                return bigW[:, :, referenceSensorIdx]
+                # return bigW[:, referenceSensorIdx, :]
         else:
             if referenceSensorIdx is None:
                 return bigW
@@ -171,8 +180,8 @@ def update_filter(
             if referenceSensorIdx is None:
                 return np.transpose(bigW, (2, 0, 1))
             else:
-                # return bigW[:, :, referenceSensorIdx]
-                return bigW[:, referenceSensorIdx, :]
+                return bigW[:, :, referenceSensorIdx]
+                # return bigW[:, referenceSensorIdx, :]
         else:
             sigma, Xmat = la.eigh(Ryy, Rnn)
             idx = np.flip(np.argsort(sigma))
