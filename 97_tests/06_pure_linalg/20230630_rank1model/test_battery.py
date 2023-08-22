@@ -21,8 +21,8 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 GLOBAL_SEED = 0  # Global seed for random number generator
 TMAX = 20  # [s] Maximum duration of the simulated data
 FS = 8000  # [Hz] Sampling frequency
-N_MC = 1  # Number of Monte Carlo repetitions
-N_MC_2 = 1  # Number of Monte Carlo repetitions for SC3
+N_MC = 10  # Number of Monte Carlo repetitions
+N_MC_2 = 10  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
     # 'gevdmwf_batch',  # GEVD-MWF (batch)
@@ -34,7 +34,7 @@ TO_COMPUTE = [
     # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
 BETA_EXT = 0.7  # External exponential averaging factor
-B = 20  # Number of blocks between updates of fusion vectors in WOLA
+B = 0  # Number of blocks between updates of fusion vectors in WOLA
 # SINGLE_FREQ_BIN_INDEX = None  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 # SIGNAL_TYPE = 'noise_complex'  # Type of input signal
@@ -44,8 +44,8 @@ TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 # TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
 
 # Export parameters
-BATTERY_NAME = 'Beq20'
-EXPORT_FOLDER = 'results\\wola\\forPhDSU20230823\\indiv_tests'
+BATTERY_NAME = 'correct_betaExt0p7'
+EXPORT_FOLDER = 'results\\wola\\forPhDSU20230823'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass

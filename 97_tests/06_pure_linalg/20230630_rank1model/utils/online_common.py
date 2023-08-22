@@ -120,8 +120,8 @@ def update_cov_mats(
             np.any(np.linalg.matrix_rank(Rnn) < Rnn.shape[-1]):
         # if nUpdatesRyy < 10 or nUpdatesRnn < 10:
             updateFilter = False
-            # if verbose:
-            print(f'i={i}, not updating filter (rank deficient covariance matrices)')
+            if verbose:
+                print(f'i={i}, not updating filter (rank deficient covariance matrices)')
         # else:
         #     print(f'i={i}, updating filter')
 

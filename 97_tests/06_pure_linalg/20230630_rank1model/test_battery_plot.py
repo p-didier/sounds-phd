@@ -14,13 +14,13 @@ import matplotlib.pyplot as plt
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
 # RESULTS_FILE_NAME = 'online/forPhDSU20230823/betaExt0p6.npz'
-RESULTS_FILE_NAME = 'wola/forPhDSU20230823/indiv_tests/Beq20.npz'
+RESULTS_FILE_NAME = 'wola/forPhDSU20230823/correct_betaExt0p7.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
 TMAX = 20  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/indiv_tests/Beq20'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/correct_betaExt0p7'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 # TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
 # Booleans
