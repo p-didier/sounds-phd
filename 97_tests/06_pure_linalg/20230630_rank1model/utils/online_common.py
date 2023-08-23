@@ -3,6 +3,21 @@ import numpy as np
 import scipy.linalg as la
 from dataclasses import dataclass
 
+
+def get_window(winType, nfft):
+    
+    if winType == 'hann':
+        win = np.hanning(nfft)
+    elif winType == 'sqrt-hann':
+        win = np.sqrt(np.hanning(nfft))
+    elif winType == 'hamming':
+        win = np.hamming(nfft)
+    elif winType == 'rect':
+        win = np.ones(nfft)
+    else:
+        raise ValueError('Window type not recognized')
+
+    return win
 @dataclass
 class WOLAparameters:
     nfft: int = 1024
@@ -142,8 +157,8 @@ def update_filter(
         bigW = np.linalg.inv(Ryy) @ (Ryy - Rnn)
         if wolaMode:
             if referenceSensorIdx is None:
-                return np.transpose(bigW, (2, 0, 1))
-                # return np.swapaxes(bigW, 0, 1)
+                # return np.transpose(bigW, (2, 0, 1))
+                return np.swapaxes(bigW, 0, 1)
             else:
                 return bigW[:, :, referenceSensorIdx]
                 # return bigW[:, referenceSensorIdx, :]
@@ -196,3 +211,55 @@ def update_filter(
                 w = Xmat @ Dmat @ Qmat.T.conj()
                 return w[:, referenceSensorIdx]
                 # return w[referenceSensorIdx, :]
+
+
+def to_wola(
+        p: WOLAparameters,
+        y: np.ndarray,
+        n: np.ndarray,
+        vad: np.ndarray=None,
+        verbose=False,
+    ):
+    # Get number of nodes
+    nSensors = y.shape[1]
+    # Get number of frames
+    nIter = y.shape[0] // p.hop - 1
+    # Compute WOLA domain signal
+    win = get_window(p.winType, p.nfft)
+    yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    vadFramewise = np.full((nIter, nSensors), fill_value=None)
+    for m in range(nSensors):
+        for i in range(nIter):
+            idxBegFrame = i * p.hop
+            idxEndFrame = idxBegFrame + p.nfft
+            yWola[i, :, m] = np.fft.fft(
+                y[idxBegFrame:idxEndFrame, m] * win
+            ) / np.sqrt(p.hop)
+            nWola[i, :, m] = np.fft.fft(
+                n[idxBegFrame:idxEndFrame, m] * win
+            ) / np.sqrt(p.hop)
+            # Get VAD for current frame
+            if vad is not None:
+                vadCurr = vad[idxBegFrame:idxEndFrame]
+                # Convert to single boolean value (True if at least 50% of the frame is active)
+                vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
+    # Convert to single boolean value
+    vadFramewise = np.any(vadFramewise, axis=1)
+    # Get number of positive frequencies
+    nPosFreqs = p.nfft // 2 + 1
+    # Keep only positive frequencies (spare computations)
+    yWola = yWola[:, :nPosFreqs, :]
+    nWola = nWola[:, :nPosFreqs, :]
+
+    # Special user request: single frequency bin study
+    if p.singleFreqBinIndex is not None:
+        if verbose:
+            print(f'/!\ /!\ /!\ WOLA-MWF: single frequency bin study (index {p.singleFreqBinIndex})')
+        yWola = yWola[:, p.singleFreqBinIndex, :]
+        nWola = nWola[:, p.singleFreqBinIndex, :]
+        yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
+        nWola = np.expand_dims(nWola, axis=1)
+        nPosFreqs = 1
+
+    return yWola, nWola, vadFramewise

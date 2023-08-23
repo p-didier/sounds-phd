@@ -156,7 +156,7 @@ def plot_final(
     axes.set_title(ti)
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
     flagBatchModeIncluded = any(['batch' in t for t in toPlot.keys()])
-    if flagBatchModeIncluded:
+    if flagBatchModeIncluded and vad is None:
         axes.set_xlim([np.amin(durations), np.amax(durations)])
     else:
         axes.set_xlim([0, np.amax(xAxis)])
@@ -176,7 +176,7 @@ def plot_final(
     ymin, ymax = np.inf, -np.inf
     for idxFilter, filterType in enumerate(toPlot.keys()):
         if ('online' in filterType or 'wola' in filterType) and\
-            flagBatchModeIncluded:
+            (flagBatchModeIncluded and vad is None):
             idxStart = int(np.amin(durations) * fs // L)
             ymin = min(
                 ymin,
