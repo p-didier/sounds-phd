@@ -4,23 +4,7 @@
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
 import numpy as np
-import scipy.linalg as la
 from .online_common import *
-
-def get_window(winType, nfft):
-    
-    if winType == 'hann':
-        win = np.hanning(nfft)
-    elif winType == 'sqrt-hann':
-        win = np.sqrt(np.hanning(nfft))
-    elif winType == 'hamming':
-        win = np.hamming(nfft)
-    elif winType == 'rect':
-        win = np.ones(nfft)
-    else:
-        raise ValueError('Window type not recognized')
-
-    return win
 
 
 def run_wola_danse(
@@ -48,42 +32,8 @@ def run_wola_danse(
     y = x + n
 
     # Convert to WOLA domain
-    win = get_window(p.winType, p.nfft)
-    yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
-    nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
-    vadFramewise = np.full((nIter, nSensors), fill_value=None)
-    for m in range(nSensors):
-        for i in range(nIter):
-            idxBegFrame = i * p.hop
-            idxEndFrame = idxBegFrame + p.nfft
-            yWola[i, :, m] = np.fft.fft(
-                y[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(p.hop)
-            nWola[i, :, m] = np.fft.fft(
-                n[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(p.hop)
-            # Get VAD for current frame
-            if vad is not None:
-                vadCurr = vad[idxBegFrame:idxEndFrame]
-                # Convert to single boolean value (True if at least 50% of the frame is active)
-                vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
-    # Convert to single boolean value
-    vadFramewise = np.any(vadFramewise, axis=1)
-    # Get number of positive frequencies
-    nPosFreqs = p.nfft // 2 + 1
-    # Keep only positive frequencies (spare computations)
-    yWola = yWola[:, :nPosFreqs, :]
-    nWola = nWola[:, :nPosFreqs, :]
-    
-    # Special user request: single frequency bin study
-    if p.singleFreqBinIndex is not None:
-        if verbose:
-            print(f'/!\ /!\ /!\ WOLA-DANSE: single frequency bin study (index {p.singleFreqBinIndex})')
-        yWola = yWola[:, p.singleFreqBinIndex, :]
-        nWola = nWola[:, p.singleFreqBinIndex, :]
-        yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
-        nWola = np.expand_dims(nWola, axis=1)
-        nPosFreqs = 1
+    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    nPosFreqs = yWola.shape[1]
     
     # Initialize
     w = []
@@ -114,79 +64,6 @@ def run_wola_danse(
     RyyCurr = []
     RnnCurr = []
     for k in range(nNodes):
-        RyyTmp = np.zeros(
-            (nPosFreqs, dimYtilde[k], dimYtilde[k]),
-            dtype=np.complex128
-        )
-        RnnTmp = np.zeros(
-            (nPosFreqs, dimYtilde[k], dimYtilde[k]),
-            dtype=np.complex128
-        )
-        for i in range(nIter):
-            # Compute fused signals from all sensors
-            fusedSignals = np.zeros(
-                (nPosFreqs, nNodes),
-                dtype=np.complex128
-            )
-            fusedSignalsNoiseOnly = np.zeros(
-                (nPosFreqs, nNodes),
-                dtype=np.complex128
-            )
-            for q in range(nNodes):
-                yk = yWola[i, :, channelToNodeMap == q]
-                nk = nWola[i, :, channelToNodeMap == q]
-                if ignoreFusionForSSNodes and yk.shape[1] == 1:
-                    pass
-                else:
-                    fusedSignals[:, q] = np.einsum(
-                        'ij,ij->i',
-                        fusionVects[q].conj(),
-                        yk.T,
-                    )
-                    fusedSignalsNoiseOnly[:, q] = np.einsum(
-                        'ij,ij->i',
-                        fusionVects[q].conj(),
-                        nk.T,
-                    )
-            # Get y tilde
-            yTilde = np.concatenate((
-                yWola[i, :, channelToNodeMap == k].T,
-                fusedSignals[:, nodeIndices != k]
-            ), axis=1)
-            nTilde = np.concatenate((
-                nWola[i, :, channelToNodeMap == k].T,
-                fusedSignalsNoiseOnly[:, nodeIndices != k]
-            ), axis=1)
-            # Update covariance matrices
-            # RyyTmp = p.betaDanse * RyyTmp +\
-            #     (1 - p.betaDanse) * 1 / dimYtilde[k] * np.einsum(
-            #         'ij,ik->jk',
-            #         yTilde,
-            #         yTilde.conj()
-            #     )
-            # RnnTmp = p.betaDanse * RnnTmp +\
-            #     (1 - p.betaDanse) * 1 / dimYtilde[k] * np.einsum(
-            #         'ij,ik->jk',
-            #         nTilde,
-            #         nTilde.conj()
-            #     )
-            if i == 0:
-                fact = 1
-            else:
-                fact = 1 / i
-            RyyTmp = fact * ((i - 1) * RyyTmp + np.einsum(
-                'ij,ik->jk',
-                yTilde,
-                yTilde.conj()
-            ))
-            RnnTmp = fact * ((i - 1) * RnnTmp + np.einsum(
-                'ij,ik->jk',
-                nTilde,
-                nTilde.conj()
-            ))
-        # Ryy.append(RyyTmp)
-        # Rnn.append(RnnTmp)
-
         Ryy.append(np.zeros(
             (nPosFreqs, dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
@@ -203,12 +80,6 @@ def run_wola_danse(
             (nPosFreqs, dimYtilde[k], dimYtilde[k]),
             dtype=np.complex128
         ))
-        # Ryy.append(np.random.randn(
-        #     nPosFreqs, dimYtilde[k], dimYtilde[k]
-        # ))
-        # Rnn.append(np.random.randn(
-        #     nPosFreqs, dimYtilde[k], dimYtilde[k]
-        # ))
     nUpdatesRyy = np.zeros(nNodes, dtype=int)
     nUpdatesRnn = np.zeros(nNodes, dtype=int)
     
