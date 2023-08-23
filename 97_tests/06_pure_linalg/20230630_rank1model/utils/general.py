@@ -14,14 +14,14 @@ class ScriptParameters:
     signalType: str = 'speech'  
     # ^^^ 'speech', 'noise_real', 'noise_complex', ...
     #     ... 'interrupt_noise_real', 'interrupt_noise_complex'.
-    interruptionDuration: float = 0.1  # seconds
-    interruptionPeriod: float = 0.5  # seconds
+    interruptionDuration: float = 1  # seconds
+    interruptionPeriod: float = 2  # seconds
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
     nSensors: int = 3
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    minDuration: float = 1
+    minDuration: float = 3
     maxDuration: float = 10
     nDurationsBatch: int = 30
     fs: float = 8e3
@@ -45,7 +45,7 @@ class ScriptParameters:
     randomDelays: bool = False
     showDeltaPerNode: bool = False
     useBatchModeFusionVectorsInOnlineDanse: bool = False
-    ignoreFusionForSSNodes: bool = True  # in DANSE, ignore fusion vector for single-sensor nodes
+    ignoreFusionForSSNodes: bool = False  # in DANSE, ignore fusion vector for single-sensor nodes
     exportFigures: bool = True
     verbose: bool = True
     useVAD: bool = True  # use VAD for online processing of nonsstationary signals
@@ -473,6 +473,7 @@ def get_filters(
                     normFact = kwargs['wolaParams'].nfft
                 else:
                     normFact = kwargs['wolaParams'].hop
+                
                 kwargs['wolaParams'].betaMwf = np.exp(
                     np.log(b) /\
                         (taus[idxTau] * kwargs['wolaParams'].fs / normFact)
@@ -598,7 +599,10 @@ def get_metrics(
                 for kk in range(nFilters):
                     fig, axes = plt.subplots(1,1)
                     fig.set_size_inches(8.5, 3.5)
-                    idxRef = np.where(channelToNodeMap == channelToNodeMap[kk])[0][0]
+                    if 'danse' in filterType:
+                        idxRef = np.where(channelToNodeMap == channelToNodeMap[kk])[0][0]
+                    else:
+                        idxRef = kk
                     for m in range(nSensors):
                         axes.hlines(np.abs(baseline[m, idxRef, :]), 0, currFilt.shape[1], f'C{m}', label=f'Coefficient {m+1}')
                         axes.plot(np.abs(filters[m, :, :, idxRef]), f'C{m}--')

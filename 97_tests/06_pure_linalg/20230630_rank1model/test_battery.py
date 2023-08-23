@@ -21,31 +21,33 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 GLOBAL_SEED = 0  # Global seed for random number generator
 TMAX = 20  # [s] Maximum duration of the simulated data
 FS = 8000  # [Hz] Sampling frequency
-N_MC = 10  # Number of Monte Carlo repetitions
-N_MC_2 = 10  # Number of Monte Carlo repetitions for SC3
+N_MC = 5  # Number of Monte Carlo repetitions
+N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
-    # 'gevdmwf_batch',  # GEVD-MWF (batch)
-    # 'gevdmwf_online',  # GEVD-MWF (online) 
-    # 'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
-    'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
-    'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
+    'gevdmwf_batch',  # GEVD-MWF (batch)
+    'gevdmwf_online',  # GEVD-MWF (online) 
+    'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
+    # 'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
+    # 'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
     # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
     # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
-BETA_EXT = 0.7  # External exponential averaging factor
+BETA_EXT = 0.0  # External exponential averaging factor
 B = 0  # Number of blocks between updates of fusion vectors in WOLA
 # SINGLE_FREQ_BIN_INDEX = None  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if None: consider all bins)
-# SIGNAL_TYPE = 'noise_complex'  # Type of input signal
-SIGNAL_TYPE = 'noise_real'  # Type of input signal
+SIGNAL_TYPE = 'noise_complex'  # Type of input signal
+# SIGNAL_TYPE = 'noise_real'  # Type of input signal
+# SIGNAL_TYPE = 'interrupt_noise_real'  # Type of input signal
 NOISE_POWER = 1  # [W] Noise power
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-# TAUS = [4.]  # [s] Time constants for exp. avg. in online filters
+# TAUS = [16.]  # [s] Time constants for exp. avg. in online filters
+IGNORE_FUSION_AT_SS_NODES = True  # If True, fusion is not performed at single-sensor nodes
 
 # Export parameters
-BATTERY_NAME = 'correct_betaExt0p7'
-EXPORT_FOLDER = 'results\\wola\\forPhDSU20230823'
+BATTERY_NAME = 'betaExt0p0'
+EXPORT_FOLDER = 'results\\online\\forPhDSU20230823\\SSnodesFusion'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass
@@ -179,7 +181,8 @@ def main():
             startFusionExpAvgAfter=2,
             singleFreqBinIndex=SINGLE_FREQ_BIN_INDEX
         ),
-        'selfNoisePower': NOISE_POWER
+        'selfNoisePower': NOISE_POWER,
+        'ignoreFusionForSSNodes': IGNORE_FUSION_AT_SS_NODES
     }
     for test in battery.tests:
         if isinstance(test.parameters, list):

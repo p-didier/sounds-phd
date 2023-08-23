@@ -135,7 +135,9 @@ def plot_final(
     axes.set_xlabel('Signal duration (s)', loc='left')
     # Decide whether to place legend in plot or not
     maxLenInnerLegend = 14  # HARDCODED  HARDCODED  HARDCODED
-    if any([len(t) > maxLenInnerLegend for t in toPlot.keys()]):
+    maxNumLinesLegend = 5  # HARDCODED  HARDCODED  HARDCODED
+    if any([len(t) > maxLenInnerLegend for t in toPlot.keys()]) and\
+        len(toPlot.keys()) > maxNumLinesLegend:
         # Place legend outside plot
         axes.legend(
             loc='upper left',

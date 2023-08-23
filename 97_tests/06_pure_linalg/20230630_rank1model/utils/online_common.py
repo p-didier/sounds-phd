@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 
 def get_window(winType, nfft):
-    
     if winType == 'hann':
         win = np.hanning(nfft)
     elif winType == 'sqrt-hann':
@@ -133,12 +132,9 @@ def update_cov_mats(
     if updateFilter:  # Check rank of updated covariance matrices
         if np.any(np.linalg.matrix_rank(Ryy) < Ryy.shape[-1]) or\
             np.any(np.linalg.matrix_rank(Rnn) < Rnn.shape[-1]):
-        # if nUpdatesRyy < 10 or nUpdatesRnn < 10:
             updateFilter = False
             if verbose:
                 print(f'i={i}, not updating filter (rank deficient covariance matrices)')
-        # else:
-        #     print(f'i={i}, updating filter')
 
     return Ryy, Rnn, RyyCurr, RnnCurr, updateFilter, nUpdatesRyy, nUpdatesRnn
 
@@ -193,7 +189,8 @@ def update_filter(
             Qhermitian = np.transpose(Qmat.conj(), axes=[0, 2, 1])
             bigW = np.matmul(np.matmul(Xmat, Dmat), Qhermitian)
             if referenceSensorIdx is None:
-                return np.transpose(bigW, (2, 0, 1))
+                # return np.transpose(bigW, (2, 0, 1))
+                return np.swapaxes(bigW, 0, 1)
             else:
                 return bigW[:, :, referenceSensorIdx]
                 # return bigW[:, referenceSensorIdx, :]

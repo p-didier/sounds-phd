@@ -133,8 +133,8 @@ def run_wola_mwf(
             print(f'WOLA-based {algLabel} iteration {i+1}/{nIter}')
 
         # Get current frame
-        yCurr: np.ndarray = yWola[i, :, :]
-        nCurr: np.ndarray = nWola[i, :, :]
+        yCurr = yWola[i, :, :]
+        nCurr = nWola[i, :, :]
 
         Ryy, Rnn, RyyCurr, RnnCurr,\
             updateFilter, nUpdatesRyy, nUpdatesRnn = update_cov_mats(
@@ -149,7 +149,8 @@ def run_wola_mwf(
             Rnn,
             RyyCurr,
             RnnCurr,
-            wolaMode=True
+            wolaMode=True,
+            danseMode=False
         )
 
         # Compute filter

@@ -39,8 +39,7 @@ def run_wola_danse(
     w = []
     dimYtilde = np.zeros(nNodes, dtype=int)
     for k in range(nNodes):
-        nSensorsPerNode = np.sum(channelToNodeMap == k)
-        dimYtilde[k] = nSensorsPerNode + nNodes - 1
+        dimYtilde[k] = np.sum(channelToNodeMap == k) + nNodes - 1
         wCurr: np.ndarray = np.zeros(
             (nPosFreqs, nIter, dimYtilde[k]),
             dtype=np.complex128
@@ -52,7 +51,7 @@ def run_wola_danse(
     fusionVectTargets = [None for _ in range(nNodes)]
     fusionVects = [None for _ in range(nNodes)]
     for k in range(nNodes):
-        baseVect = np.ones((nPosFreqs, sum(channelToNodeMap == k)))
+        baseVect = np.ones((nPosFreqs, np.sum(channelToNodeMap == k)))
         # baseVect = np.zeros((nPosFreqs, sum(channelToNodeMap == k)))
         # baseVect[:, referenceSensorIdx] = 1  # select reference sensor
         fusionVectTargets[k] = baseVect
@@ -126,10 +125,10 @@ def run_wola_danse(
             dtype=np.complex128
         )
 
-        # Get current frame [necessary step because of some unexplained NumPy
-        # behaviour which make it so that:
-        # shape(yWola[i, :, channelToNodeMap == k]) = (Mk, nPosFreqs)
-        # instead of (nPosFreqs, Mk)]
+        # Get current frame
+        #   [necessary step because of some unexplained NumPy behaviour
+        #   which make it so that: shape(yWola[i, :, channelToNodeMap == k]) = (Mk, nPosFreqs)
+        #   instead of (nPosFreqs, Mk)]
         yCurr = yWola[i, :, :]
         nCurr = nWola[i, :, :]
 
@@ -195,8 +194,7 @@ def run_wola_danse(
                 RyyCurr[k],
                 RnnCurr[k],
                 wolaMode=True,
-                danseMode=True,
-                Mk=np.sum(channelToNodeMap == k),
+                danseMode=True
             )
 
             # Check if filter should be updated according to the 
@@ -342,7 +340,7 @@ def run_online_danse(
     fusionVectTargets = [None for _ in range(nNodes)]
     fusionVects = [None for _ in range(nNodes)]
     for k in range(nNodes):
-        baseVect = np.zeros(sum(channelToNodeMap == k))
+        baseVect = np.zeros(np.sum(channelToNodeMap == k))
         baseVect[0] = 1
         fusionVectTargets[k] = baseVect
         fusionVects[k] = baseVect

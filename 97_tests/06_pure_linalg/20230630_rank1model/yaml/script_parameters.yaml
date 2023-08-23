@@ -1,34 +1,34 @@
-# Mk:
-# - 1
-# - 2
+Mk:
+- 1
+- 4
 b: 0.1
-minDuration: 2
-maxDuration: 10
+minDuration: 3
+maxDuration: 20
 nDurationsBatch: 30  # linearly spaced from `minDuration to maxDuration
 exportFigures: true
 exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate
 fs: 8000.0
 ignoreFusionForSSNodes: false
 nMC: 1
-nNodes: 3
+nNodes: 2
 nSensors: 5
 randomDelays: false
 seed: 0
-selfNoisePower: .1
+selfNoisePower: 1
 showDeltaPerNode: false
 # signalType: speech
 # signalType: noise_complex
 # signalType: noise_real
 # signalType: interrupt_noise_complex
 signalType: interrupt_noise_real
-interruptionDuration: 0.5  # [s]
-interruptionPeriod: 1   # [s]
+interruptionDuration: 1  # [s]
+interruptionPeriod: 2   # [s]
 targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
 taus:
-# - 0.2
-- 4.0
+# - 2.0
+# - 4.0
 # - 8.0
-# - 16.0
+- 16.0
 toCompute: 
 # - mwf_batch
 # - gevdmwf_batch
@@ -38,9 +38,9 @@ toCompute:
 # - gevdmwf_online
 # - danse_sim_online
 # - gevddanse_sim_online
-- mwf_wola
-# - gevdmwf_wola
-- danse_sim_wola
+# - mwf_wola
+- gevdmwf_wola
+# - danse_sim_wola
 # - gevddanse_sim_wola
 useBatchModeFusionVectorsInOnlineDanse: false
 useVAD: true
@@ -48,20 +48,20 @@ VADwinLength: 0.02
 VADenergyDecrease_dB: 30
 verbose: true
 wolaParams:
-  # B: 10
+  # B: 50
   # alpha: 0.7
-  # betaExt: 0.8
+  betaExt: 0.99
   B: 0
   alpha: 1
-  betaExt: 0.0
+  # betaExt: 0.0
   fs: 8000.0
   # hop: 4
   # nfft: 8
   # singleFreqBinIndex: 3
   hop: 512
   nfft: 1024
-  # singleFreqBinIndex: 99
-  singleFreqBinIndex: null
+  singleFreqBinIndex: 99
+  # singleFreqBinIndex: null
   startExpAvgAfter: 2
   startFusionExpAvgAfter: 2
   winType: sqrt-hann

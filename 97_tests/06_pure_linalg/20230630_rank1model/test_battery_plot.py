@@ -14,20 +14,29 @@ import matplotlib.pyplot as plt
 FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
 # RESULTS_FILE_NAME = 'online/forPhDSU20230823/betaExt0p6.npz'
-RESULTS_FILE_NAME = 'wola/forPhDSU20230823/correct_betaExt0p7.npz'
+# RESULTS_FILE_NAME = 'wola/forPhDSU20230823/withVAD/betaExt0p9.npz'
+# RESULTS_FILE_NAME = 'wola/forPhDSU20230823/withVAD/betaExt0p99.npz'
+RESULTS_FILE_NAME = 'online/forPhDSU20230823/SSnodesFusion/betaExt0p0.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
 TMAX = 20  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/correct_betaExt0p7'  # Path to export figures to
+# EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/withVAD/betaExt0p99'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/online/SSnodesFusion/betaExt0p0'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-# TAUS = [4.]  # [s] Time constants for exp. avg. in online filterss
+# TAUS = [16.]  # [s] Time constants for exp. avg. in online filterss
 # Booleans
 # SHOW_RESULTS_RANGE = True  # whether to show the range of y-axis values as a shaded area
 SHOW_RESULTS_RANGE = False  # whether to show the range of y-axis values as a shaded area
 # SHOW_INDIV_RUN_LINES = True  # whether to show individual MC runs as light lines
 SHOW_INDIV_RUN_LINES = False  # whether to show individual MC runs as light lines
+
+# VAD parameters
+FS = 8000  # [Hz] Sampling frequency
+EFFECTIVE_FRAME_SIZE = 512  # [samples] Effective frame size
+INTERRUPTION_DURATION = 1  # [s] Duration of the interruption
+INTERRUPTION_PERIOD = 2  # [s] Period of the interruption
 
 def main():
     """Main function (called by default when running script)."""
@@ -144,6 +153,49 @@ def generate_plots(
     return xAxisOnline
 
 
+def add_vad_line(
+        axes: plt.Axes,
+        nSamples: int,
+        fsTarget: float,
+        durations: np.ndarray,
+        interruptionDuration: float,
+        interruptionPeriod: float
+    ):
+    """Add VAD line to plot."""
+    # Generate VAD
+    dur = np.amax(durations)
+    nInterruptions = int(dur / interruptionPeriod)
+    vad = np.ones((nSamples, 1))
+    for k in range(nInterruptions):
+        idxStart = int(
+            ((k + 1) * interruptionPeriod - interruptionDuration) *\
+                fsTarget
+        )
+        idxEnd = int(idxStart + interruptionDuration * fsTarget)
+        vad[idxStart:idxEnd, 0] = 0
+    
+    # Add VAD line to plot
+    axesRight = axes.twinx()
+    axesRight.plot(
+        np.linspace(0, np.amax(durations), len(vad)),
+        vad,
+        'k--',
+        linewidth=0.5,
+        zorder=-1
+    )
+    axesRight.set_ylabel('VAD (-)')
+    axesRight.set_yticks([0, 1])
+    axesRight.set_zorder(-1)  # put the VAD behind the other plots
+    axes.set_frame_on(False)  # remove the frame of the main axes
+    # Set `axes` grid only to horizontal lines
+    axes.grid(axis='y', which='both')
+    # Add grid to `axesRight` only to vertical lines
+    axesRight.set_xticks(axes.get_xticks())
+    axesRight.grid(axis='x', which='major')
+    # Ensure the grid is behind the other plots
+    axesRight.set_axisbelow(True)
+
+
 def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]:
     """Plot results for Type-1 and Type-2 test."""
 
@@ -165,8 +217,7 @@ def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]
                 xAxisBatch,
                 taus
             )
-        axes.legend()
-        axes.grid(True, which='both')
+        axes.legend(loc='upper right')
         axes.set_xlabel('Duration [s]')
         if flagBatch:
             axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
@@ -178,6 +229,17 @@ def plot_results(resAll: list[TestOutput], xAxisBatch, taus) -> list[plt.Figure]
             ymin, ymax = compute_yaxis_limits(res.results, xAxisOnline)
         axes.set_ylim([ymin, ymax])
         axes.set_title(f'$K={res.parameters.K}$, $M={res.parameters.M}$, $M_k={res.parameters.Mk}$ ({res.results[filterType].shape[0]} MC runs)')
+        if INTERRUPTION_DURATION is not None:
+            add_vad_line(
+                axes,
+                nSamples=res.results[filterType].shape[1] * EFFECTIVE_FRAME_SIZE,
+                fsTarget=FS,
+                durations=xAxisBatch,
+                interruptionDuration=INTERRUPTION_DURATION,
+                interruptionPeriod=INTERRUPTION_PERIOD
+            )
+        else:
+            axes.grid(which='both')
         fig.set_label(res.name)
         figs.append(fig)
 
@@ -237,8 +299,7 @@ def plot_results_mc_tests(
             )
         axes.set_title(f'Average over {dataToPlot[filterType].shape[0]} MC runs (random $\{{M_k\}}_{{k\\in\\mathcal{{K}}}}$)')
 
-    axes.legend()
-    axes.grid(True, which='both')
+    axes.legend(loc='upper right')
     axes.set_xlabel('Duration [s]')
     if flagBatch:
         axes.set_xlim([np.amin(xAxisBatch), np.amax(xAxisBatch)])
@@ -249,6 +310,17 @@ def plot_results_mc_tests(
         # Adapt y-axis limits to the data
         ymin, ymax = compute_yaxis_limits(dataToPlot, xAxisOnline)
     axes.set_ylim([ymin, ymax])
+    if INTERRUPTION_DURATION is not None:
+        add_vad_line(
+            axes,
+            nSamples=res[0].results[filterType].shape[1] * EFFECTIVE_FRAME_SIZE,
+            fsTarget=FS,
+            durations=xAxisBatch,
+            interruptionDuration=INTERRUPTION_DURATION,
+            interruptionPeriod=INTERRUPTION_PERIOD
+        )
+    else:
+        axes.grid(which='both')
     fig.set_label('test3')
 
     return fig
