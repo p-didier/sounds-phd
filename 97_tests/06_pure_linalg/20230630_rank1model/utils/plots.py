@@ -82,6 +82,7 @@ def plot_final(
                             alpha=(k + 1) / toPlot[filterType].shape[-1]
                         )
         else:  # <-- batch-mode
+            batchls = allLineStyles[idxFilter % len(allLineStyles)]
             # Plot as function of signal duration
             if avgAcrossNodesFlag:  # Case where we have an average across nodes
                 # Add a patch of color to show the range of values across MC runs
@@ -95,7 +96,7 @@ def plot_final(
                 axes.semilogy(
                     durations,
                     np.mean(toPlot[filterType], axis=0),
-                    f'{baseColor}o-',
+                    f'{baseColor}o{batchls}',
                     label=filterType
                 )
             else:  # Case where we have data per node and per MC run
@@ -103,7 +104,7 @@ def plot_final(
                     axes.semilogy(
                         durations,
                         np.mean(toPlot[filterType][:, :, k], axis=0),
-                        f'{baseColor}o-',
+                        f'{baseColor}o{batchls}',
                         label=f'{filterType} $k=${k+1}',
                         alpha=(k + 1) / toPlot[filterType].shape[-1]
                     )

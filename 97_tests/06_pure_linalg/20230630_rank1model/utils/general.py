@@ -4,10 +4,40 @@ import resampy
 import numpy as np
 import soundfile as sf
 from numba import njit
-import scipy.linalg as la
+from utils.batch_mode import *
 from utils.online_mwf import *
 from utils.online_danse import *
 from dataclasses import dataclass, field
+
+
+@dataclass
+class FilterType:
+    danse: bool = False
+    nodeUpdatingStrategy: str = 'seq'  # 'seq' (sequential) or 'sim' (simultaneous)
+    gevd: bool = False
+    wola: bool = False
+    online: bool = False
+    batch: bool = False
+
+    def indiv_frames(self):
+        """Return True if time frames are to be treated individually."""
+        return (self.online or self.wola) and not self.batch
+
+    def to_str(self):
+        """Return string representation of filter type."""
+        if self.danse:
+            s = 'danse'
+        else:
+            s = 'mwf'
+        if self.gevd:
+            s += '_gevd'
+        if self.wola:
+            s += '_wola'
+        if self.online:
+            s += '_online'
+        if self.batch:
+            s += '_batch'
+        return s
 
 @dataclass
 class ScriptParameters:
@@ -29,12 +59,13 @@ class ScriptParameters:
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate'
     taus: list[float] = field(default_factory=lambda: [2.])
     b: float = 0.1  # factor for determining beta from tau (online processing)
-    toCompute: list[str] = field(default_factory=lambda: [
+    toComputeStrings: list[str] = field(default_factory=lambda: [
         'mwf_batch',
         'gevdmwf_batch',
         'danse_sim_batch',
         'gevddanse_sim_batch',
     ])
+    toCompute: list[FilterType] = field(default_factory=lambda: None)
     seed: int = 0
     wolaParams: WOLAparameters = WOLAparameters(
         fs=fs,
@@ -54,7 +85,7 @@ class ScriptParameters:
     vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
 
     def __post_init__(self):
-        if any(['wola' in t for t in self.toCompute]) and\
+        if any(['wola' in t for t in self.toComputeStrings]) and\
             'complex' in self.signalType:
                 raise ValueError('WOLA not implemented for complex-valued signals')
         self.durations = np.linspace(
@@ -68,13 +99,42 @@ class ScriptParameters:
         if 'interrupt' in self.signalType and\
             self.minDuration <= self.interruptionPeriod:
             raise ValueError('`minDuration` should be > `interruptionPeriod`')
+        # Convert strings to FilterType objects
+        self.toCompute = []
+        for t in self.toComputeStrings:
+            self.toCompute.append(string_to_filtertype(t))
+
+def string_to_filtertype(string):
+    """Convert string to `FilterType` object."""
+    currType = FilterType()
+    if 'danse' in string:
+        currType.danse = True  # default: False
+        if 'sim' in string:
+            currType.nodeUpdatingStrategy = 'sim'
+        else:
+            currType.nodeUpdatingStrategy = 'seq'
+
+    if 'gevd' in string:
+        currType.gevd = True  # default: False
+    if 'wola' in string:
+        if 'online' in string:
+            raise ValueError('`wola` and `online` cannot be combined')
+        currType.wola = True  # default: False
+    elif 'online' in string:
+        if 'wola' in string:
+            raise ValueError('`wola` and `online` cannot be combined')
+        currType.online = True  # default: False
+    if 'batch' in string:
+        if 'online' in string:
+            raise ValueError('`batch` and `online` cannot be combined')
+        currType.batch = True  # default: False
+    return currType
 
 
 def compute_filter(
-        noisySignals: np.ndarray,
         cleanSigs: np.ndarray,
         noiseOnlySigs: np.ndarray,
-        type='mwf_batch',
+        type=FilterType(),
         rank=1,
         channelToNodeMap=None,  # only used for DANSE
         wolaParams: WOLAparameters=WOLAparameters(),
@@ -89,94 +149,29 @@ def compute_filter(
     acoustic sensor and actuator networks" - 2022
     """
 
-    if vad is None:
-        nSamples = cleanSigs.shape[0]
-        Ryy = 1 / nSamples * noisySignals.T @ noisySignals.conj()
-        Rnn = 1 / nSamples * noiseOnlySigs.T @ noiseOnlySigs.conj()
+    # Determine filter type
+    if type.gevd:
+        filterType = 'gevd'
     else:
-        # Include VAD knowledge in batch-mode estimates of `Ryy` and `Rnn`.
-        # Only keep frames where all sensors VADs are active.
-        vadBool = np.all(vad.astype(bool), axis=1)
-        Ryy = 1 / np.sum(vadBool) *\
-            noisySignals[vadBool, :].T @ noisySignals[vadBool, :].conj()
-        Rnn = 1 / np.sum(~vadBool) *\
-            noisySignals[~vadBool, :].T @ noisySignals[~vadBool, :].conj()
+        filterType = 'regular'
 
-    nSensors = cleanSigs.shape[1]
-
-    if type == 'mwf_batch':
-        RyyInv = np.linalg.inv(Ryy)
-        if np.iscomplex(cleanSigs).any():
-            w = np.zeros((nSensors, nSensors), dtype=np.complex128)
-        else:
-            w = np.zeros((nSensors, nSensors))
-        for n in range(nSensors):
-            e = np.zeros(nSensors)  # Selection vector
-            e[n] = 1
-            ryd = (Ryy - Rnn) @ e
-            w[:, n] = RyyInv @ ryd
-    elif type == 'mwf_online':
-        w = run_online_mwf(
-            x=cleanSigs,
-            n=noiseOnlySigs,
-            filterType='regular',
-            p=wolaParams,
-            verbose=verbose,
-            vad=vad
-        )
-    elif type == 'mwf_wola':
-        w = run_wola_mwf(
-            x=cleanSigs,
-            n=noiseOnlySigs,
-            filterType='regular',
-            p=wolaParams,
-            verbose=verbose,
-            vad=vad
-        )
-    elif type == 'gevdmwf_batch':
-        sigma, Xmat = la.eigh(Ryy, Rnn)
-        idx = np.flip(np.argsort(sigma))
-        sigma = sigma[idx]
-        Xmat = Xmat[:, idx]
-        Qmat = np.linalg.inv(Xmat.T.conj())
-        Dmat = np.zeros((nSensors, nSensors))
-        Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-        w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
-    elif type == 'gevdmwf_online':
-        w = run_online_mwf(
-            x=cleanSigs,
-            n=noiseOnlySigs,
-            filterType='gevd',
-            rank=rank,
-            p=wolaParams,
-            verbose=verbose,
-            vad=vad
-        )
-    elif type == 'gevdmwf_wola':
-        w = run_wola_mwf(
-            x=cleanSigs,
-            n=noiseOnlySigs,
-            filterType='gevd',
-            rank=rank,
-            p=wolaParams,
-            verbose=verbose,
-            vad=vad
-        )
-    elif 'danse' in type:
+    if type.danse:  # (GEVD-)DANSE
         kwargsBatch = {
             'x': cleanSigs,
             'n': noiseOnlySigs,
             'referenceSensorIdx': 0,
             'channelToNodeMap': channelToNodeMap,
-            'filterType': 'gevd' if 'gevd' in type else 'regular',
+            'filterType': filterType,
             'rank': rank,
             'verbose': verbose,
             'vad': vad
         }
-        if 'sim' in type:
+        if type.nodeUpdatingStrategy == 'sim':
             kwargsBatch['nodeUpdatingStrategy'] = 'simultaneous'
-        else:
+        elif type.nodeUpdatingStrategy == 'seq':
             kwargsBatch['nodeUpdatingStrategy'] = 'sequential'
+        else:
+            raise ValueError('Invalid node updating strategy')
 
         # Keyword-arguments for online-mode DANSE function
         kwargsOnline = copy.deepcopy(kwargsBatch)
@@ -184,162 +179,153 @@ def compute_filter(
         kwargsOnline['ignoreFusionForSSNodes'] = noSSfusion
     
         if batchFusionInOnline:
-            wBatchNetWide = run_danse(**kwargsBatch)
+            wBatchNetWide = run_batch_danse(**kwargsBatch)
             kwargsOnline['batchModeNetWideFilters'] = wBatchNetWide
         
-        if 'wola' in type:
-            w = run_wola_danse(**kwargsOnline)
-        elif 'online' in type:
+        if type.batch:
+            if type.wola:
+                raise NotImplementedError('TODO')
+            else:
+                w = run_batch_danse(**kwargsBatch)
+        elif type.online:
             w = run_online_danse(**kwargsOnline)
-        else:
-            w = run_danse(**kwargsBatch)
-    return w
+        elif type.wola:
+            w = run_wola_danse(**kwargsOnline)
 
-
-def run_danse(
-        x,
-        n,
-        channelToNodeMap,      
-        filterType='regular',  # 'regular' or 'gevd'
-        rank=1,
-        nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
-        referenceSensorIdx=0,
-        verbose=True,
-        vad=None
-    ):
-
-    maxIter = 100
-    tol = 1e-9
-    # Get noisy signal
-    y = x + n
-    # Get number of nodes
-    nNodes = np.amax(channelToNodeMap) + 1
-    # Determine data type (complex or real)
-    myDtype = np.complex128 if np.iscomplex(x).any() else np.float64
-    # Initialize
-    w = []
-    for k in range(nNodes):
-        nSensorsPerNode = np.sum(channelToNodeMap == k)
-        wCurr = np.zeros((nSensorsPerNode + nNodes - 1, maxIter), dtype=myDtype)
-        wCurr[referenceSensorIdx, :] = 1
-        w.append(wCurr)
-    idxNodes = np.arange(nNodes)
-    idxUpdatingNode = 0
-    wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
-
-    for k in range(nNodes):
-        # Determine reference sensor index
-        idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
-        wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
-    # Run DANSE
-    if nodeUpdatingStrategy == 'sequential':
-        label = 'Batch DANSE [seq NU]'
-    else:
-        label = 'Batch DANSE [sim NU]'
-    if filterType == 'gevd':
-        label += ' [GEVD]'
-    for iter in range(maxIter):
-        if verbose:
-            print(f'{label} iteration {iter+1}/{maxIter}')
-        # Compute fused signals from all sensors
-        fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
-        fusedSignalsNoiseOnly = np.zeros((x.shape[0], nNodes), dtype=myDtype)
-        for q in range(nNodes):
-            yq = y[:, channelToNodeMap == q]
-            fusedSignals[:, q] = yq @ w[q][:yq.shape[1], iter].conj()
-            nq = n[:, channelToNodeMap == q]
-            fusedSignalsNoiseOnly[:, q] = nq @ w[q][:nq.shape[1], iter].conj()
-            
-        for k in range(nNodes):
-            # Get y tilde
-            yTilde: np.ndarray = np.concatenate((
-                y[:, channelToNodeMap == k],
-                fusedSignals[:, idxNodes != k]
-            ), axis=1)
-            nTilde: np.ndarray = np.concatenate((
-                n[:, channelToNodeMap == k],
-                fusedSignalsNoiseOnly[:, idxNodes != k]
-            ), axis=1)
-
-            # Compute covariance matrices
-            if vad is None:
-                Ryy = 1 / yTilde.shape[0] * yTilde.T @ yTilde.conj()
-                Rnn = 1 / nTilde.shape[0] * nTilde.T @ nTilde.conj()
+    else:  # (GEVD-)MWF
+        kwargs = {
+            'x': cleanSigs,
+            'n': noiseOnlySigs,
+            'filterType': filterType,
+            'rank': rank,
+            'p': wolaParams,
+            'verbose': verbose,
+            'vad': vad
+        }
+        if type.batch:
+            if type.wola:
+                w = run_batch_mwf_wola(**kwargs)
             else:
-                vadBool = np.all(vad.astype(bool), axis=1)
-                Ryy = 1 / np.sum(vadBool) *\
-                    yTilde[vadBool, :].T @ yTilde[vadBool, :].conj()
-                Rnn = 1 / np.sum(~vadBool) *\
-                    yTilde[~vadBool, :].T @ yTilde[~vadBool, :].conj()
-            
-            if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
-                updateFilter = True
-            elif nodeUpdatingStrategy == 'simultaneous':
-                updateFilter = True
-            else:
-                updateFilter = False
+                # Delete keyword-arguments that are not needed for batch-mode
+                kwargs.pop('p')
+                kwargs.pop('verbose')
 
-            if updateFilter:
-                # Compute filter
-                if filterType == 'regular':
-                    e = np.zeros(w[k].shape[0])
-                    e[referenceSensorIdx] = 1  # selection vector
-                    ryd = (Ryy - Rnn) @ e
-                    w[k][:, iter + 1] = np.linalg.inv(Ryy) @ ryd
-                elif filterType == 'gevd':
-                    sigma, Xmat = la.eigh(Ryy, Rnn)
-                    idx = np.flip(np.argsort(sigma))
-                    sigma = sigma[idx]
-                    Xmat = Xmat[:, idx]
-                    Qmat = np.linalg.inv(Xmat.T.conj())
-                    Dmat = np.zeros((Ryy.shape[0], Ryy.shape[0]))
-                    Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-                    e = np.zeros(Ryy.shape[0])
-                    e[referenceSensorIdx] = 1
-                    w[k][:, iter + 1] = Xmat @ Dmat @ Qmat.T.conj() @ e
-            else:
-                w[k][: , iter + 1] = w[k][:, iter]  # keep old filter
-            
-        # Update node index
-        if nodeUpdatingStrategy == 'sequential':
-            idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
+                w = run_batch_mwf(**kwargs)
+        elif type.online:
+            w = run_online_mwf(**kwargs)
+        elif type.wola:
+            w = run_wola_mwf(**kwargs)
 
-        # Compute network-wide filters
-        for k in range(nNodes):
-            channelCount = np.zeros(nNodes, dtype=int)
-            neighborCount = 0
-            for m in range(x.shape[1]):
-                # Node index corresponding to channel `m`
-                currNode = channelToNodeMap[m]
-                # Count channel index within node
-                c = channelCount[currNode]
-                if currNode == k:
-                    # Use local filter coefficient
-                    wNet[m, iter + 1, k] = w[currNode][c, iter + 1]
-                else:
-                    nChannels_k = np.sum(channelToNodeMap == k)
-                    gkq = w[k][nChannels_k + neighborCount, iter + 1]
-                    wNet[m, iter + 1, k] = w[currNode][c, iter] * gkq
-                channelCount[currNode] += 1
 
-                if currNode != k and c == np.sum(channelToNodeMap == currNode) - 1:
-                    neighborCount += 1
+    # if not type.danse and type.batch and not type.gevd:
+    #     RyyInv = np.linalg.inv(Ryy)
+    #     if np.iscomplex(cleanSigs).any():
+    #         w = np.zeros((nSensors, nSensors), dtype=np.complex128)
+    #     else:
+    #         w = np.zeros((nSensors, nSensors))
+    #     for n in range(nSensors):
+    #         e = np.zeros(nSensors)  # Selection vector
+    #         e[n] = 1
+    #         ryd = (Ryy - Rnn) @ e
+    #         w[:, n] = RyyInv @ ryd
+    # elif type == 'gevdmwf_batch':
+    #     sigma, Xmat = la.eigh(Ryy, Rnn)
+    #     idx = np.flip(np.argsort(sigma))
+    #     sigma = sigma[idx]
+    #     Xmat = Xmat[:, idx]
+    #     Qmat = np.linalg.inv(Xmat.T.conj())
+    #     Dmat = np.zeros((nSensors, nSensors))
+    #     Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
+    #     w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
+    # elif type == 'mwf_online':
+    #     w = run_online_mwf(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='regular',
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif type == 'gevdmwf_online':
+    #     w = run_online_mwf(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='gevd',
+    #         rank=rank,
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif type == 'mwf_wola_b':  # batch-mode WOLA-MWF
+    #     w = run_batch_mwf_wola(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='regular',
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif type == 'gevdmwf_wola_b':  # batch-mode WOLA-GEVD-MWF
+    #     w = run_batch_mwf_wola(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='gevd',
+    #         rank=rank,
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif type == 'mwf_wola':
+    #     w = run_wola_mwf(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='regular',
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif type == 'gevdmwf_wola':
+    #     w = run_wola_mwf(
+    #         x=cleanSigs,
+    #         n=noiseOnlySigs,
+    #         filterType='gevd',
+    #         rank=rank,
+    #         p=wolaParams,
+    #         verbose=verbose,
+    #         vad=vad
+    #     )
+    # elif 'danse' in type:
+    #     kwargsBatch = {
+    #         'x': cleanSigs,
+    #         'n': noiseOnlySigs,
+    #         'referenceSensorIdx': 0,
+    #         'channelToNodeMap': channelToNodeMap,
+    #         'filterType': 'gevd' if 'gevd' in type else 'regular',
+    #         'rank': rank,
+    #         'verbose': verbose,
+    #         'vad': vad
+    #     }
+    #     if 'sim' in type:
+    #         kwargsBatch['nodeUpdatingStrategy'] = 'simultaneous'
+    #     else:
+    #         kwargsBatch['nodeUpdatingStrategy'] = 'sequential'
+
+    #     # Keyword-arguments for online-mode DANSE function
+    #     kwargsOnline = copy.deepcopy(kwargsBatch)
+    #     kwargsOnline['p'] = wolaParams
+    #     kwargsOnline['ignoreFusionForSSNodes'] = noSSfusion
+    
+    #     if batchFusionInOnline:
+    #         wBatchNetWide = run_danse(**kwargsBatch)
+    #         kwargsOnline['batchModeNetWideFilters'] = wBatchNetWide
         
-        # Check convergence
-        if iter > 0:
-            diff = 0
-            for k in range(nNodes):
-                diff += np.mean(np.abs(w[k][:, iter + 1] - w[k][:, iter]))
-            if diff < tol:
-                print(f'Convergence reached after {iter+1} iterations')
-                break
-
-    # Format for output
-    wOut = np.zeros((x.shape[1], iter + 2, nNodes), dtype=myDtype)
-    for k in range(nNodes):
-        wOut[:, :, k] = wNet[:, :(iter + 2), k]
-
-    return wOut
+    #     if 'wola' in type:
+    #         w = run_wola_danse(**kwargsOnline)
+    #     elif 'online' in type:
+    #         w = run_online_danse(**kwargsOnline)
+    #     else:
+    #         w = run_danse(**kwargsBatch)
+    return w
 
 
 def get_clean_signals(
@@ -430,7 +416,7 @@ def get_filters(
         noiseSignals,
         channelToNodeMap,
         gevdRank=1,
-        toCompute=[''],
+        toCompute: list[FilterType]=[FilterType()],
         wolaParams: WOLAparameters=WOLAparameters(),
         taus=[2.],
         durations=[1.],
@@ -453,14 +439,14 @@ def get_filters(
     for filterType in toCompute:
 
         if verbose:
-            print(f'Computing {filterType} filter(s)')
+            print(f'Computing {filterType.to_str()} filter(s)')
 
-        if 'online' in filterType or 'wola' in filterType:
+        if filterType.indiv_frames():
             # Only need to compute for longest duration
             # + computing for several tau's
             nSamples = int(np.amax(durations) * wolaParams.fs)
-            noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
-            kwargs['noisySignals'] = noisySignals
+            # noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
+            # kwargs['noisySignals'] = noisySignals
             kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
             kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
             kwargs['vad'] = vad[:nSamples, :] if vad is not None else None
@@ -469,7 +455,7 @@ def get_filters(
             # & (nTaus, nSensors, nIters, nFrequencies, nNodes) for 'wola'
             for idxTau in range(len(taus)):
                 # Set beta based on tau
-                if 'online' in filterType:
+                if filterType.online:
                     normFact = kwargs['wolaParams'].nfft
                 else:
                     normFact = kwargs['wolaParams'].hop
@@ -491,8 +477,8 @@ def get_filters(
             # ^^^ shape: (nDurations, nSensors, nNodes)
             for dur in durations:
                 nSamples = int(np.amax(dur) * wolaParams.fs)
-                noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
-                kwargs['noisySignals'] = noisySignals
+                # noisySignals = cleanSigs[:nSamples, :] + noiseSignals[:nSamples, :]
+                # kwargs['noisySignals'] = noisySignals
                 kwargs['cleanSigs'] = cleanSigs[:nSamples, :]
                 kwargs['noiseOnlySigs'] = noiseSignals[:nSamples, :]
                 kwargs['vad'] = vad[:nSamples, :] if vad is not None else None
@@ -501,7 +487,7 @@ def get_filters(
                     compute_filter(type=filterType, **kwargs)
                 )
             
-            if 'danse' in filterType:
+            if filterType.danse:
                 # Ensure adequate array dimensions
                 maxNiter = np.amax([f.shape[1] for f in currFiltsAll])
                 for k in range(len(currFiltsAll)):
@@ -516,7 +502,7 @@ def get_filters(
                                 axis=1
                             )
                         ), axis=1)
-        filters[filterType] = np.array(currFiltsAll)
+        filters[filterType.to_str()] = np.array(currFiltsAll)
 
     return filters
 
@@ -528,13 +514,13 @@ def get_metrics(
         sigma_sr,
         sigma_nr,
         channelToNodeMap,
-        filterType,
+        filterType: FilterType,
         computeForComparisonWithDANSE=True,
         exportDiffPerFilter=False
     ):
     
     # Compute FAS + SPF (baseline)
-    if 'wola' in filterType:
+    if filterType.wola:
         nBins = sigma_nr.shape[0]  # number of frequency bins
         if np.any(np.iscomplex(filters)):
             baseline = np.zeros((nSensors, nSensors, nBins), dtype=np.complex128)
@@ -562,14 +548,17 @@ def get_metrics(
     diffsPerCoefficient = [None for _ in range(nFilters)]
     currNode = 0
     for k in range(nFilters):
-        if 'danse' in filterType:  # DANSE case
+        if filterType.danse:  # DANSE case
             # Determine reference sensor index
             idxRef = np.where(channelToNodeMap == k)[0][0]
-            if 'online' in filterType:
+            if filterType.online:
                 # Keep all iterations (all p.durations)
                 currFilt = filters[:, :, k]
-            elif 'wola' in filterType:
+            elif filterType.wola and not filterType.batch:
                 currFilt = filters[:, :, :, k]
+            elif filterType.wola and filterType.batch:
+                stop = 1
+                raise NotImplementedError('TODO')
             else:
                 # Only keep last iteration (converged filter coefficients)
                 currFilt = filters[:, -1, k]
@@ -577,10 +566,13 @@ def get_metrics(
             if computeForComparisonWithDANSE:
                 if channelToNodeMap[k] == currNode:
                     idxRef = np.where(channelToNodeMap == channelToNodeMap[k])[0][0]
-                    if 'online' in filterType:
+                    if filterType.online:
                         currFilt = filters[:, :, idxRef]
-                    elif 'wola' in filterType:
+                    elif filterType.wola and not filterType.batch:
                         currFilt = filters[:, :, :, idxRef]
+                    elif filterType.wola and filterType.batch:
+                        stop = 1
+                        raise NotImplementedError('TODO')
                     else:
                         currFilt = filters[:, idxRef]
                     currNode += 1
@@ -591,7 +583,7 @@ def get_metrics(
                 idxRef = copy.deepcopy(k)
                 currFilt = filters[:, k]
         
-        if 'wola' in filterType:
+        if filterType.wola:
             currBaseline = baseline[:, idxRef, :]
             # Average over nodes and frequency bins, keeping iteration index
             if 0:
@@ -599,7 +591,7 @@ def get_metrics(
                 for kk in range(nFilters):
                     fig, axes = plt.subplots(1,1)
                     fig.set_size_inches(8.5, 3.5)
-                    if 'danse' in filterType:
+                    if filterType.danse:
                         idxRef = np.where(channelToNodeMap == channelToNodeMap[kk])[0][0]
                     else:
                         idxRef = kk

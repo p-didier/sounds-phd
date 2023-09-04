@@ -66,24 +66,24 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         # Initialize dictionary where results are stored for plotting
         toDict = []
         for filterType in p.toCompute:
-            if 'online' in filterType or 'wola' in filterType:
+            if filterType.indiv_frames():
                 # Compute number of iterations
-                if 'online' in filterType:
+                if filterType.online:
                     nIter = int(np.amax(p.durations) *\
                         wolaParamsCurr.fs / wolaParamsCurr.nfft) # divide by frame size
-                elif 'wola' in filterType:
+                elif filterType.wola:
                     nIter = int(np.amax(p.durations) *\
                         wolaParamsCurr.fs / wolaParamsCurr.hop) - 1  # divide by hop size
                 
                 if p.showDeltaPerNode:
-                    toDict.append((filterType, np.zeros((p.nMC, nIter, len(p.taus), p.nNodes))))
+                    toDict.append((filterType.to_str(), np.zeros((p.nMC, nIter, len(p.taus), p.nNodes))))
                 else:
-                    toDict.append((filterType, np.zeros((p.nMC, nIter, len(p.taus)))))
+                    toDict.append((filterType.to_str(), np.zeros((p.nMC, nIter, len(p.taus)))))
             else:
                 if p.showDeltaPerNode:
-                    toDict.append((filterType, np.zeros((p.nMC, len(p.durations), p.nNodes))))
+                    toDict.append((filterType.to_str(), np.zeros((p.nMC, len(p.durations), p.nNodes))))
                 else:
-                    toDict.append((filterType, np.zeros((p.nMC, len(p.durations)))))
+                    toDict.append((filterType.to_str(), np.zeros((p.nMC, len(p.durations)))))
         metricsData = dict(toDict)
 
         for idxMC in range(p.nMC):
@@ -170,10 +170,10 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
 
             # Compute metrics
             for filterType in p.toCompute:
-                currFilters = allFilters[filterType]
-                if 'online' in filterType or 'wola' in filterType:
+                currFilters = allFilters[filterType.to_str()]
+                if filterType.indiv_frames():
                     for idxTau in range(len(p.taus)):
-                        if 'online' in filterType:
+                        if filterType.online:
                             currMetrics = get_metrics(
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :],
@@ -184,7 +184,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                                 filterType=filterType,
                                 exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
                             )
-                        elif 'wola' in filterType:
+                        elif filterType.wola:
                             currMetrics = get_metrics(
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :, :],
@@ -196,9 +196,9 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                                 exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
                             )
                         if p.showDeltaPerNode:
-                            metricsData[filterType][idxMC, :, idxTau, :] = currMetrics
+                            metricsData[filterType.to_str()][idxMC, :, idxTau, :] = currMetrics
                         else:
-                            metricsData[filterType][idxMC, :, idxTau] = currMetrics
+                            metricsData[filterType.to_str()][idxMC, :, idxTau] = currMetrics
                 else:
                     for idxDur in range(len(p.durations)):
                         currFiltCurrDur = currFilters[idxDur, :, :]
@@ -213,18 +213,17 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                             exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
                         )
                         if p.showDeltaPerNode:
-                            metricsData[filterType][idxMC, idxDur, :] = currMetrics
+                            metricsData[filterType.to_str()][idxMC, idxDur, :] = currMetrics
                         else:
-                            metricsData[filterType][idxMC, idxDur] = currMetrics
+                            metricsData[filterType.to_str()][idxMC, idxDur] = currMetrics
         
         if p.exportFigures:
             # Plot results
             figTitleSuffix = ''
-            if any([('danse' in t) and (('online' in t) or ('wola' in t))\
-                    for t in p.toCompute]):
+            if any([t.danse and (t.online or t.wola) for t in p.toCompute]):
                 figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
             if wolaParamsCurr.singleFreqBinIndex is not None and\
-                any(['wola' in t for t in p.toCompute]):
+                any([t.wola for t in p.toCompute]):
                 figTitleSuffix += f" [WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin]"
             fig = plot_final(
                 p.durations,
@@ -244,7 +243,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 else:
                     fname = f'{p.exportFolder}/betas'
                 fname += f'_betaExt_0p{int(betaExtCurr * 1e3)}'
-                for t in p.toCompute:
+                for t in p.toComputeStrings:
                     fname += f'_{t}'
                 if not Path(p.exportFolder).is_dir():
                     Path(p.exportFolder).mkdir(parents=True, exist_ok=True)

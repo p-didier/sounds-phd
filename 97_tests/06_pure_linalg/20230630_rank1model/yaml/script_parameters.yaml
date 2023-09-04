@@ -18,30 +18,35 @@ selfNoisePower: 1
 showDeltaPerNode: false
 # signalType: speech
 # signalType: noise_complex
-# signalType: noise_real
+signalType: noise_real
 # signalType: interrupt_noise_complex
-signalType: interrupt_noise_real
+# signalType: interrupt_noise_real
 interruptionDuration: 1  # [s]
 interruptionPeriod: 2   # [s]
 targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
 taus:
-# - 2.0
-# - 4.0
-# - 8.0
-- 16.0
-toCompute: 
-# - mwf_batch
-# - gevdmwf_batch
-# - danse_sim_batch
-# - gevddanse_sim_batch
+- 2.0
+- 4.0
+- 8.0
+# - 16.0
+toComputeStrings: 
+# - mwf_batch             # batch mode
+# - gevdmwf_batch         # batch mode
+# - danse_sim_batch       # batch mode
+# - gevddanse_sim_batch   # batch mode
 # - mwf_online
 # - gevdmwf_online
 # - danse_sim_online
 # - gevddanse_sim_online
-# - mwf_wola
+#
+# - mwf_wola_b            # batch mode
+# - gevdmwf_wola_b        # batch mode
+# - danse_sim_wola_b      # batch mode
+# - gevddanse_sim_wola_b  # batch mode
+- mwf_wola
 - gevdmwf_wola
-# - danse_sim_wola
-# - gevddanse_sim_wola
+- danse_sim_wola
+- gevddanse_sim_wola
 useBatchModeFusionVectorsInOnlineDanse: false
 useVAD: true
 VADwinLength: 0.02

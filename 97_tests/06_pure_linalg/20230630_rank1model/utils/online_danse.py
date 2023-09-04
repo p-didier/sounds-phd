@@ -4,7 +4,7 @@
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
 import numpy as np
-from .online_common import *
+from .common import *
 
 
 def run_wola_danse(

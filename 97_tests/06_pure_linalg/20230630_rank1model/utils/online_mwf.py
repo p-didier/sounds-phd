@@ -3,11 +3,9 @@
 #
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
-import copy
 import numpy as np
-import scipy.linalg as la
 from .online_danse import get_window, WOLAparameters
-from .online_common import *
+from .common import *
 
 def run_online_mwf(
         x: np.ndarray,
