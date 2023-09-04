@@ -1,16 +1,16 @@
-Mk:
-- 1
-- 4
+# Mk:
+# - 1
+# - 4
 b: 0.1
 minDuration: 3
-maxDuration: 20
-nDurationsBatch: 30  # linearly spaced from `minDuration to maxDuration
+maxDuration: 60
+nDurationsBatch: 30  # linearly spaced from `minDuration` to `maxDuration`
 exportFigures: true
 exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate
 fs: 8000.0
 ignoreFusionForSSNodes: false
 nMC: 1
-nNodes: 2
+nNodes: 3
 nSensors: 5
 randomDelays: false
 seed: 0
@@ -25,8 +25,8 @@ interruptionDuration: 1  # [s]
 interruptionPeriod: 2   # [s]
 targetSignalSpeechFile: danse/tests/sigs/01_speech/speech2_16000Hz.wav
 taus:
-- 2.0
-- 4.0
+# - 2.0
+# - 4.0
 - 8.0
 # - 16.0
 toComputeStrings: 
@@ -38,11 +38,11 @@ toComputeStrings:
 # - gevdmwf_online
 # - danse_sim_online
 # - gevddanse_sim_online
-#
-# - mwf_wola_b            # batch mode
-# - gevdmwf_wola_b        # batch mode
-# - danse_sim_wola_b      # batch mode
-# - gevddanse_sim_wola_b  # batch mode
+#     -------------- VVVVVVVV WOLA VVVVVVVV --------------
+# - mwf_wola_batch            # batch mode
+# - gevdmwf_wola_batch        # batch mode
+# - danse_sim_wola_batch      # batch mode
+- gevddanse_sim_wola_batch  # batch mode
 - mwf_wola
 - gevdmwf_wola
 - danse_sim_wola
@@ -55,10 +55,10 @@ verbose: true
 wolaParams:
   # B: 50
   # alpha: 0.7
-  betaExt: 0.99
+  # betaExt: 0.99
   B: 0
   alpha: 1
-  # betaExt: 0.0
+  betaExt: 0.9
   fs: 8000.0
   # hop: 4
   # nfft: 8

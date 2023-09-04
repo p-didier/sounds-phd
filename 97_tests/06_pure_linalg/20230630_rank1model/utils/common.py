@@ -146,7 +146,7 @@ def update_filter(
         rank=1,
         referenceSensorIdx=None,
     ):
-    n = Ryy.shape[-1]
+    dim = Ryy.shape[-1]
     wolaMode = len(Ryy.shape) == 3  # True if WOLA mode on
     # Compute filter
     if filterType == 'regular':
@@ -167,8 +167,8 @@ def update_filter(
     elif filterType == 'gevd':
         if wolaMode:
             nBins = Ryy.shape[0]
-            Xmat = np.zeros((nBins, n, n), dtype=np.complex128)
-            sigma = np.zeros((nBins, n))
+            Xmat = np.zeros((nBins, dim, dim), dtype=np.complex128)
+            sigma = np.zeros((nBins, dim))
             # Looping over frequencies because of the GEVD
             for kappa in range(nBins):
                 sigmaCurr, XmatCurr = la.eigh(
@@ -182,7 +182,7 @@ def update_filter(
                 np.transpose(Xmat.conj(), axes=[0, 2, 1])
             )
             # GEVLs tensor
-            Dmat = np.zeros((nBins, n, n))
+            Dmat = np.zeros((nBins, dim, dim))
             for r in range(rank):
                 Dmat[:, r, r] = np.squeeze(1 - 1 / sigma[:, r])
             # LMMSE weights
@@ -200,7 +200,7 @@ def update_filter(
             sigma = sigma[idx]
             Xmat = Xmat[:, idx]
             Qmat = np.linalg.inv(Xmat.T.conj())
-            Dmat = np.zeros((n, n))
+            Dmat = np.zeros((dim, dim))
             Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
             if referenceSensorIdx is None:
                 return Xmat @ Dmat @ Qmat.T.conj()

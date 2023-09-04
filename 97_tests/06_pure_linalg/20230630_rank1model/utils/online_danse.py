@@ -216,8 +216,6 @@ def run_wola_danse(
                     rank=rank,
                     referenceSensorIdx=referenceSensorIdx
                 )
-                # for kppp in range(nNodes):
-                #     print(w[kppp][:, i + 1, :])
             else:
                 w[k][:, i + 1, :] = w[k][:, i, :]
 

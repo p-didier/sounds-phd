@@ -104,7 +104,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 maxDelay=0.1
             )
             if vad is not None:
-                sigma_sr = np.sqrt(
+                sigmaSr = np.sqrt(
                     np.mean(
                         np.abs(
                             cleanSigs[np.squeeze(vad).astype(bool), :]
@@ -112,20 +112,20 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                         axis=0
                     )
                 )
-                sigma_sr_wola = get_sigma_wola(
+                sigmaSrWOLA = get_sigma_wola(
                     cleanSigs[np.squeeze(vad).astype(bool), :],
                     wolaParamsCurr
                 )
             else:
-                sigma_sr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
-                sigma_sr_wola = get_sigma_wola(cleanSigs, wolaParamsCurr)
+                sigmaSr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+                sigmaSrWOLA = get_sigma_wola(cleanSigs, wolaParamsCurr)
 
             # Generate noise signals
-            sigma_nr = np.zeros(p.nSensors)
+            sigmaNr = np.zeros(p.nSensors)
             if wolaParamsCurr.singleFreqBinIndex is not None:
-                sigma_nr_wola = np.zeros((1, p.nSensors))
+                sigmaNrWOLA = np.zeros((1, p.nSensors))
             else:
-                sigma_nr_wola = np.zeros((wolaParamsCurr.nPosFreqs, p.nSensors))
+                sigmaNrWOLA = np.zeros((wolaParamsCurr.nPosFreqs, p.nSensors))
             if np.iscomplex(cleanSigs).any():
                 noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
             else:
@@ -143,10 +143,10 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 # Scale to desired power
                 noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
                 # Check power
-                sigma_nr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
-                if np.abs(sigma_nr[n] ** 2 - p.selfNoisePower) > 1e-6:
-                    raise ValueError(f'Noise signal power is {sigma_nr[n] ** 2} instead of {p.selfNoisePower}')
-                sigma_nr_wola[:, n] = get_sigma_wola(
+                sigmaNr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
+                if np.abs(sigmaNr[n] ** 2 - p.selfNoisePower) > 1e-6:
+                    raise ValueError(f'Noise signal power is {sigmaNr[n] ** 2} instead of {p.selfNoisePower}')
+                sigmaNrWOLA[:, n] = get_sigma_wola(
                     noiseSignals[:, n],
                     wolaParamsCurr
                 )
@@ -171,15 +171,15 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             # Compute metrics
             for filterType in p.toCompute:
                 currFilters = allFilters[filterType.to_str()]
-                if filterType.indiv_frames():
+                if filterType.indiv_frames():  # online or WOLA in non-batch mode
                     for idxTau in range(len(p.taus)):
                         if filterType.online:
                             currMetrics = get_metrics(
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :],
                                 scalings,
-                                sigma_sr,
-                                sigma_nr,
+                                sigmaSr,
+                                sigmaNr,
                                 channelToNodeMap,
                                 filterType=filterType,
                                 exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
@@ -189,8 +189,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :, :],
                                 scalings,
-                                sigma_sr_wola,
-                                sigma_nr_wola,
+                                sigmaSrWOLA,
+                                sigmaNrWOLA,
                                 channelToNodeMap,
                                 filterType=filterType,
                                 exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
@@ -199,15 +199,22 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                             metricsData[filterType.to_str()][idxMC, :, idxTau, :] = currMetrics
                         else:
                             metricsData[filterType.to_str()][idxMC, :, idxTau] = currMetrics
-                else:
+                else:  # batch mode (WOLA or not)
                     for idxDur in range(len(p.durations)):
+                        if filterType.wola:
+                            sigmaSrEffective = copy.deepcopy(sigmaSrWOLA)
+                            sigmaNrEffective = copy.deepcopy(sigmaNrWOLA)
+                        else:
+                            sigmaSrEffective = copy.deepcopy(sigmaSr)
+                            sigmaNrEffective = copy.deepcopy(sigmaNr)
+
                         currFiltCurrDur = currFilters[idxDur, :, :]
                         currMetrics = get_metrics(
                             p.nSensors,
                             currFiltCurrDur,
                             scalings,
-                            sigma_sr,
-                            sigma_nr,
+                            sigmaSrEffective,
+                            sigmaNrEffective,
                             channelToNodeMap,
                             filterType=filterType,
                             exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually

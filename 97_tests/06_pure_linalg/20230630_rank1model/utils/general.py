@@ -26,7 +26,7 @@ class FilterType:
     def to_str(self):
         """Return string representation of filter type."""
         if self.danse:
-            s = 'danse'
+            s = f'danse_{self.nodeUpdatingStrategy}'
         else:
             s = 'mwf'
         if self.gevd:
@@ -184,7 +184,9 @@ def compute_filter(
         
         if type.batch:
             if type.wola:
-                raise NotImplementedError('TODO')
+                kwargsBatch['p'] = wolaParams  # add WOLA parameters
+                # kwargsBatch['ignoreFusionForSSNodes'] = noSSfusion  # TODO: maybe!
+                w = run_batch_danse_wola(**kwargsBatch)
             else:
                 w = run_batch_danse(**kwargsBatch)
         elif type.online:
@@ -557,8 +559,8 @@ def get_metrics(
             elif filterType.wola and not filterType.batch:
                 currFilt = filters[:, :, :, k]
             elif filterType.wola and filterType.batch:
-                stop = 1
-                raise NotImplementedError('TODO')
+                # Only keep last iteration (converged filter coefficients)
+                currFilt = filters[:, -1, :, k]
             else:
                 # Only keep last iteration (converged filter coefficients)
                 currFilt = filters[:, -1, k]
@@ -571,8 +573,7 @@ def get_metrics(
                     elif filterType.wola and not filterType.batch:
                         currFilt = filters[:, :, :, idxRef]
                     elif filterType.wola and filterType.batch:
-                        stop = 1
-                        raise NotImplementedError('TODO')
+                        currFilt = filters[:, :, idxRef]
                     else:
                         currFilt = filters[:, idxRef]
                     currNode += 1
@@ -601,9 +602,14 @@ def get_metrics(
                     plt.legend()
                     axes.set_title(f'Node {kk+1}')
             
-            diffsPerCoefficient[k] = np.mean(np.abs(
-                currFilt - currBaseline[:, np.newaxis, :]
-            ), axis=(0, -1))
+            if filterType.batch:
+                diffsPerCoefficient[k] = np.mean(np.abs(
+                    currFilt - currBaseline
+                ), axis=(0, -1))
+            else:
+                diffsPerCoefficient[k] = np.mean(np.abs(
+                    currFilt - currBaseline[:, np.newaxis, :]
+                ), axis=(0, -1))
         else:
             currBaseline = baseline[:, idxRef]            
             if 0:

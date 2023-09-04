@@ -46,40 +46,41 @@ def plot_final(
     fig, axes = plt.subplots(1, 1)
     fig.set_size_inches(8.5, 4)
     allLineStyles = ['-', '--', '-.', ':']
-    for idxFilter, filterType in enumerate(toPlot.keys()):
+    for idxFilter, filterKey in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
-        if 'online' in filterType or 'wola' in filterType:
-            nTaus = toPlot[filterType].shape[2]
+        if ('online' in filterKey or 'wola' in filterKey) and\
+            'batch' not in filterKey:
+            nTaus = toPlot[filterKey].shape[2]
             # Plot as function of beta (== as function of tau)
-            if 'online' in filterType:
-                xAxis = np.arange(0, toPlot[filterType].shape[1]) * L / fs
-            elif 'wola' in filterType:
-                xAxis = np.arange(0, toPlot[filterType].shape[1]) * R / fs
+            if 'online' in filterKey:
+                xAxis = np.arange(0, toPlot[filterKey].shape[1]) * L / fs
+            elif 'wola' in filterKey:
+                xAxis = np.arange(0, toPlot[filterKey].shape[1]) * R / fs
             for idxTau in range(nTaus):
                 ls = allLineStyles[idxTau % len(allLineStyles)]
                 tauLeg = f'($\\tau={taus[idxTau]}$ s)'
                 if avgAcrossNodesFlag:
                     axes.fill_between(
                         xAxis,
-                        np.amin(toPlot[filterType][:, :, idxTau], axis=0),
-                        np.amax(toPlot[filterType][:, :, idxTau], axis=0),
+                        np.amin(toPlot[filterKey][:, :, idxTau], axis=0),
+                        np.amax(toPlot[filterKey][:, :, idxTau], axis=0),
                         color=baseColor,
                         alpha=0.15
                     )
                     axes.semilogy(
                         xAxis,
-                        np.mean(toPlot[filterType][:, :, idxTau], axis=0),
+                        np.mean(toPlot[filterKey][:, :, idxTau], axis=0),
                         f'{baseColor}{ls}',
-                        label=f'{filterType} {tauLeg}',
+                        label=f'{filterKey} {tauLeg}',
                     )
                 else:
-                    for k in range(toPlot[filterType].shape[-1]):
+                    for k in range(toPlot[filterKey].shape[-1]):
                         axes.semilogy(
                             xAxis,
-                            np.mean(toPlot[filterType][:, :, idxTau, k], axis=0),
+                            np.mean(toPlot[filterKey][:, :, idxTau, k], axis=0),
                             f'{baseColor}{ls}',
-                            label=f'{filterType} $k=${k+1} {tauLeg}',
-                            alpha=(k + 1) / toPlot[filterType].shape[-1]
+                            label=f'{filterKey} $k=${k+1} {tauLeg}',
+                            alpha=(k + 1) / toPlot[filterKey].shape[-1]
                         )
         else:  # <-- batch-mode
             batchls = allLineStyles[idxFilter % len(allLineStyles)]
@@ -88,25 +89,25 @@ def plot_final(
                 # Add a patch of color to show the range of values across MC runs
                 axes.fill_between(
                     durations,
-                    np.amin(toPlot[filterType], axis=0),
-                    np.amax(toPlot[filterType], axis=0),
+                    np.amin(toPlot[filterKey], axis=0),
+                    np.amax(toPlot[filterKey], axis=0),
                     color=baseColor,
                     alpha=0.15
                 )
                 axes.semilogy(
                     durations,
-                    np.mean(toPlot[filterType], axis=0),
+                    np.mean(toPlot[filterKey], axis=0),
                     f'{baseColor}o{batchls}',
-                    label=filterType
+                    label=filterKey
                 )
             else:  # Case where we have data per node and per MC run
-                for k in range(toPlot[filterType].shape[-1]):
+                for k in range(toPlot[filterKey].shape[-1]):
                     axes.semilogy(
                         durations,
-                        np.mean(toPlot[filterType][:, :, k], axis=0),
+                        np.mean(toPlot[filterKey][:, :, k], axis=0),
                         f'{baseColor}o{batchls}',
-                        label=f'{filterType} $k=${k+1}',
-                        alpha=(k + 1) / toPlot[filterType].shape[-1]
+                        label=f'{filterKey} $k=${k+1}',
+                        alpha=(k + 1) / toPlot[filterKey].shape[-1]
                     )
     
     # Add VAD if provided
@@ -164,34 +165,35 @@ def plot_final(
     else:
         axes.set_xlim([0, np.amax(xAxis)])
     
-    if 'online' in filterType or 'wola' in filterType:
+    if 'online' in filterKey or 'wola' in filterKey:
         # Add secondary x-axis with iterations
         ax2 = axes.secondary_xaxis("top")
         ax2.set_xticks(axes.get_xticks())
-        if 'online' in filterType:
+        if 'online' in filterKey:
             xTicks2 = np.round(axes.get_xticks() * fs / L).astype(int)
-        elif 'wola' in filterType:
+        elif 'wola' in filterKey:
             xTicks2 = np.round(axes.get_xticks() * fs / R).astype(int)
         ax2.set_xticklabels(xTicks2)
         ax2.set_xlabel('Iteration index (-)', loc='left')
     fig.tight_layout()
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf
-    for idxFilter, filterType in enumerate(toPlot.keys()):
-        if ('online' in filterType or 'wola' in filterType) and\
+    for idxFilter, filterKey in enumerate(toPlot.keys()):
+        if (('online' in filterKey or 'wola' in filterKey) and\
+            'batch' not in filterKey) and\
             (flagBatchModeIncluded and vad is None):
             idxStart = int(np.amin(durations) * fs // L)
             ymin = min(
                 ymin,
-                np.amin(toPlot[filterType][:, idxStart:, :])
+                np.amin(toPlot[filterKey][:, idxStart:, :])
             )
             ymax = max(
                 ymax,
-                np.amax(toPlot[filterType][:, idxStart:, :])
+                np.amax(toPlot[filterKey][:, idxStart:, :])
             )
         else:
-            ymin = min(ymin, np.amin(toPlot[filterType]))
-            ymax = max(ymax, np.amax(toPlot[filterType]))
+            ymin = min(ymin, np.amin(toPlot[filterKey]))
+            ymax = max(ymax, np.amax(toPlot[filterKey]))
     ymin *= 0.9
     ymax *= 1.1
     axes.set_ylim([ymin, ymax])
