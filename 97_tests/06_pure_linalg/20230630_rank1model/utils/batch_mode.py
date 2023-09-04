@@ -2,6 +2,9 @@ import numpy as np
 from scipy import linalg as la
 from .common import *
 
+MAX_ITER_BATCH_DANSE = 100
+TOL_BATCH_DANSE = 1e-9
+
 
 def run_batch_mwf(
         x: np.ndarray,
@@ -48,12 +51,6 @@ def run_batch_mwf_wola(
         vad=None
     ):
     """Batch-mode WOLA-(GEVD-)MWF."""
-
-    def _compute_scm(a: np.ndarray):
-        """Helper function: Compute spatial covariance matrix (SCM) based on 
-        WOLA-domain signal `a`."""
-        return np.mean(np.einsum('ijk,ijl->ijkl', a, np.conj(a)), axis=0)
-
     # Get noisy signal (time-domain)
     y = x + n
     # Compute WOLA domain signal
@@ -61,11 +58,11 @@ def run_batch_mwf_wola(
 
     # Compute batch-mode covariance matrices
     if vad is None:
-        Ryy = _compute_scm(yWola)
-        Rnn = _compute_scm(nWola)
+        Ryy = compute_scm(yWola)
+        Rnn = compute_scm(nWola)
     else:
-        Ryy = _compute_scm(yWola[vadFramewise, :, :])
-        Rnn = _compute_scm(yWola[~vadFramewise, :, :])
+        Ryy = compute_scm(yWola[vadFramewise, :, :])
+        Rnn = compute_scm(yWola[~vadFramewise, :, :])
 
     # Compute filter
     w = update_filter(
@@ -89,8 +86,8 @@ def run_batch_danse(
         vad=None
     ):
 
-    maxIter = 100
-    tol = 1e-9
+    maxIter = MAX_ITER_BATCH_DANSE
+    tol = TOL_BATCH_DANSE
     # Get noisy signal
     y = x + n
     # Get number of nodes
@@ -106,12 +103,13 @@ def run_batch_danse(
         w.append(wCurr)
     idxNodes = np.arange(nNodes)
     idxUpdatingNode = 0
-    wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
 
+    # Initialize network-wide filter
+    wNet = np.zeros((x.shape[1], maxIter, nNodes), dtype=myDtype)
     for k in range(nNodes):
-        # Determine reference sensor index
         idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
         wNet[idxRef, 0, k] = 1  # set reference sensor weight to 1
+    
     # Run DANSE
     if nodeUpdatingStrategy == 'sequential':
         label = 'Batch DANSE [seq NU]'
@@ -212,12 +210,174 @@ def run_batch_danse(
             for k in range(nNodes):
                 diff += np.mean(np.abs(w[k][:, iter + 1] - w[k][:, iter]))
             if diff < tol:
-                print(f'Convergence reached after {iter+1} iterations')
+                if verbose:
+                    print(f'Convergence reached after {iter+1} iterations')
                 break
 
-    # Format for output
+    # Format for output: just keep the iterations that were actually run
     wOut = np.zeros((x.shape[1], iter + 2, nNodes), dtype=myDtype)
     for k in range(nNodes):
         wOut[:, :, k] = wNet[:, :(iter + 2), k]
 
     return wOut
+
+
+def run_batch_danse_wola(
+        x,
+        n,
+        channelToNodeMap,      
+        filterType='regular',  # 'regular' or 'gevd'
+        rank=1,
+        nodeUpdatingStrategy='sequential',  # 'sequential' or 'simultaneous'
+        referenceSensorIdx=0,
+        p: WOLAparameters=WOLAparameters(),
+        verbose=True,
+        vad=None
+    ):
+
+    maxIter = MAX_ITER_BATCH_DANSE
+    tol = TOL_BATCH_DANSE
+
+    nSensors = x.shape[1]
+    # Get noisy signal
+    y = x + n
+    # Compute WOLA domain signal
+    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    nFrames = yWola.shape[0]
+    nPosFreqs = yWola.shape[1]
+    # Get number of nodes
+    nNodes = np.amax(channelToNodeMap) + 1
+    # Initialize
+    w = []
+    for k in range(nNodes):
+        nSensorsPerNode = np.sum(channelToNodeMap == k)
+        wCurr = np.zeros((nPosFreqs, maxIter, nSensorsPerNode + nNodes - 1), dtype=complex)
+        wCurr[:, :, referenceSensorIdx] = 1
+        w.append(wCurr)
+    idxNodes = np.arange(nNodes)
+    idxUpdatingNode = 0
+
+    # Initialize network-wide filter
+    wNet = np.zeros((nSensors, maxIter, nPosFreqs, nNodes), dtype=complex)
+    for k in range(nNodes):
+        idxRef = np.where(channelToNodeMap == k)[0][referenceSensorIdx]
+        wNet[idxRef, 0, :, k] = 1  # set reference sensor weight to 1 at first iteration
+    # Run DANSE
+    if nodeUpdatingStrategy == 'sequential':
+        label = 'Batch WOLA-based DANSE [seq NU]'
+    else:
+        label = 'Batch WOLA-based DANSE [sim NU]'
+    if filterType == 'gevd':
+        label += ' [GEVD]'
+    for iter in range(maxIter):
+        if verbose:
+            print(f'{label} iteration {iter+1}/{maxIter}')
+        # Compute fused signals from all sensors
+        fusedSignals = np.zeros(
+            (nFrames, nPosFreqs, nNodes),
+            dtype=complex
+        )
+        fusedSignalsNoiseOnly = np.zeros(
+            (nFrames, nPosFreqs, nNodes),
+            dtype=complex
+        )
+        for q in range(nNodes):
+            yq = yWola[:, :, channelToNodeMap == q]
+            fusedSignals[:, :, q] = np.einsum(
+                'ijk,jk->ij',
+                yq,
+                w[q][:, iter, :yq.shape[2]].conj()
+            )
+            nq = nWola[:, :, channelToNodeMap == q]
+            fusedSignalsNoiseOnly[:, :, q] = np.einsum(
+                'ijk,jk->ij',
+                nq,
+                w[q][:, iter, :yq.shape[2]].conj()
+            )
+    
+        for k in range(nNodes):
+            # Get y tilde
+            yTilde: np.ndarray = np.concatenate((
+                yWola[:, :, channelToNodeMap == k],
+                fusedSignals[:, :, idxNodes != k]
+            ), axis=2)
+            nTilde: np.ndarray = np.concatenate((
+                nWola[:, :, channelToNodeMap == k],
+                fusedSignalsNoiseOnly[:, :, idxNodes != k]
+            ), axis=2)
+
+            # Compute covariance matrices
+            if vad is None:
+                Ryy = compute_scm(yTilde)
+                Rnn = compute_scm(nTilde)
+            else:
+                Ryy = 1 / np.sum(vadFramewise) *\
+                    compute_scm(yTilde[vadFramewise.astype(bool), :, :])
+                Rnn = 1 / np.sum(~vadFramewise) *\
+                    compute_scm(yTilde[~vadFramewise.astype(bool), :, :])
+            
+            if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
+                updateFilter = True
+            elif nodeUpdatingStrategy == 'simultaneous':
+                updateFilter = True
+            else:
+                updateFilter = False
+
+            if updateFilter:
+                # Compute filter
+                w[k][:, iter + 1, :] = update_filter(
+                    Ryy, Rnn,
+                    filterType=filterType,
+                    rank=rank,
+                    referenceSensorIdx=referenceSensorIdx
+                )
+            else:
+                w[k][:, iter + 1, :] = w[k][:, iter, :]  # keep old filter
+            
+        # Update node index
+        if nodeUpdatingStrategy == 'sequential':
+            idxUpdatingNode = (idxUpdatingNode + 1) % nNodes
+
+        # Compute network-wide filters
+        for k in range(nNodes):
+            Mk = np.sum(channelToNodeMap == k)
+            channelCount = np.zeros(nNodes, dtype=int)
+            neighborCount = 0
+            for m in range(nSensors):
+                # Node index corresponding to channel `m`
+                currNwIdx = channelToNodeMap[m]
+                # Count channel index within node
+                cIdx = channelCount[currNwIdx]
+                if currNwIdx == k:  # current node channel
+                    wNet[m, iter + 1, :, k] = w[currNwIdx][:, iter + 1, cIdx]
+                else:  # neighbor node channel
+                    gkq = w[k][:, iter + 1, Mk + neighborCount]
+                    wNet[m, iter + 1, :, k] = w[currNwIdx][:, iter, cIdx] * gkq
+                    # If we have reached the last channel of the current 
+                    # neighbor node, increment neighbor count
+                    if cIdx == np.sum(channelToNodeMap == currNwIdx) - 1:
+                        neighborCount += 1
+                channelCount[currNwIdx] += 1
+        
+        # Check convergence
+        if iter > 0:
+            diff = 0
+            for k in range(nNodes):
+                diff += np.mean(np.abs(w[k][:, iter + 1, :] - w[k][:, iter, :]))
+            if diff < tol:
+                if verbose:
+                    print(f'Convergence reached after {iter+1} iterations')
+                break
+
+    # Format for output: just keep the iterations that were actually run
+    wOut = np.zeros((x.shape[1], iter + 2, nPosFreqs, nNodes), dtype=complex)
+    for k in range(nNodes):
+        wOut[:, :, :, k] = wNet[:, :(iter + 2), :, k]
+
+    return wOut
+
+
+def compute_scm(a: np.ndarray):
+    """Compute spatial covariance matrix (SCM) based on 
+    WOLA-domain signal `a`."""
+    return np.mean(np.einsum('ijk,ijl->ijkl', a, np.conj(a)), axis=0)

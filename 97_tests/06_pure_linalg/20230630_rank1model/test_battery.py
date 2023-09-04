@@ -11,7 +11,7 @@ from typing import Union
 from dataclasses import dataclass
 from script import main as run_test
 from script import ScriptParameters
-from utils.online_common import WOLAparameters
+from utils.common import WOLAparameters
 
 
 # Get current file folder
@@ -25,20 +25,22 @@ N_MC = 5  # Number of Monte Carlo repetitions
 N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
 TO_COMPUTE = [
-    'gevdmwf_batch',  # GEVD-MWF (batch)
-    'gevdmwf_online',  # GEVD-MWF (online) 
-    'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
-    # 'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
-    # 'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
-    # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
-    # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
+    # 'gevdmwf_batch',  # GEVD-MWF (batch)
+    # 'gevdmwf_online',  # GEVD-MWF (online) 
+    # 'gevddanse_sim_online',  # GEVD-DANSE (online), simultaneous node-updating
+    # ---------- vvvv WOLA-based algorithms vvvv ----------
+    'gevddanse_sim_wola_batch',  # WOLA-based GEVD-DANSE (batch)
+    'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
+    'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
+    'mwf_wola',  # WOLA-based GEVD-MWF (online)
+    'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
 BETA_EXT = 0.0  # External exponential averaging factor
 B = 0  # Number of blocks between updates of fusion vectors in WOLA
 # SINGLE_FREQ_BIN_INDEX = None  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if None: consider all bins)
-SIGNAL_TYPE = 'noise_complex'  # Type of input signal
-# SIGNAL_TYPE = 'noise_real'  # Type of input signal
+# SIGNAL_TYPE = 'noise_complex'  # Type of input signal
+SIGNAL_TYPE = 'noise_real'  # Type of input signal
 # SIGNAL_TYPE = 'interrupt_noise_real'  # Type of input signal
 NOISE_POWER = 1  # [W] Noise power
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
@@ -47,7 +49,7 @@ IGNORE_FUSION_AT_SS_NODES = True  # If True, fusion is not performed at single-s
 
 # Export parameters
 BATTERY_NAME = 'betaExt0p0'
-EXPORT_FOLDER = 'results\\online\\forPhDSU20230823\\SSnodesFusion'
+EXPORT_FOLDER = 'results\\20230904_withBatchWOLA'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass
@@ -164,7 +166,7 @@ def main():
     # durations to test (for batch mode -- online mode only considers
     # the largest duration)
     commonKwargs = {
-        'toCompute': TO_COMPUTE,
+        'toComputeStrings': TO_COMPUTE,
         'maxDuration': TMAX,
         'fs': FS,
         'exportFigures': False,
