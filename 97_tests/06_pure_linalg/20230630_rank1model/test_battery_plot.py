@@ -16,14 +16,14 @@ RESULTS_FOLDER_NAME = f'{FILE_FOLDER}/results'
 # RESULTS_FILE_NAME = 'online/forPhDSU20230823/betaExt0p6.npz'
 # RESULTS_FILE_NAME = 'wola/forPhDSU20230823/withVAD/betaExt0p9.npz'
 # RESULTS_FILE_NAME = 'wola/forPhDSU20230823/withVAD/betaExt0p99.npz'
-RESULTS_FILE_NAME = 'online/forPhDSU20230823/SSnodesFusion/betaExt0p0.npz'
+RESULTS_FILE_NAME = '20230904_withBatchWOLA/betaExt0p0.npz'
 
 # Global variables
 FIGSIZE = (12, 4)  # Figure size
 TMAX = 20  # [s] Maximum duration of the simulated data
 EXPORT_FIGURES = True  # Whether to export figures to PDF and PNG files
 # EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/wola/withVAD/betaExt0p99'  # Path to export figures to
-EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/forPhDSU20230823/online/SSnodesFusion/betaExt0p0'  # Path to export figures to
+EXPORT_PATH = f'{FILE_FOLDER}/figs/battery_test/20230904_withBatchWOLA/betaExt0p0'  # Path to export figures to
 TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
 # TAUS = [16.]  # [s] Time constants for exp. avg. in online filterss
 # Booleans
@@ -97,7 +97,8 @@ def generate_plots(
 
     lineStyles = ['-', '--', '-.', ':']
 
-    if 'online' in filterType or 'wola' in filterType:
+    if ('online' in filterType or 'wola' in filterType) and\
+        'batch' not in filterType:
         xAxisOnline = np.linspace(
             start=0,
             stop=np.amax(xAxisBatch),
@@ -334,7 +335,8 @@ def compute_yaxis_limits(
     """Compute y-axis limits for plotting."""
     ymin, ymax = np.inf, -np.inf
     for filterType in list(data.keys()):
-        if ('online' in filterType) or ('wola' in filterType) and\
+        if ('online' in filterType or 'wola' in filterType) and\
+            'batch' not in filterType and\
             xAxisBatch is not None:
             idxStart = np.argmin(np.abs(xAxisOnline - xAxisBatch[0]))
             ymin = min(

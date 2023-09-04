@@ -43,6 +43,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         # Sort
         channelToNodeMap = np.sort(channelToNodeMap)
     else:
+        p.nNodes = len(p.Mk)
+        p.nSensors = np.sum(p.Mk)
         # Assign sensors to nodes according to Mk
         channelToNodeMap = np.zeros(p.nSensors, dtype=int)
         for k in range(p.nNodes):
@@ -101,7 +103,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 p,
                 scalings,
                 wolaParamsCurr.fs,
-                maxDelay=0.1
+                maxDelay=0.1,
             )
             if vad is not None:
                 sigmaSr = np.sqrt(

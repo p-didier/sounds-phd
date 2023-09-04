@@ -61,8 +61,17 @@ def run_batch_mwf_wola(
         Ryy = compute_scm(yWola)
         Rnn = compute_scm(nWola)
     else:
-        Ryy = compute_scm(yWola[vadFramewise, :, :])
-        Rnn = compute_scm(yWola[~vadFramewise, :, :])
+        # Check if there are enough frames to compute batch-mode estimates
+        # using VAD information
+        if np.sum(vadFramewise.astype(bool)) < y.shape[1] or\
+            np.sum(~vadFramewise.astype(bool)) < y.shape[1]:
+            print('[WARNING] VAD-BASED BATCH FILTERS ESTIMATION: not enough VAD=0 and VAD=1 frames to update batch filters.')
+            w = np.zeros((y.shape[1], yWola.shape[1], y.shape[1]))
+            for k in range(y.shape[1]):
+                w[0, :, k] = 1
+            return w
+        Ryy = compute_scm(yWola[vadFramewise.astype(bool), :, :])
+        Rnn = compute_scm(yWola[~vadFramewise.astype(bool), :, :])
 
     # Compute filter
     w = update_filter(
@@ -307,21 +316,30 @@ def run_batch_danse_wola(
             ), axis=2)
 
             # Compute covariance matrices
+            updateFilter = True
             if vad is None:
                 Ryy = compute_scm(yTilde)
                 Rnn = compute_scm(nTilde)
             else:
-                Ryy = 1 / np.sum(vadFramewise) *\
-                    compute_scm(yTilde[vadFramewise.astype(bool), :, :])
-                Rnn = 1 / np.sum(~vadFramewise) *\
-                    compute_scm(yTilde[~vadFramewise.astype(bool), :, :])
+                # Check if there are enough frames to compute batch-mode estimates
+                # using VAD information
+                if np.sum(vadFramewise.astype(bool)) < yTilde.shape[-1] or\
+                    np.sum(~vadFramewise.astype(bool)) < yTilde.shape[-1]:
+                    print('[WARNING] VAD-BASED BATCH DANSE FILTERS ESTIMATION: not enough VAD=0 and VAD=1 frames to update batch filters.')
+                    updateFilter = False
+                else:
+                    Ryy = 1 / np.sum(vadFramewise) *\
+                        compute_scm(yTilde[vadFramewise.astype(bool), :, :])
+                    Rnn = 1 / np.sum(~vadFramewise) *\
+                        compute_scm(yTilde[~vadFramewise.astype(bool), :, :])
             
-            if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
-                updateFilter = True
-            elif nodeUpdatingStrategy == 'simultaneous':
-                updateFilter = True
-            else:
-                updateFilter = False
+            if updateFilter:
+                if nodeUpdatingStrategy == 'sequential' and k == idxUpdatingNode:
+                    updateFilter = True
+                elif nodeUpdatingStrategy == 'simultaneous':
+                    updateFilter = True
+                else:
+                    updateFilter = False
 
             if updateFilter:
                 # Compute filter

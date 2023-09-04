@@ -349,8 +349,14 @@ def get_clean_signals(
                 fs,
                 fsTarget
             )
+        
+        # Loop signal if needed to reach desired duration
+        if dur > latentSignal.shape[0] / fsTarget:
+            nReps = int(np.ceil(dur * fsTarget / latentSignal.shape[0]))
+            latentSignal = np.tile(latentSignal, (nReps, 1)).T.flatten()
         # Truncate
         latentSignal = latentSignal[:int(dur * fsTarget)]
+
         if p.useVAD:
             # Get VAD
             vad = get_vad(
@@ -392,6 +398,8 @@ def get_clean_signals(
                 vad[idxStart:idxEnd, 0] = 0
             # Normalize power (using VAD)
             latentSignal /= get_power(latentSignal[np.squeeze(vad).astype(bool)])
+            if not p.useVAD:
+                vad = None
         else:
             # Normalize power
             latentSignal /= get_power(latentSignal)

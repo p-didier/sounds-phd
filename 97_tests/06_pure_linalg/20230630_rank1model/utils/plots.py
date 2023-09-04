@@ -160,12 +160,13 @@ def plot_final(
     axes.set_title(ti)
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
     flagBatchModeIncluded = any(['batch' in t for t in toPlot.keys()])
-    if flagBatchModeIncluded and vad is None:
+    if flagBatchModeIncluded:# and vad is None:
         axes.set_xlim([np.amin(durations), np.amax(durations)])
     else:
         axes.set_xlim([0, np.amax(xAxis)])
     
-    if 'online' in filterKey or 'wola' in filterKey:
+    if ('online' in filterKey or 'wola' in filterKey) and\
+        'batch' not in filterKey:
         # Add secondary x-axis with iterations
         ax2 = axes.secondary_xaxis("top")
         ax2.set_xticks(axes.get_xticks())

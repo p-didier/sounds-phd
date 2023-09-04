@@ -32,8 +32,8 @@ TO_COMPUTE = [
     'gevddanse_sim_wola_batch',  # WOLA-based GEVD-DANSE (batch)
     'gevdmwf_wola',  # WOLA-based GEVD-MWF (online)
     'gevddanse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
-    'mwf_wola',  # WOLA-based GEVD-MWF (online)
-    'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
+    # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
+    # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
 BETA_EXT = 0.0  # External exponential averaging factor
 B = 0  # Number of blocks between updates of fusion vectors in WOLA
@@ -43,8 +43,8 @@ SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if Non
 SIGNAL_TYPE = 'noise_real'  # Type of input signal
 # SIGNAL_TYPE = 'interrupt_noise_real'  # Type of input signal
 NOISE_POWER = 1  # [W] Noise power
-TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-# TAUS = [16.]  # [s] Time constants for exp. avg. in online filters
+# TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
+TAUS = [16.]  # [s] Time constants for exp. avg. in online filters
 IGNORE_FUSION_AT_SS_NODES = True  # If True, fusion is not performed at single-sensor nodes
 
 # Export parameters
