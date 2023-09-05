@@ -156,18 +156,6 @@ def add_vad_line(
         vad: np.ndarray,
     ):
     """Add VAD line to plot."""
-    # Generate VAD
-    # dur = np.amax(durations)
-    # nInterruptions = int(dur / interruptionPeriod)
-    # vad = np.ones((nSamples, 1))
-    # for k in range(nInterruptions):
-    #     idxStart = int(
-    #         ((k + 1) * interruptionPeriod - interruptionDuration) *\
-    #             fsTarget
-    #     )
-    #     idxEnd = int(idxStart + interruptionDuration * fsTarget)
-    #     vad[idxStart:idxEnd, 0] = 0
-    
     # Add VAD line to plot
     axesRight = axes.twinx()
     axesRight.plot(
