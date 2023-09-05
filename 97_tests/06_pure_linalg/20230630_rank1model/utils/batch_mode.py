@@ -3,8 +3,7 @@ from scipy import linalg as la
 from .common import *
 
 MAX_ITER_BATCH_DANSE = 100
-TOL_BATCH_DANSE = 1e-9
-
+TOL_BATCH_DANSE = 1e-4
 
 def run_batch_mwf(
         x: np.ndarray,
@@ -128,7 +127,7 @@ def run_batch_danse(
         label += ' [GEVD]'
     for iter in range(maxIter):
         if verbose:
-            print(f'{label} iteration {iter+1}/{maxIter}')
+            print(f'{label} iteration {iter+1} (max. {maxIter})')
         # Compute fused signals from all sensors
         fusedSignals = np.zeros((x.shape[0], nNodes), dtype=myDtype)
         fusedSignalsNoiseOnly = np.zeros((x.shape[0], nNodes), dtype=myDtype)
@@ -280,7 +279,7 @@ def run_batch_danse_wola(
         label += ' [GEVD]'
     for iter in range(maxIter):
         if verbose:
-            print(f'{label} iteration {iter+1}/{maxIter}')
+            print(f'{label} iteration {iter+1} (max. {maxIter})')
         # Compute fused signals from all sensors
         fusedSignals = np.zeros(
             (nFrames, nPosFreqs, nNodes),
@@ -381,10 +380,16 @@ def run_batch_danse_wola(
         if iter > 0:
             diff = 0
             for k in range(nNodes):
-                diff += np.mean(np.abs(w[k][:, iter + 1, :] - w[k][:, iter, :]))
-            if diff < tol:
+                diff += np.mean(
+                    np.abs(w[k][:, iter + 1, :] - w[k][:, iter, :]) /\
+                        np.amax(np.abs(w[k][:, iter, :]))
+                )
+            if diff < tol:  # normalize by number of frequency bins
                 if verbose:
                     print(f'Convergence reached after {iter+1} iterations')
+                break
+            if iter == maxIter - 2:
+                print(f'WARNING: Batch DANSE did not converge after {maxIter} iterations')
                 break
 
     # Format for output: just keep the iterations that were actually run

@@ -228,12 +228,16 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         
         if p.exportFigures:
             # Plot results
-            figTitleSuffix = ''
+            substr = ''
+            for mk in p.Mk:
+                substr += f'{mk},'
+            substr = substr[:-1]
+            figTitleSuffix = f'"{p.signalType}", $\\{{M_k\\}} = \\{{{substr}\\}}$ '
             if any([t.danse and (t.online or t.wola) for t in p.toCompute]):
-                figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$'
+                figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$ '
             if wolaParamsCurr.singleFreqBinIndex is not None and\
                 any([t.wola for t in p.toCompute]):
-                figTitleSuffix += f" [WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin]"
+                figTitleSuffix += f"[WOLA's {wolaParamsCurr.singleFreqBinIndex + 1}-th freq. bin]"
             fig = plot_final(
                 p.durations,
                 p.taus,

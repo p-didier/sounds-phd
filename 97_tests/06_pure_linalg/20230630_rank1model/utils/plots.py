@@ -160,10 +160,10 @@ def plot_final(
     axes.set_title(ti)
     axes.set_ylabel('$\\Delta$ bw. estimated filter and baseline')
     flagBatchModeIncluded = any(['batch' in t for t in toPlot.keys()])
-    if flagBatchModeIncluded:# and vad is None:
-        axes.set_xlim([np.amin(durations), np.amax(durations)])
-    else:
-        axes.set_xlim([0, np.amax(xAxis)])
+    # if flagBatchModeIncluded:# and vad is None:
+    #     axes.set_xlim([np.amin(durations), np.amax(durations)])
+    # else:
+    axes.set_xlim([0, np.amax(xAxis)])
     
     if ('online' in filterKey or 'wola' in filterKey) and\
         'batch' not in filterKey:
@@ -180,21 +180,21 @@ def plot_final(
     # Adapt y-axis limits to the data
     ymin, ymax = np.inf, -np.inf
     for idxFilter, filterKey in enumerate(toPlot.keys()):
-        if (('online' in filterKey or 'wola' in filterKey) and\
-            'batch' not in filterKey) and\
-            (flagBatchModeIncluded and vad is None):
-            idxStart = int(np.amin(durations) * fs // L)
-            ymin = min(
-                ymin,
-                np.amin(toPlot[filterKey][:, idxStart:, :])
-            )
-            ymax = max(
-                ymax,
-                np.amax(toPlot[filterKey][:, idxStart:, :])
-            )
-        else:
-            ymin = min(ymin, np.amin(toPlot[filterKey]))
-            ymax = max(ymax, np.amax(toPlot[filterKey]))
+        # if (('online' in filterKey or 'wola' in filterKey) and\
+        #     'batch' not in filterKey) and\
+        #     (flagBatchModeIncluded and vad is None):
+        #     idxStart = int(np.amin(durations) * fs // L)
+        #     ymin = min(
+        #         ymin,
+        #         np.amin(toPlot[filterKey][:, idxStart:, :])
+        #     )
+        #     ymax = max(
+        #         ymax,
+        #         np.amax(toPlot[filterKey][:, idxStart:, :])
+        #     )
+        # else:
+        ymin = min(ymin, np.amin(toPlot[filterKey]))
+        ymax = max(ymax, np.amax(toPlot[filterKey]))
     ymin *= 0.9
     ymax *= 1.1
     axes.set_ylim([ymin, ymax])
