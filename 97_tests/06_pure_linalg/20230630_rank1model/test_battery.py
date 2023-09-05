@@ -21,9 +21,11 @@ FILE_FOLDER = os.path.dirname(os.path.abspath(__file__))
 GLOBAL_SEED = 0  # Global seed for random number generator
 TMAX = 20  # [s] Maximum duration of the simulated data
 FS = 8000  # [Hz] Sampling frequency
-N_MC = 5  # Number of Monte Carlo repetitions
-N_MC_2 = 5  # Number of Monte Carlo repetitions for SC3
+N_MC = 1  # Number of Monte Carlo repetitions
+N_MC_2 = 1  # Number of Monte Carlo repetitions for SC3
 MAX_NUM_SENSORS_PER_NODE = 5  # Maximum number of sensors per node
+NUM_NODES_TEST3 = 3 # Number of nodes for test 3
+MIN_NUM_SENSORS_IN_TOTAL = 2 * NUM_NODES_TEST3  # Minimum number of sensors in total
 TO_COMPUTE = [
     # 'gevdmwf_batch',  # GEVD-MWF (batch)
     # 'gevdmwf_online',  # GEVD-MWF (online) 
@@ -35,28 +37,29 @@ TO_COMPUTE = [
     # 'mwf_wola',  # WOLA-based GEVD-MWF (online)
     # 'danse_sim_wola',  # WOLA-based GEVD-DANSE (online), simultaneous node-updating
 ]
-BETA_EXT = 0.0  # External exponential averaging factor
+BETA_EXT = 0  # External exponential averaging factor
 B = 0  # Number of blocks between updates of fusion vectors in WOLA
 # SINGLE_FREQ_BIN_INDEX = None  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 SINGLE_FREQ_BIN_INDEX = 99  # Index of the frequency bin to use for WOLA (if None: consider all bins)
 # SIGNAL_TYPE = 'noise_complex'  # Type of input signal
-SIGNAL_TYPE = 'noise_real'  # Type of input signal
+# SIGNAL_TYPE = 'noise_real'  # Type of input signal
 # SIGNAL_TYPE = 'interrupt_noise_real'  # Type of input signal
+SIGNAL_TYPE = 'speech'  # Type of input signal
 NOISE_POWER = 1  # [W] Noise power
-# TAUS = [2., 4., 8.]  # [s] Time constants for exp. avg. in online filters
-TAUS = [16.]  # [s] Time constants for exp. avg. in online filters
+TAUS = [2., 8.]  # [s] Time constants for exp. avg. in online filters
+# TAUS = [16.]  # [s] Time constants for exp. avg. in online filters
 IGNORE_FUSION_AT_SS_NODES = True  # If True, fusion is not performed at single-sensor nodes
 
 # Export parameters
-BATTERY_NAME = 'betaExt0p0'
-EXPORT_FOLDER = 'results\\20230904_withBatchWOLA'
+BATTERY_NAME = 'quickie1'
+EXPORT_FOLDER = 'results\\20230905_functionalRank1\\_quick'
 # EXPORT_FOLDER = 'results\\online\\fs8kHz'
 
 @dataclass
 class TestParameters:
     """Class for parameters of a single test."""
     seed: int = 0  # Seed for random number generator
-    K: int = 1  # Number of nodes
+    K: int = 2  # Number of nodes
     M: int = None # Number of sensors in total (if None, is randomized (at least equal to `K`))
     Mk: list[int] = None  # Number of sensors per node (if None, is randomized)
 
@@ -69,6 +72,10 @@ class TestParameters:
             if self.M is None:
                 for k in range(self.K):
                     self.Mk[k] = np.random.randint(1, MAX_NUM_SENSORS_PER_NODE + 1)
+                # If condition not met, re-randomize
+                while np.sum(self.Mk) < MIN_NUM_SENSORS_IN_TOTAL:
+                    for k in range(self.K):
+                        self.Mk[k] = np.random.randint(1, MAX_NUM_SENSORS_PER_NODE + 1)
             else:
                 # Distribute `self.M` sensors over `self.K` nodes
                 for k in range(self.K):
@@ -108,6 +115,7 @@ class TestOutput:
     description: str = ''
     parameters: TestParameters = TestParameters()
     results: dict[str, dict[str, np.ndarray]] = None
+    vad: np.ndarray = None
 
 
 def main():
@@ -149,7 +157,7 @@ def main():
                 parameters=[
                     TestParameters(
                         seed=batteryOfSeeds[n],
-                        K=3,
+                        K=NUM_NODES_TEST3,
                     ) for n in range(N_MC_2)  # Repeat `N_MC` times
                 ]
             )
@@ -190,9 +198,9 @@ def main():
         if isinstance(test.parameters, list):
             print(f'- Running battery of tests "{test.name}"...')
             for ii, parameters in enumerate(test.parameters):
-                print(f'-- Running "{test.name}" test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, M={parameters.M})...')
+                print(f'-- Running "{test.name}" test {ii + 1} of {len(test.parameters)} (seed: {parameters.seed}, Mk={parameters.Mk})...')
                 # Run test
-                res = run_test(
+                res, vad = run_test(
                     p=ScriptParameters(
                         nSensors=parameters.M,
                         nNodes=parameters.K,
@@ -208,14 +216,15 @@ def main():
                         name=f'{test.name}_{ii + 1}',
                         description=f'SEED: {parameters.seed} - {test.description}',
                         parameters=parameters,
-                        results=res
+                        results=res,
+                        vad=vad
                     )
                 )
         else:
-            print(f'- Running test "{test.name}"...')
+            print(f'- Running test "{test.name}" (seed: {test.parameters.seed}, Mk={test.parameters.Mk})...')
 
             # Run test
-            res = run_test(
+            res, vad = run_test(
                 p=ScriptParameters(
                     nSensors=test.parameters.M,
                     nNodes=test.parameters.K,
@@ -231,7 +240,8 @@ def main():
                     name=test.name,
                     description=test.description,
                     parameters=test.parameters,
-                    results=res
+                    results=res,
+                    vad=vad
                 )
             )
 

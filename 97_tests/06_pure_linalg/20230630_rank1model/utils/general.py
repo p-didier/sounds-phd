@@ -71,7 +71,7 @@ class ScriptParameters:
         fs=fs,
     )
     VADwinLength: float = 0.02  # seconds
-    VADenergyDecrease_dB: float = 10  # dB
+    VADenergyDecrease_dB: float = 40  # dB
     # Booleans vvvv
     randomDelays: bool = False
     showDeltaPerNode: bool = False
@@ -334,7 +334,8 @@ def get_clean_signals(
         p: ScriptParameters,
         scalings,
         fsTarget,
-        maxDelay=0.1
+        maxDelay=0.1,
+        verbose=True
     ):
 
     dur = np.amax(p.durations)
@@ -365,7 +366,8 @@ def get_clean_signals(
                 eFactdB=p.VADenergyDecrease_dB,
                 fs=fsTarget,
                 loadIfPossible=p.loadVadIfPossible,
-                vadFilesFolder=p.vadFilesFolder
+                vadFilesFolder=p.vadFilesFolder,
+                verbose=verbose
             )
             # Normalize power (including VAD)
             latentSignal /= get_power(
@@ -691,7 +693,15 @@ def get_sigma_wola(x, params: WOLAparameters):
     return sigmaWOLA
 
 
-def get_vad(x, tw, eFactdB, fs, loadIfPossible=False, vadFilesFolder=''):
+def get_vad(
+        x,
+        tw,
+        eFactdB,
+        fs,
+        loadIfPossible=False,
+        vadFilesFolder='',
+        verbose=True
+    ):
     """
     Oracle Voice Activity Detection (VAD) function. Returns the
     oracle VAD for a given speech (+ background noise) signal <x>.
@@ -723,7 +733,8 @@ def get_vad(x, tw, eFactdB, fs, loadIfPossible=False, vadFilesFolder=''):
     # Check if VAD can be loaded from file
     if loadIfPossible and os.path.isfile(vadFilename):
         # Load VAD from file
-        print(f'Loading VAD from file {vadFilename}')
+        if verbose:
+            print(f'Loading VAD from file {vadFilename}')
         vad = np.load(vadFilename)
     else:
         # Compute VAD

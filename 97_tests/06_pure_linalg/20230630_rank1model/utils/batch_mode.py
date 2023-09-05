@@ -324,8 +324,12 @@ def run_batch_danse_wola(
                 # using VAD information
                 if np.sum(vadFramewise.astype(bool)) < yTilde.shape[-1] or\
                     np.sum(~vadFramewise.astype(bool)) < yTilde.shape[-1]:
-                    print('[WARNING] VAD-BASED BATCH DANSE FILTERS ESTIMATION: not enough VAD=0 and VAD=1 frames to update batch filters.')
-                    updateFilter = False
+                    print('[WARNING] VAD-BASED BATCH WOLA-DANSE FILTERS ESTIMATION: not enough VAD=0 and VAD=1 frames to update batch filters.')
+                    # Format for output: just keep the iterations that were actually run
+                    wOut = np.zeros((x.shape[1], iter + 2, nPosFreqs, nNodes), dtype=complex)
+                    for k in range(nNodes):
+                        wOut[:, :, :, k] = wNet[:, :(iter + 2), :, k]
+                    return wOut  # return filters already, no need to go through iterations
                 else:
                     Ryy = 1 / np.sum(vadFramewise) *\
                         compute_scm(yTilde[vadFramewise.astype(bool), :, :])

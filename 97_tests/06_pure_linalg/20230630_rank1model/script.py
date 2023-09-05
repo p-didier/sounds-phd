@@ -104,6 +104,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 scalings,
                 wolaParamsCurr.fs,
                 maxDelay=0.1,
+                verbose=p.verbose
             )
             if vad is not None:
                 sigmaSr = np.sqrt(
@@ -266,7 +267,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             # plt.waitforbuttonpress()
             # plt.close('all')
 
-    return metricsData
+    return metricsData, vad
 
 
 if __name__ == '__main__':
