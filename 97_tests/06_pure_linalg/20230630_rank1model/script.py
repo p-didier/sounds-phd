@@ -91,8 +91,11 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
         for idxMC in range(p.nMC):
             print(f'Running Monte-Carlo iteration {idxMC+1}/{p.nMC}')
 
+            pCurr = copy.deepcopy(p)
+            pCurr.wolaParams = wolaParamsCurr
+            generate_signals(pCurr)
             # Get scalings
-            if 'complex' in p.signalType:
+            if 'complex' in p.targetSignalType:
                 scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
                     1j * np.random.uniform(low=0.5, high=1, size=p.nSensors)
             else:
@@ -233,7 +236,7 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             for mk in p.Mk:
                 substr += f'{mk},'
             substr = substr[:-1]
-            figTitleSuffix = f'"{p.signalType}", $\\{{M_k\\}} = \\{{{substr}\\}}$ '
+            figTitleSuffix = f'"{p.targetSignalType}", $\\{{M_k\\}} = \\{{{substr}\\}}$ '
             if any([t.danse and (t.online or t.wola) for t in p.toCompute]):
                 figTitleSuffix += f'$\\beta_{{\\mathrm{{EXT}}}} = {np.round(betaExtCurr, 4)}$ '
             if wolaParamsCurr.singleFreqBinIndex is not None and\

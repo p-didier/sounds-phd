@@ -1,3 +1,6 @@
+rank1model: false
+roomParams:
+  baseSNR: 0
 # Mk:
 # - 1
 # - 8
@@ -20,7 +23,7 @@ randomDelays: false
 seed: 0
 selfNoisePower: 1
 showDeltaPerNode: false
-signalType: speech
+targetSignalType: speech
 # signalType: noise_complex
 # signalType: noise_real
 # signalType: interrupt_noise_complex

@@ -4,6 +4,7 @@ import resampy
 import numpy as np
 import soundfile as sf
 from numba import njit
+import pyroomacoustics as pra
 from utils.batch_mode import *
 from utils.online_mwf import *
 from utils.online_danse import *
@@ -39,21 +40,63 @@ class FilterType:
             s += '_batch'
         return s
 
+
+@dataclass
+class RoomParameters:
+    dimensions: np.ndarray = np.array([5, 5, 5])
+        # ^^^ [x, y, z] dimensions of the room (in meters)
+    nTargetSources: int = 1
+    nInterferingSources: int = 1
+    reverberationTime: float = 0.0  # seconds
+    rirDuration: float = 0.1  # seconds
+    #
+    interferingSourceType: str = 'noise'  # 'babble' or 'noise'
+    baseSNR: float = 0  # dB
+    selfNoisePower: float = 0.01  # power of self-noise (per sensor)
+    #
+    minDistWalls: float = 0.5  # meters
+    nodeDiameter: float = 0.1  # meters
+
+    def __post_init__(self):
+        # vvvv TEMPORARY WARNINGS vvvv
+        if self.nTargetSources > 1:  # TODO: implement multiple target sources
+            raise NotImplementedError('Multiple target sources not implemented yet')
+        if self.nInterferingSources > 1:  # TODO: implement multiple interfering sources
+            raise NotImplementedError('Multiple interfering sources not implemented yet')
+        if self.interferingSourceType == 'babble':  # TODO: implement babble noise
+            raise NotImplementedError('Babble noise not implemented yet')
+        
+        if len(self.dimensions) != 3:
+            raise ValueError('`dimensions` should be a list of length 3')
+        if self.nTargetSources < 1:
+            raise ValueError('`nTargetSources` should be >= 1')
+        # Check that distance to walls is large enough
+        if np.any(np.array(self.dimensions) < 2 * self.minDistWalls):
+            raise ValueError('`minDistWalls` is too large compared to `dimensions`')
+        # Check that node diameter is small enough
+        if np.any(np.array(self.dimensions) < self.nodeDiameter):
+            raise ValueError('`nodeDiameter` is too large compared to `dimensions`')
+
+
 @dataclass
 class ScriptParameters:
-    signalType: str = 'speech'  
+    targetSignalType: str = 'speech'  
     # ^^^ 'speech', 'noise_real', 'noise_complex', ...
     #     ... 'interrupt_noise_real', 'interrupt_noise_complex'.
     interruptionDuration: float = 1  # seconds
     interruptionPeriod: float = 2  # seconds
     targetSignalSpeechFile: str = 'danse/tests/sigs/01_speech/speech2_16000Hz.wav'
+    minDuration: float = 3
+    maxDuration: float = 10
+    nDurationsBatch: int = 30
+    # Related to acoustic scenario vvv
     nSensors: int = 3
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
     selfNoisePower: float = 1
-    minDuration: float = 3
-    maxDuration: float = 10
-    nDurationsBatch: int = 30
+    rank1model: bool = True  # if False, use actual RIRs model
+    roomParams: RoomParameters = RoomParameters()
+    # Other vvv
     fs: float = 8e3
     nMC: int = 10
     exportFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/figs/for20230823marcUpdate'
@@ -86,7 +129,7 @@ class ScriptParameters:
 
     def __post_init__(self):
         if any(['wola' in t for t in self.toComputeStrings]) and\
-            'complex' in self.signalType:
+            'complex' in self.targetSignalType:
                 raise ValueError('WOLA not implemented for complex-valued signals')
         self.durations = np.linspace(
             self.minDuration,
@@ -96,13 +139,14 @@ class ScriptParameters:
         )
         if self.wolaParams.fs != self.fs:
             self.wolaParams.fs = self.fs
-        if 'interrupt' in self.signalType and\
+        if 'interrupt' in self.targetSignalType and\
             self.minDuration <= self.interruptionPeriod:
             raise ValueError('`minDuration` should be > `interruptionPeriod`')
         # Convert strings to FilterType objects
         self.toCompute = []
         for t in self.toComputeStrings:
             self.toCompute.append(string_to_filtertype(t))
+
 
 def string_to_filtertype(string):
     """Convert string to `FilterType` object."""
@@ -129,6 +173,136 @@ def string_to_filtertype(string):
             raise ValueError('`batch` and `online` cannot be combined')
         currType.batch = True  # default: False
     return currType
+
+
+def generate_signals(p: ScriptParameters):
+    """Generate signals."""
+    if p.rank1model:
+        return generate_signals_rank1model(p)
+    else:
+        return generate_signals_actualRIRs(p)
+
+
+def generate_signals_actualRIRs(p: ScriptParameters):
+
+    pp = p.roomParams  # shorter name
+    
+    # Generate source positions
+    Ns = pp.nTargetSources + pp.nInterferingSources
+    sourcesCoords = np.zeros((Ns, 3))
+    for k in range(Ns):
+        sourcesCoords[k, :] = np.random.uniform(
+            low=pp.minDistWalls,
+            high=pp.dimensions - pp.minDistWalls,
+            size=3
+        )
+    # targetCoords = sourcesCoords[:pp.nTargetSources, :]
+    # interfCoords = sourcesCoords[pp.nTargetSources:, :]
+
+    # Generate node and sensor positions
+    nodeCoords = np.zeros((p.nNodes, 3))
+    sensorCoords = [np.zeros((p.Mk[k], 3)) for k in range(p.nNodes)]
+    for k in range(p.nNodes):
+        delta = pp.nodeDiameter / 2 + pp.minDistWalls
+        nodeCoords[k, :] = np.random.uniform(
+            low=delta,
+            high=pp.dimensions - delta,
+            size=3
+        )
+        # Generate sensor positions
+        for m in range(p.Mk[k]):
+            localCoords = np.random.uniform(
+                low=-pp.nodeDiameter / 2,
+                high=pp.nodeDiameter / 2,
+                size=3
+            )
+            # Center sensor positions around node position
+            sensorCoords[k][m, :] = nodeCoords[k, :] + localCoords
+
+
+    # Create a room using pyroomacoustics
+    room = pra.ShoeBox(pp.dimensions, fs=p.fs, t0=0.0)
+
+    # Add sources and microphones to the room
+    for n in range(Ns):
+        room.add_source(sourcesCoords[n, :])
+    for k in range(p.nNodes):
+        for m in range(p.Mk[k]):
+            room.add_microphone(sensorCoords[k][m, :])
+
+    # Compute RIRs
+    room.compute_rir()
+    rirs = room.rir
+        # ^^^ [M x 1] list of [Ns x 1] lists of [nSamples x 1] arrays
+
+    # Apply RIRs to sources
+    cleanSigs, _, vad = get_clean_signals_fromRIRs(p, rirs)
+
+
+def generate_signals_rank1model(p: ScriptParameters):
+    """Generate signals using rank-1 model."""
+    # Get scalings
+    if 'complex' in p.targetSignalType:
+        scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
+            1j * np.random.uniform(low=0.5, high=1, size=p.nSensors)
+    else:
+        scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
+    # Get clean signals
+    nSamplesMax = int(np.amax(p.durations) * p.wolaParams.fs)
+    cleanSigs, _, vad = get_clean_signals(
+        p,
+        scalings,
+        maxDelay=0.1
+    )
+    if vad is not None:
+        sigmaSr = np.sqrt(
+            np.mean(
+                np.abs(
+                    cleanSigs[np.squeeze(vad).astype(bool), :]
+                ) ** 2,
+                axis=0
+            )
+        )
+        sigmaSrWOLA = get_sigma_wola(
+            cleanSigs[np.squeeze(vad).astype(bool), :],
+            p.wolaParams
+        )
+    else:
+        sigmaSr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+        sigmaSrWOLA = get_sigma_wola(cleanSigs, p.wolaParams)
+
+    # Generate noise signals
+    sigmaNr = np.zeros(p.nSensors)
+    if p.wolaParams.singleFreqBinIndex is not None:
+        sigmaNrWOLA = np.zeros((1, p.nSensors))
+    else:
+        sigmaNrWOLA = np.zeros((p.wolaParams.nPosFreqs, p.nSensors))
+    if np.iscomplex(cleanSigs).any():
+        noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
+    else:
+        noiseSignals = np.zeros((nSamplesMax, p.nSensors))
+    for n in range(p.nSensors):
+        # Generate random sequence with unit power
+        if np.iscomplex(cleanSigs).any():
+            randSequence = np.random.normal(size=nSamplesMax) +\
+                1j * np.random.normal(size=nSamplesMax)
+            
+        else:
+            randSequence = np.random.normal(size=nSamplesMax)
+        # Make unit power
+        randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
+        # Scale to desired power
+        noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
+        # Check power
+        sigmaNr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
+        if np.abs(sigmaNr[n] ** 2 - p.selfNoisePower) > 1e-6:
+            raise ValueError(f'Noise signal power is {sigmaNr[n] ** 2} instead of {p.selfNoisePower}')
+        sigmaNrWOLA[:, n] = get_sigma_wola(
+            noiseSignals[:, n],
+            p.wolaParams
+        )
+
+    return cleanSigs, noiseSignals, sigmaSr, sigmaNr, sigmaSrWOLA, sigmaNrWOLA, vad
 
 
 def compute_filter(
@@ -218,145 +392,34 @@ def compute_filter(
         elif type.wola:
             w = run_wola_mwf(**kwargs)
 
-
-    # if not type.danse and type.batch and not type.gevd:
-    #     RyyInv = np.linalg.inv(Ryy)
-    #     if np.iscomplex(cleanSigs).any():
-    #         w = np.zeros((nSensors, nSensors), dtype=np.complex128)
-    #     else:
-    #         w = np.zeros((nSensors, nSensors))
-    #     for n in range(nSensors):
-    #         e = np.zeros(nSensors)  # Selection vector
-    #         e[n] = 1
-    #         ryd = (Ryy - Rnn) @ e
-    #         w[:, n] = RyyInv @ ryd
-    # elif type == 'gevdmwf_batch':
-    #     sigma, Xmat = la.eigh(Ryy, Rnn)
-    #     idx = np.flip(np.argsort(sigma))
-    #     sigma = sigma[idx]
-    #     Xmat = Xmat[:, idx]
-    #     Qmat = np.linalg.inv(Xmat.T.conj())
-    #     Dmat = np.zeros((nSensors, nSensors))
-    #     Dmat[:rank, :rank] = np.diag(1 - 1 / sigma[:rank])
-    #     w = Xmat @ Dmat @ Qmat.T.conj()   # see eq. (24) in [1]
-    # elif type == 'mwf_online':
-    #     w = run_online_mwf(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='regular',
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif type == 'gevdmwf_online':
-    #     w = run_online_mwf(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='gevd',
-    #         rank=rank,
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif type == 'mwf_wola_b':  # batch-mode WOLA-MWF
-    #     w = run_batch_mwf_wola(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='regular',
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif type == 'gevdmwf_wola_b':  # batch-mode WOLA-GEVD-MWF
-    #     w = run_batch_mwf_wola(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='gevd',
-    #         rank=rank,
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif type == 'mwf_wola':
-    #     w = run_wola_mwf(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='regular',
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif type == 'gevdmwf_wola':
-    #     w = run_wola_mwf(
-    #         x=cleanSigs,
-    #         n=noiseOnlySigs,
-    #         filterType='gevd',
-    #         rank=rank,
-    #         p=wolaParams,
-    #         verbose=verbose,
-    #         vad=vad
-    #     )
-    # elif 'danse' in type:
-    #     kwargsBatch = {
-    #         'x': cleanSigs,
-    #         'n': noiseOnlySigs,
-    #         'referenceSensorIdx': 0,
-    #         'channelToNodeMap': channelToNodeMap,
-    #         'filterType': 'gevd' if 'gevd' in type else 'regular',
-    #         'rank': rank,
-    #         'verbose': verbose,
-    #         'vad': vad
-    #     }
-    #     if 'sim' in type:
-    #         kwargsBatch['nodeUpdatingStrategy'] = 'simultaneous'
-    #     else:
-    #         kwargsBatch['nodeUpdatingStrategy'] = 'sequential'
-
-    #     # Keyword-arguments for online-mode DANSE function
-    #     kwargsOnline = copy.deepcopy(kwargsBatch)
-    #     kwargsOnline['p'] = wolaParams
-    #     kwargsOnline['ignoreFusionForSSNodes'] = noSSfusion
-    
-    #     if batchFusionInOnline:
-    #         wBatchNetWide = run_danse(**kwargsBatch)
-    #         kwargsOnline['batchModeNetWideFilters'] = wBatchNetWide
-        
-    #     if 'wola' in type:
-    #         w = run_wola_danse(**kwargsOnline)
-    #     elif 'online' in type:
-    #         w = run_online_danse(**kwargsOnline)
-    #     else:
-    #         w = run_danse(**kwargsBatch)
     return w
 
 
-def get_clean_signals(
-        p: ScriptParameters,
-        scalings,
-        fsTarget,
-        maxDelay=0.1,
-        verbose=True
-    ):
-
+def get_latent_signal(p: ScriptParameters, overridingType=None):
+    """Get latent signal (speech or noise (possibly interrupted))."""
     dur = np.amax(p.durations)
     # Load target signal
     vad = None
-    if p.signalType == 'speech':
+
+    signalType = overridingType if overridingType is not None\
+        else p.targetSignalType
+
+    if signalType == 'speech':
         latentSignal, fs = sf.read(p.targetSignalSpeechFile)
-        if fs != fsTarget:
+        if fs != p.wolaParams.fs:
             # Resample
             latentSignal = resampy.resample(
                 latentSignal,
                 fs,
-                fsTarget
+                p.wolaParams.fs
             )
         
         # Loop signal if needed to reach desired duration
-        if dur > latentSignal.shape[0] / fsTarget:
-            nReps = int(np.ceil(dur * fsTarget / latentSignal.shape[0]))
+        if dur > latentSignal.shape[0] / p.wolaParams.fs:
+            nReps = int(np.ceil(dur * p.wolaParams.fs / latentSignal.shape[0]))
             latentSignal = np.tile(latentSignal, (nReps, 1)).T.flatten()
         # Truncate
-        latentSignal = latentSignal[:int(dur * fsTarget)]
+        latentSignal = latentSignal[:int(dur * p.wolaParams.fs)]
 
         if p.useVAD:
             # Get VAD
@@ -364,10 +427,10 @@ def get_clean_signals(
                 x=latentSignal,
                 tw=p.VADwinLength,
                 eFactdB=p.VADenergyDecrease_dB,
-                fs=fsTarget,
+                fs=p.wolaParams.fs,
                 loadIfPossible=p.loadVadIfPossible,
                 vadFilesFolder=p.vadFilesFolder,
-                verbose=verbose
+                verbose=p.verbose
             )
             # Normalize power (including VAD)
             latentSignal /= get_power(
@@ -376,16 +439,16 @@ def get_clean_signals(
         else:
             # Normalize power
             latentSignal /= get_power(latentSignal)
-    elif 'noise' in p.signalType:
-        if 'real' in p.signalType:
-            # Generate noise signal (real-valued)
-            latentSignal = np.random.normal(size=int(dur * fsTarget))
-        elif 'complex' in p.signalType:
+    elif 'noise' in signalType:
+        if 'complex' in signalType:
             # Generate noise signal (complex-valued)
-            latentSignal = np.random.normal(size=int(dur * fsTarget)) +\
-                1j * np.random.normal(size=int(dur * fsTarget))
+            latentSignal = np.random.normal(size=int(dur * p.wolaParams.fs)) +\
+                1j * np.random.normal(size=int(dur * p.wolaParams.fs))
+        else:
+            # Generate noise signal (real-valued)
+            latentSignal = np.random.normal(size=int(dur * p.wolaParams.fs))
         
-        if 'interrupt' in p.signalType:
+        if 'interrupt' in signalType:
             # Add `p.interruptionDuration`-long interruptions every
             # `p.interruptionPeriod` seconds 
             nInterruptions = int(dur / p.interruptionPeriod)
@@ -393,9 +456,9 @@ def get_clean_signals(
             for k in range(nInterruptions):
                 idxStart = int(
                     ((k + 1) * p.interruptionPeriod - p.interruptionDuration) *\
-                        fsTarget
+                        p.wolaParams.fs
                 )
-                idxEnd = int(idxStart + p.interruptionDuration * fsTarget)
+                idxEnd = int(idxStart + p.interruptionDuration * p.wolaParams.fs)
                 latentSignal[idxStart:idxEnd] = 0
                 vad[idxStart:idxEnd, 0] = 0
             # Normalize power (using VAD)
@@ -405,6 +468,19 @@ def get_clean_signals(
         else:
             # Normalize power
             latentSignal /= get_power(latentSignal)
+
+    return latentSignal, vad
+
+
+def get_clean_signals(
+        p: ScriptParameters,
+        scalings,
+        maxDelay=0.1
+    ):
+    """Get clean signals."""
+
+    # Get latent signal
+    latentSignal, vad = get_latent_signal(p)
     
     # Generate clean signals
     mat = np.tile(latentSignal, (p.nSensors, 1)).T
@@ -413,10 +489,87 @@ def get_clean_signals(
     # Random delays
     if p.randomDelays:
         for n in range(p.nSensors):
-            delay = np.random.randint(0, int(maxDelay * fsTarget))
+            delay = np.random.randint(0, int(maxDelay * p.wolaParams.fs))
             cleanSigs[:, n] = np.roll(cleanSigs[:, n], delay)
 
     return cleanSigs, latentSignal, vad
+
+
+def get_clean_signals_fromRIRs(p: ScriptParameters, rirs):
+    """Get clean signals from RIRs."""
+
+    def _convolve(x, h):
+        return np.convolve(x, h, mode='full')[:len(x)]
+
+    # Get latent target signal
+    latentTargetSignal, vad = get_latent_signal(p)
+    # Get latent noise signals
+    latentNoiseSignal, _ = get_latent_signal(
+        p,
+        overridingType=p.roomParams.interferingSourceType
+    )
+    # Adapt SNR using `p.roomParams.baseSNR`
+    latentNoiseSignal *= np.sqrt(
+        get_power(latentTargetSignal) / get_power(latentNoiseSignal)
+    )
+    latentNoiseSignal *= 10 ** (-p.roomParams.baseSNR / 20)
+
+    # Stack latent signals for later use
+    latentSignals = np.vstack((
+        latentTargetSignal,
+        latentNoiseSignal
+    ))
+    nSamples = latentTargetSignal.shape[0]
+
+    # Get number of sources (shorter name)
+    Ns = p.roomParams.nInterferingSources + p.roomParams.nTargetSources
+
+    # Generate clean signals
+    micSigs = np.zeros((nSamples, p.nSensors))
+    noiseOnlySigs = np.zeros((nSamples, p.nSensors))
+    targetOnlySigs = np.zeros((nSamples, p.nSensors))
+    selfNoiseSigs = np.zeros((nSamples, p.nSensors))
+    for m in range(p.nSensors):
+        for s in range(Ns):
+            currRir = rirs[m][s]
+            # Convolve with RIR
+            micSigs[:, m] += _convolve(
+                latentSignals[s, :],
+                currRir
+            )
+            if s < p.roomParams.nTargetSources:
+                targetOnlySigs[:, m] += _convolve(
+                    latentSignals[s, :],
+                    currRir
+                )
+            else:
+                noiseOnlySigs[:, m] += _convolve(
+                    latentSignals[s, :],
+                    currRir
+                )
+        # Generate self-noise 
+        selfNoiseSigs[:, m] = np.random.normal(
+            size=nSamples
+        ) * np.sqrt(p.roomParams.selfNoisePower)
+        # Add self-noise to source signals
+        micSigs[:, m] += selfNoiseSigs[:, m]
+
+    # Normalize power with respect to microphone #1
+    # FIXME: this is not correct for now [PD~2023.09.05 5PM]
+    if vad is None:
+        micSigs /= get_power(micSigs[:, 0])
+        targetOnlySigs /= get_power(micSigs[:, 0])
+        noiseOnlySigs /= get_power(micSigs[:, 0])
+        selfNoiseSigs /= get_power(micSigs[:, 0])
+    else:
+        micSigs /= get_power(micSigs[np.squeeze(vad).astype(bool), 0])
+        targetOnlySigs /= get_power(micSigs[np.squeeze(vad).astype(bool), 0])
+        noiseOnlySigs /= get_power(micSigs[np.squeeze(vad).astype(bool), 0])
+        selfNoiseSigs /= get_power(micSigs[np.squeeze(vad).astype(bool), 0])
+
+    stop = 1
+
+
 
 
 def get_power(x):
