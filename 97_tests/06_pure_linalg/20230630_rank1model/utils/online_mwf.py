@@ -106,7 +106,8 @@ def run_wola_mwf(
     y = x + n
 
     # Compute WOLA domain signal
-    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    yWola, vadFramewise = to_wola(p, y, vad, verbose)
+    nWola, _ = to_wola(p, n, None, verbose)
     nPosFreqs = yWola.shape[1]
     
     # Initialize

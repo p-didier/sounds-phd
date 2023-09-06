@@ -93,69 +93,68 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
 
             pCurr = copy.deepcopy(p)
             pCurr.wolaParams = wolaParamsCurr
-            generate_signals(pCurr)
-            # Get scalings
-            if 'complex' in p.targetSignalType:
-                scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
-                    1j * np.random.uniform(low=0.5, high=1, size=p.nSensors)
-            else:
-                scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
-            # Get clean signals
-            nSamplesMax = int(np.amax(p.durations) * wolaParamsCurr.fs)
-            cleanSigs, _, vad = get_clean_signals(
-                p,
-                scalings,
-                wolaParamsCurr.fs,
-                maxDelay=0.1,
-                verbose=p.verbose
-            )
-            if vad is not None:
-                sigmaSr = np.sqrt(
-                    np.mean(
-                        np.abs(
-                            cleanSigs[np.squeeze(vad).astype(bool), :]
-                        ) ** 2,
-                        axis=0
-                    )
-                )
-                sigmaSrWOLA = get_sigma_wola(
-                    cleanSigs[np.squeeze(vad).astype(bool), :],
-                    wolaParamsCurr
-                )
-            else:
-                sigmaSr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
-                sigmaSrWOLA = get_sigma_wola(cleanSigs, wolaParamsCurr)
+            cleanSigs, noiseSignals, scalings, sigmaSr, sigmaNr,\
+                sigmaSrWOLA, sigmaNrWOLA, vad = generate_signals(pCurr)
+            # # Get scalings
+            # if 'complex' in p.targetSignalType:
+            #     scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
+            #         1j * np.random.uniform(low=0.5, high=1, size=p.nSensors)
+            # else:
+            #     scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors)
+            # # Get clean signals
+            # nSamplesMax = int(np.amax(p.durations) * wolaParamsCurr.fs)
+            # cleanSigs, _, vad = get_clean_signals(
+            #     p,
+            #     scalings,
+            #     maxDelay=0.1,
+            # )
+            # if vad is not None:
+            #     sigmaSr = np.sqrt(
+            #         np.mean(
+            #             np.abs(
+            #                 cleanSigs[np.squeeze(vad).astype(bool), :]
+            #             ) ** 2,
+            #             axis=0
+            #         )
+            #     )
+            #     sigmaSrWOLA = get_sigma_wola(
+            #         cleanSigs[np.squeeze(vad).astype(bool), :],
+            #         wolaParamsCurr
+            #     )
+            # else:
+            #     sigmaSr = np.sqrt(np.mean(np.abs(cleanSigs) ** 2, axis=0))
+            #     sigmaSrWOLA = get_sigma_wola(cleanSigs, wolaParamsCurr)
 
-            # Generate noise signals
-            sigmaNr = np.zeros(p.nSensors)
-            if wolaParamsCurr.singleFreqBinIndex is not None:
-                sigmaNrWOLA = np.zeros((1, p.nSensors))
-            else:
-                sigmaNrWOLA = np.zeros((wolaParamsCurr.nPosFreqs, p.nSensors))
-            if np.iscomplex(cleanSigs).any():
-                noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
-            else:
-                noiseSignals = np.zeros((nSamplesMax, p.nSensors))
-            for n in range(p.nSensors):
-                # Generate random sequence with unit power
-                if np.iscomplex(cleanSigs).any():
-                    randSequence = np.random.normal(size=nSamplesMax) +\
-                        1j * np.random.normal(size=nSamplesMax)
+            # # Generate noise signals
+            # sigmaNr = np.zeros(p.nSensors)
+            # if wolaParamsCurr.singleFreqBinIndex is not None:
+            #     sigmaNrWOLA = np.zeros((1, p.nSensors))
+            # else:
+            #     sigmaNrWOLA = np.zeros((wolaParamsCurr.nPosFreqs, p.nSensors))
+            # if np.iscomplex(cleanSigs).any():
+            #     noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
+            # else:
+            #     noiseSignals = np.zeros((nSamplesMax, p.nSensors))
+            # for n in range(p.nSensors):
+            #     # Generate random sequence with unit power
+            #     if np.iscomplex(cleanSigs).any():
+            #         randSequence = np.random.normal(size=nSamplesMax) +\
+            #             1j * np.random.normal(size=nSamplesMax)
                     
-                else:
-                    randSequence = np.random.normal(size=nSamplesMax)
-                # Make unit power
-                randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
-                # Scale to desired power
-                noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
-                # Check power
-                sigmaNr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
-                if np.abs(sigmaNr[n] ** 2 - p.selfNoisePower) > 1e-6:
-                    raise ValueError(f'Noise signal power is {sigmaNr[n] ** 2} instead of {p.selfNoisePower}')
-                sigmaNrWOLA[:, n] = get_sigma_wola(
-                    noiseSignals[:, n],
-                    wolaParamsCurr
-                )
+            #     else:
+            #         randSequence = np.random.normal(size=nSamplesMax)
+            #     # Make unit power
+            #     randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
+            #     # Scale to desired power
+            #     noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
+            #     # Check power
+            #     sigmaNr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
+            #     if np.abs(sigmaNr[n] ** 2 - p.selfNoisePower) > 1e-6:
+            #         raise ValueError(f'Noise signal power is {sigmaNr[n] ** 2} instead of {p.selfNoisePower}')
+            #     sigmaNrWOLA[:, n] = get_sigma_wola(
+            #         noiseSignals[:, n],
+            #         wolaParamsCurr
+            #     )
 
             # Compute desired filters
             allFilters = get_filters(
@@ -173,6 +172,9 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 verbose=p.verbose,
                 vad=vad
             )
+
+            if p.targetSignalType == 'speech' and p.listenToSpeech:
+                listen_to_speech(p, allFilters, cleanSigs, noiseSignals)
 
             # Compute metrics
             for filterType in p.toCompute:

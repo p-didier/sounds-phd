@@ -1,12 +1,16 @@
 import os
 import copy
+import time
 import resampy
 import numpy as np
 import soundfile as sf
 from numba import njit
+import simpleaudio as sa
+from utils.common import *
 import pyroomacoustics as pra
 from utils.batch_mode import *
 from utils.online_mwf import *
+import matplotlib.pyplot as plt
 from utils.online_danse import *
 from dataclasses import dataclass, field
 
@@ -124,6 +128,7 @@ class ScriptParameters:
     verbose: bool = True
     useVAD: bool = True  # use VAD for online processing of nonsstationary signals
     loadVadIfPossible: bool = True  # if True, load VAD from file if possible
+    listenToSpeech: bool = False  # if True, listen to speech signal
     # Strings vvvv
     vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
 
@@ -135,7 +140,7 @@ class ScriptParameters:
             self.minDuration,
             self.maxDuration,
             self.nDurationsBatch,
-            endpoint=True
+            endpoint=True   # include `maxDuration`
         )
         if self.wolaParams.fs != self.fs:
             self.wolaParams.fs = self.fs
@@ -238,6 +243,8 @@ def generate_signals_actualRIRs(p: ScriptParameters):
     # Apply RIRs to sources
     cleanSigs, _, vad = get_clean_signals_fromRIRs(p, rirs)
 
+    return cleanSigs, vad
+
 
 def generate_signals_rank1model(p: ScriptParameters):
     """Generate signals using rank-1 model."""
@@ -302,7 +309,7 @@ def generate_signals_rank1model(p: ScriptParameters):
             p.wolaParams
         )
 
-    return cleanSigs, noiseSignals, sigmaSr, sigmaNr, sigmaSrWOLA, sigmaNrWOLA, vad
+    return cleanSigs, noiseSignals, scalings, sigmaSr, sigmaNr, sigmaSrWOLA, sigmaNrWOLA, vad
 
 
 def compute_filter(
@@ -1002,3 +1009,127 @@ def dot_to_p(x):
     Converts a float to a string with a 'p' instead of a '.'.
     """
     return str(x).replace('.', 'p')
+
+
+def listen_to_speech(p: ScriptParameters, allFilters, x, n):
+    """Listen to speech signal with different filters applied."""
+
+    # Mic signals
+    y = x + n
+
+    dhat = {}
+
+    for filterType in p.toCompute:
+        ref = filterType.to_str()
+        currFilters = allFilters[ref]
+        if filterType.wola and p.wolaParams.singleFreqBinIndex is None:
+            if filterType.batch:
+                currFilt = currFilters[-1, :, -1, :, :]  # get max. duration filter
+                dhat[ref] = np.zeros((y.shape[0], p.nNodes))
+                for k in range(p.nNodes):
+                    currFilt_k = currFilt[:, :, k]
+                    # Apply filter
+                    dhat[ref][:, k] = apply_filter_wola(
+                        y,
+                        currFilt_k,
+                        p.wolaParams
+                    )
+            else:
+                nTaus = currFilters.shape[0]
+                dhat[ref] = np.zeros((y.shape[0], nTaus, p.nNodes))
+                for idxTau in range(nTaus):
+                    currFilt = currFilters[idxTau, :, :, :, :]
+                    for k in range(p.nNodes):
+                        currFilt_k = currFilt[:, :, :, k]
+                        # Apply filter
+                        dhat[ref][:, idxTau, k] = apply_filter_wola(
+                            y,
+                            currFilt_k,
+                            p.wolaParams
+                        )
+        elif filterType.online:
+            raise NotImplementedError
+        elif filterType.batch:
+            raise NotImplementedError
+        else:
+            print('Cannot obtain full-band filtered signals.')
+
+    # Plot signals
+    fig, axes = plt.subplots(1, 1)
+    fig.set_size_inches(8.5, 3.5)
+    refSensorIdx = 0
+    # Plot waveforms above one another
+    delta = np.amax(np.abs(y[:, refSensorIdx])) * 1.5
+    for idx, ref in enumerate(dhat.keys()):
+        if len(dhat[ref].shape) == 3:
+            for idxTau in range(dhat[ref].shape[1]):
+                axes.plot(
+                    dhat[ref][:, idxTau, refSensorIdx] + delta * idx,
+                    label=f'{ref} ($\\tau_{{{idxTau + 1}}}$)'
+                )
+        else:
+            axes.plot(dhat[ref][:, refSensorIdx] + delta * idx, label=ref)
+    axes.plot(x[:, refSensorIdx] + delta * len(dhat.keys()), label=f'Target signal (mic {refSensorIdx + 1})')
+    axes.plot(y[:, refSensorIdx] + delta * (len(dhat.keys()) + 1), label=f'Microphone signal (mic {refSensorIdx + 1})')
+    plt.legend()
+    plt.show()
+
+    # Compute metrics
+    
+
+    stop = 1
+
+def apply_filter_wola(y: np.ndarray, h: np.ndarray, p: WOLAparameters):
+    """Apply filter in WOLA-domain."""
+
+    # Transform to WOLA-domain
+    yWola, _ = to_wola(
+        p, y, vad=None, verbose=False
+    )
+    
+    # Apply filter in WOLA-domain to each time-frequency bin
+    filteredY = np.zeros(
+        (yWola.shape[0], yWola.shape[1]),
+        dtype=np.complex128
+    )
+    for i in range(yWola.shape[0]):
+        currFrame = yWola[i, :, :]
+        if len(h.shape) == 2:
+            currFilt = h.T
+            op = 'ij,ij->i'
+        else:
+            currFilt = h[:, i, :].T
+            op = 'ij,ij->i'
+        
+        filteredY[i, :] = np.einsum(
+            op,
+            currFrame,
+            currFilt.conj()
+        )
+    
+    # Transform back to time-domain
+    out = from_wola(p, filteredY)
+
+    # Pad or truncate to original length
+    if out.shape[0] < y.shape[0]:
+        out = np.concatenate((
+            out,
+            np.zeros((y.shape[0] - out.shape[0], 1))
+        ), axis=0)
+    elif out.shape[0] > y.shape[0]:
+        out = out[:y.shape[0], :]
+
+    if 0:
+        in_line_listen(y[:, 0], p.fs, 3)
+        time.sleep(3)
+        in_line_listen(out, p.fs, 3)
+
+    return np.squeeze(out)
+
+
+def in_line_listen(signal, fs, duration):
+    """Listen to signal."""
+    nSamples = int(duration * fs)
+    audio_array = signal[:nSamples] *  32767 / max(abs(signal[:nSamples]))
+    audio_array = audio_array.astype(np.int16)
+    sa.play_buffer(audio_array, 1, 2, int(8e3))

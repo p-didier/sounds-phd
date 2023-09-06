@@ -53,7 +53,8 @@ def run_batch_mwf_wola(
     # Get noisy signal (time-domain)
     y = x + n
     # Compute WOLA domain signal
-    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    yWola, vadFramewise = to_wola(p, y, vad, verbose)
+    nWola, _ = to_wola(p, n, None, verbose)
 
     # Compute batch-mode covariance matrices
     if vad is None:
@@ -250,7 +251,8 @@ def run_batch_danse_wola(
     # Get noisy signal
     y = x + n
     # Compute WOLA domain signal
-    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    yWola, vadFramewise = to_wola(p, y, vad, verbose)
+    nWola, _ = to_wola(p, n, None, verbose)
     nFrames = yWola.shape[0]
     nPosFreqs = yWola.shape[1]
     # Get number of nodes

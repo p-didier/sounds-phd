@@ -32,7 +32,9 @@ def run_wola_danse(
     y = x + n
 
     # Convert to WOLA domain
-    yWola, nWola, vadFramewise = to_wola(p, y, n, vad, verbose)
+    yWola, vadFramewise = to_wola(p, y, vad, verbose)
+    nWola, _ = to_wola(p, n, None, verbose)
+    
     nPosFreqs = yWola.shape[1]
     
     # Initialize

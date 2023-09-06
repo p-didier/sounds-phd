@@ -17,6 +17,8 @@ def get_window(winType, nfft):
         raise ValueError('Window type not recognized')
 
     return win
+
+
 @dataclass
 class WOLAparameters:
     nfft: int = 1024
@@ -212,53 +214,83 @@ def update_filter(
 
 def to_wola(
         p: WOLAparameters,
-        y: np.ndarray,
-        n: np.ndarray,
+        sig: np.ndarray,
         vad: np.ndarray=None,
         verbose=False,
     ):
+    """Converts time-domain signal to WOLA domain signal."""
     # Get number of nodes
-    nSensors = y.shape[1]
+    nSensors = sig.shape[1]
     # Get number of frames
-    nIter = y.shape[0] // p.hop - 1
+    nIter = sig.shape[0] // p.hop - 1
     # Compute WOLA domain signal
     win = get_window(p.winType, p.nfft)
-    yWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
-    nWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
+    sigWola = np.zeros((nIter, p.nfft, nSensors), dtype=np.complex128)
     vadFramewise = np.full((nIter, nSensors), fill_value=None)
     for m in range(nSensors):
         for i in range(nIter):
             idxBegFrame = i * p.hop
             idxEndFrame = idxBegFrame + p.nfft
-            yWola[i, :, m] = np.fft.fft(
-                y[idxBegFrame:idxEndFrame, m] * win
-            ) / np.sqrt(p.hop)
-            nWola[i, :, m] = np.fft.fft(
-                n[idxBegFrame:idxEndFrame, m] * win
+            sigWola[i, :, m] = np.fft.fft(
+                sig[idxBegFrame:idxEndFrame, m] * win
             ) / np.sqrt(p.hop)
             # Get VAD for current frame
             if vad is not None:
                 vadCurr = vad[idxBegFrame:idxEndFrame]
-                # Convert to single boolean value (True if at least 50% of the frame is active)
-                vadFramewise[i, m] = np.sum(vadCurr.astype(bool)) > p.nfft // 2
+                # Convert to single boolean value
+                # (True if at least 50% of the frame is active)
+                vadFramewise[i, m] =\
+                    np.sum(vadCurr.astype(bool)) > p.nfft // 2
     # Convert to single boolean value
     vadFramewise = np.any(vadFramewise, axis=1)
     # Get number of positive frequencies
     nPosFreqs = p.nfft // 2 + 1
     # Keep only positive frequencies (spare computations)
-    yWola = yWola[:, :nPosFreqs, :]
-    nWola = nWola[:, :nPosFreqs, :]
+    sigWola = sigWola[:, :nPosFreqs, :]
 
     # Special user request: single frequency bin study
     if p.singleFreqBinIndex is not None:
         if verbose:
             print(f'/!\ /!\ /!\ WOLA-MWF: single frequency bin study (index {p.singleFreqBinIndex})')
-        yWola = yWola[:, p.singleFreqBinIndex, :]
-        nWola = nWola[:, p.singleFreqBinIndex, :]
-        yWola = np.expand_dims(yWola, axis=1)  # add singleton dimension
-        nWola = np.expand_dims(nWola, axis=1)
+        sigWola = sigWola[:, p.singleFreqBinIndex, :]
+        sigWola = np.expand_dims(sigWola, axis=1)  # add singleton dimension
         nPosFreqs = 1
 
-    return yWola, nWola, vadFramewise
+    return sigWola, vadFramewise
 
 
+def from_wola(
+        p: WOLAparameters,
+        sigWola: np.ndarray,
+    ):
+    """Converts WOLA domain signal to time-domain signal."""
+
+    if len(sigWola.shape) == 2:
+        sigWola = sigWola[:, :, np.newaxis]  # single-sensor case
+
+    # Get number of nodes
+    nSensors = sigWola.shape[-1]
+    # Get number of frames
+    nIter = sigWola.shape[0]
+    # Compute time-domain signal
+    win = get_window(p.winType, p.nfft)
+    sig = np.zeros((nIter * p.hop + p.nfft, nSensors), dtype=np.complex128)
+    for m in range(nSensors):
+        for i in range(nIter):
+            idxBegFrame = i * p.hop
+            idxEndFrame = idxBegFrame + p.nfft
+            # Re-include negative frequencies
+            currSigFrame = np.concatenate((
+                sigWola[i, :, m],
+                np.flip(sigWola[i, 1:-1, m].conj(), axis=0)
+            ))
+
+            sig[idxBegFrame:idxEndFrame, m] += np.fft.ifft(
+                currSigFrame * np.sqrt(p.hop)
+            ) * win
+    # Remove zero-padding
+    sig = sig[p.nfft:-p.nfft, :]
+    
+    sig = np.real_if_close(sig, tol=1000)
+
+    return sig
