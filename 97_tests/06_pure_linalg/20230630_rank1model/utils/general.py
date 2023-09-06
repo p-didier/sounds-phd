@@ -1,4 +1,5 @@
 import os
+import sys
 import copy
 import time
 import resampy
@@ -13,7 +14,8 @@ from utils.online_mwf import *
 import matplotlib.pyplot as plt
 from utils.online_danse import *
 from dataclasses import dataclass, field
-
+sys.path.append('./danse')
+from danse_toolbox.d_eval import get_metrics as get_metrics_from_toolbox
 
 @dataclass
 class FilterType:
@@ -128,7 +130,8 @@ class ScriptParameters:
     verbose: bool = True
     useVAD: bool = True  # use VAD for online processing of nonsstationary signals
     loadVadIfPossible: bool = True  # if True, load VAD from file if possible
-    listenToSpeech: bool = False  # if True, listen to speech signal
+    speechPlots: bool = False  # if True, plots waveforms and metrics for speech signals
+    exportFilteredSignals: bool = False  # if True, export filtered signals
     # Strings vvvv
     vadFilesFolder: str = '97_tests/06_pure_linalg/20230630_rank1model/vad_files'
 
@@ -1011,13 +1014,18 @@ def dot_to_p(x):
     return str(x).replace('.', 'p')
 
 
-def listen_to_speech(p: ScriptParameters, allFilters, x, n):
-    """Listen to speech signal with different filters applied."""
+def speech_plots(
+        p: ScriptParameters,
+        allFilters,
+        x,
+        n,
+        vad
+    ):
+    """Produce plots (waveforms and metrics) for a speech-like
+    target signal."""
 
-    # Mic signals
-    y = x + n
-
-    dhat = {}
+    dhatTarget = {}   # for target signal(s)
+    dhatInterf = {}   # for interfering signal(s)
 
     for filterType in p.toCompute:
         ref = filterType.to_str()
@@ -1025,25 +1033,37 @@ def listen_to_speech(p: ScriptParameters, allFilters, x, n):
         if filterType.wola and p.wolaParams.singleFreqBinIndex is None:
             if filterType.batch:
                 currFilt = currFilters[-1, :, -1, :, :]  # get max. duration filter
-                dhat[ref] = np.zeros((y.shape[0], p.nNodes))
+                dhatTarget[ref] = np.zeros((x.shape[0], p.nNodes))
+                dhatInterf[ref] = np.zeros((x.shape[0], p.nNodes))
                 for k in range(p.nNodes):
                     currFilt_k = currFilt[:, :, k]
                     # Apply filter
-                    dhat[ref][:, k] = apply_filter_wola(
-                        y,
+                    dhatTarget[ref][:, k] = apply_filter_wola(
+                        x,
+                        currFilt_k,
+                        p.wolaParams
+                    )
+                    dhatInterf[ref][:, k] = apply_filter_wola(
+                        n,
                         currFilt_k,
                         p.wolaParams
                     )
             else:
                 nTaus = currFilters.shape[0]
-                dhat[ref] = np.zeros((y.shape[0], nTaus, p.nNodes))
+                dhatTarget[ref] = np.zeros((x.shape[0], nTaus, p.nNodes))
+                dhatInterf[ref] = np.zeros((x.shape[0], nTaus, p.nNodes))
                 for idxTau in range(nTaus):
                     currFilt = currFilters[idxTau, :, :, :, :]
                     for k in range(p.nNodes):
                         currFilt_k = currFilt[:, :, :, k]
                         # Apply filter
-                        dhat[ref][:, idxTau, k] = apply_filter_wola(
-                            y,
+                        dhatTarget[ref][:, idxTau, k] = apply_filter_wola(
+                            x,
+                            currFilt_k,
+                            p.wolaParams
+                        )
+                        dhatInterf[ref][:, idxTau, k] = apply_filter_wola(
+                            n,
                             currFilt_k,
                             p.wolaParams
                         )
@@ -1054,30 +1074,134 @@ def listen_to_speech(p: ScriptParameters, allFilters, x, n):
         else:
             print('Cannot obtain full-band filtered signals.')
 
+    # Get time-domain signals
+    y = x + n  # untreated mic signals
+    filteredSignals = {}
+    for idx, ref in enumerate(dhatTarget.keys()):
+        if len(dhatTarget[ref].shape) == 3:
+            for idxTau in range(dhatTarget[ref].shape[1]):
+                for k in range(p.nNodes):
+                    filteredSignals[f'{ref}_tau{idxTau+1}_node{k+1}'] =\
+                        dhatTarget[ref][:, idxTau, k] +\
+                        dhatInterf[ref][:, idxTau, k]
+        else:
+            for k in range(p.nNodes):
+                filteredSignals[f'{ref}_node{k+1}'] = dhatTarget[ref][:, k] +\
+                        dhatInterf[ref][:, k]
+
     # Plot signals
-    fig, axes = plt.subplots(1, 1)
-    fig.set_size_inches(8.5, 3.5)
+    figWaveforms, axes = plt.subplots(1, 1)
+    figWaveforms.set_size_inches(8.5, 3.5)
     refSensorIdx = 0
     # Plot waveforms above one another
     delta = np.amax(np.abs(y[:, refSensorIdx])) * 1.5
-    for idx, ref in enumerate(dhat.keys()):
-        if len(dhat[ref].shape) == 3:
-            for idxTau in range(dhat[ref].shape[1]):
+    for idx, ref in enumerate(dhatTarget.keys()):
+        if len(dhatTarget[ref].shape) == 3:
+            for idxTau in range(dhatTarget[ref].shape[1]):
+                # TODO: redundant with previous for-loops
+                # Full filtered signal
+                yCurr = dhatTarget[ref][:, idxTau, refSensorIdx] +\
+                        dhatInterf[ref][:, idxTau, refSensorIdx]
                 axes.plot(
-                    dhat[ref][:, idxTau, refSensorIdx] + delta * idx,
+                    yCurr + delta * idx,
                     label=f'{ref} ($\\tau_{{{idxTau + 1}}}$)'
                 )
         else:
-            axes.plot(dhat[ref][:, refSensorIdx] + delta * idx, label=ref)
-    axes.plot(x[:, refSensorIdx] + delta * len(dhat.keys()), label=f'Target signal (mic {refSensorIdx + 1})')
-    axes.plot(y[:, refSensorIdx] + delta * (len(dhat.keys()) + 1), label=f'Microphone signal (mic {refSensorIdx + 1})')
+            # Full filtered signal
+            yCurr = dhatTarget[ref][:, refSensorIdx] +\
+                    dhatInterf[ref][:, refSensorIdx]
+            axes.plot(
+                yCurr + delta * idx,
+                label=ref
+            )
+    axes.plot(x[:, refSensorIdx] + delta * len(dhatTarget.keys()), label=f'Target signal (mic {refSensorIdx + 1})')
+    axes.plot(y[:, refSensorIdx] + delta * (len(dhatTarget.keys()) + 1), label=f'Microphone signal (mic {refSensorIdx + 1})')
     plt.legend()
-    plt.show()
-
-    # Compute metrics
     
 
-    stop = 1
+    # Speech-enhancement metrics
+    metricsDicts = dict(
+        (ref, [{} for _ in range(p.nNodes)])\
+            for ref in dhatTarget.keys()
+    )
+    # For all filter types, skip first 2.5 seconds (also for batch-mode
+    # estimates, to make metrics comparable).
+    startIdx = int(2.5 * p.fs)  # (HARDCODED)
+    for filterType in p.toCompute:
+        ref = filterType.to_str()
+        for k in range(p.nNodes):
+            if len(dhatTarget[ref].shape) == 3:
+                for idxTau in range(dhatTarget[ref].shape[1]):
+                    metricsDicts[ref][k] = get_metrics_from_toolbox(
+                        clean=x[:, k],
+                        noiseOnly=n[:, k],
+                        noisy=y[:, k],
+                        filtSpeech=dhatTarget[ref][:, idxTau, k],
+                        filtNoise=dhatInterf[ref][:, idxTau, k],
+                        fs=p.fs,
+                        vad=vad,
+                        startIdx=startIdx
+                    )
+            else:
+                metricsDicts[ref][k] = get_metrics_from_toolbox(
+                    clean=x[:, k],
+                    noiseOnly=n[:, k],
+                    noisy=y[:, k],
+                    filtSpeech=dhatTarget[ref][:, k],
+                    filtNoise=dhatInterf[ref][:, k],
+                    fs=p.fs,
+                    vad=vad,
+                    startIdx=startIdx
+                )
+
+    # Compute and plot metrics
+    figMetrics = plot_metrics_dict(metricsDicts)
+
+    return figWaveforms, figMetrics, filteredSignals
+
+
+def plot_metrics_dict(metricsDicts: dict, metricsToPlot=['snr', 'stoi']):
+    """Plots increase in speech enhancement metrics as bar plots,
+    for each node, and each considered algorithm."""
+
+    nSubplots = len(metricsDicts[list(metricsDicts.keys())[0]])  # == nNodes
+    fig, axes = plt.subplots(
+        len(metricsToPlot),
+        nSubplots,
+        sharex=True,
+        sharey='row'
+    )
+    fig.set_size_inches(8.5, 3.5)
+    for k in range(nSubplots):
+        for ii, ref in enumerate(metricsDicts.keys()):  # for each algorithm
+            currSet = metricsDicts[ref][k]
+            for jj, metric in enumerate(metricsToPlot):
+                axes[jj, k].bar(
+                    x=ii,
+                    height=currSet[metric].after,
+                    width=0.5,
+                    label=ref
+                )
+        # Add reference: noisy signal
+        currSet = metricsDicts[list(metricsDicts.keys())[0]][k]
+        for jj, metric in enumerate(metricsToPlot):
+            axes[jj, k].bar(
+                x=len(metricsDicts.keys()),
+                height=currSet[metric].before,
+                width=0.5,
+                label='No enhancement'
+            )
+        
+        for jj, metric in enumerate(metricsToPlot):
+            axes[jj, k].set_title(f'Node {k+1}, {metric}')
+            axes[jj, k].grid()
+            axes[jj, k].set_xticklabels([])
+            if metric == 'stoi':
+                axes[jj, k].set_ylim([0, 1])
+    axes[0, 0].legend()
+    
+    return fig
+
 
 def apply_filter_wola(y: np.ndarray, h: np.ndarray, p: WOLAparameters):
     """Apply filter in WOLA-domain."""
@@ -1133,3 +1257,21 @@ def in_line_listen(signal, fs, duration):
     audio_array = signal[:nSamples] *  32767 / max(abs(signal[:nSamples]))
     audio_array = audio_array.astype(np.int16)
     sa.play_buffer(audio_array, 1, 2, int(8e3))
+
+
+def normalize_toint16(nparray):
+    """Normalizes a NumPy array to integer 16.
+    Parameters
+    ----------
+    nparray : np.ndarray
+        Input array to be normalized.
+
+    Returns
+    ----------
+    nparrayNormalized : np.ndarray
+        Normalized array.
+    """
+    amplitude = np.iinfo(np.int16).max
+    nparrayNormalized = (amplitude * nparray / \
+        np.amax(nparray) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
+    return nparrayNormalized

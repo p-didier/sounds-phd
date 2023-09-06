@@ -289,7 +289,7 @@ def from_wola(
                 currSigFrame * np.sqrt(p.hop)
             ) * win
     # Remove zero-padding
-    sig = sig[p.nfft:-p.nfft, :]
+    # sig = sig[p.nfft:-p.nfft, :]
     
     sig = np.real_if_close(sig, tol=1000)
 

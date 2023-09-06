@@ -7,6 +7,7 @@ import sys
 sys.path.append('..')
 
 import copy
+import wavfile
 import numpy as np
 from pathlib import Path
 from utils.plots import *
@@ -173,9 +174,6 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 vad=vad
             )
 
-            if p.targetSignalType == 'speech' and p.listenToSpeech:
-                listen_to_speech(p, allFilters, cleanSigs, noiseSignals)
-
             # Compute metrics
             for filterType in p.toCompute:
                 currFilters = allFilters[filterType.to_str()]
@@ -231,6 +229,30 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                             metricsData[filterType.to_str()][idxMC, idxDur, :] = currMetrics
                         else:
                             metricsData[filterType.to_str()][idxMC, idxDur] = currMetrics
+        
+        # If asked, get plotted results (waveforms and speech
+        # enhancement metrics) for speech signals
+        if p.targetSignalType == 'speech' and p.speechPlots:
+            fig1, fig2, filteredSignals = speech_plots(
+                p,
+                allFilters,
+                cleanSigs,
+                noiseSignals,
+                vad
+            )
+            if p.exportFolder is not None:
+                if not Path(p.exportFolder).is_dir():
+                    Path(p.exportFolder).mkdir(parents=True, exist_ok=True)
+                fig1.savefig(f'{p.exportFolder}/speech_waveforms.png', dpi=300, bbox_inches='tight')
+                fig2.savefig(f'{p.exportFolder}/speech_metrics.png', dpi=300, bbox_inches='tight')
+                # Export filtered signals as wav
+                if p.exportFilteredSignals:
+                    for key in filteredSignals.keys():
+                        wavfile.write(
+                            f'{p.exportFolder}/{key}.wav',
+                            normalize_toint16(filteredSignals[key][:, np.newaxis]),
+                            p.wolaParams.fs,
+                        )
         
         if p.exportFigures:
             # Plot results
