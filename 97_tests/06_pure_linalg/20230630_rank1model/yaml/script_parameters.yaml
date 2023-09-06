@@ -1,27 +1,27 @@
 rank1model: true
 roomParams:
   baseSNR: 0
-# Mk:
-# - 1
-# - 8
 Mk:
-- 2
-- 2
 - 1
+- 4
+# Mk:
+# - 2
+# - 2
+# - 1
 b: 0.1
 minDuration: 3
 maxDuration: 20
 nDurationsBatch: 2  # linearly spaced from `minDuration` to `maxDuration`
 exportFigures: true
-exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/out/20230906_tests/test1
-fs: 8000.0
+exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/out/20230906_tests/test2_16kHz
+fs: 16000.0
 ignoreFusionForSSNodes: true
 nMC: 1
 nNodes: 3
 nSensors: 5
 randomDelays: false
 seed: 0
-selfNoisePower: 1
+selfNoisePower: 0.25
 showDeltaPerNode: false
 targetSignalType: speech
 # signalType: noise_complex
@@ -70,7 +70,7 @@ wolaParams:
   B: 0
   alpha: 1
   # betaExt: 1
-  fs: 8000.0
+  fs: 16000.0
   # hop: 4
   # nfft: 8
   # singleFreqBinIndex: 3
