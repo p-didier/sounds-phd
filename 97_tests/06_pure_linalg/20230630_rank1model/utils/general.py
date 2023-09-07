@@ -99,9 +99,13 @@ class ScriptParameters:
     nSensors: int = 3
     nNodes: int = 3
     Mk: list[int] = field(default_factory=lambda: None)  # if None, randomly assign sensors to nodes
-    selfNoisePower: float = 1
     rank1model: bool = True  # if False, use actual RIRs model
     roomParams: RoomParameters = RoomParameters()
+    selfNoisePower: float = 1
+    localizedNoiseSource: bool = False  # if True, the noise component is also
+        # composed of a localized source (i.e., not only self-noise), with
+        # random scalings (TODO: + possibly random delays).
+    localizedNoiseSourcePower: float = 1  # power of localized noise source
     # Other vvv
     fs: float = 8e3
     nMC: int = 10
@@ -251,6 +255,21 @@ def generate_signals_actualRIRs(p: ScriptParameters):
 
 def generate_signals_rank1model(p: ScriptParameters):
     """Generate signals using rank-1 model."""
+    
+    def _gen_noise(n, power, complexType=False):
+        """Helper function: generate noise signal."""
+        # Generate random sequence with unit power
+        if complexType:
+            randSequence = np.random.normal(size=n) +\
+                1j * np.random.normal(size=n)
+        else:
+            randSequence = np.random.normal(size=n)
+        # Make unit power
+        randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
+        # Scale to desired power
+        randSequence *= np.sqrt(power)
+        return randSequence
+
     # Get scalings
     if 'complex' in p.targetSignalType:
         scalings = np.random.uniform(low=0.5, high=1, size=p.nSensors) +\
@@ -282,37 +301,81 @@ def generate_signals_rank1model(p: ScriptParameters):
         sigmaSrWOLA = get_sigma_wola(cleanSigs, p.wolaParams)
 
     # Generate noise signals
-    sigmaNr = np.zeros(p.nSensors)
+    sigmaSelfNoise = np.zeros(p.nSensors)
+    sigmaLocNoise = np.zeros(p.nSensors)
+    sigmaAllNoise = np.zeros(p.nSensors)
     if p.wolaParams.singleFreqBinIndex is not None:
-        sigmaNrWOLA = np.zeros((1, p.nSensors))
+        sigmaSelfNoiseWOLA = np.zeros((1, p.nSensors))
+        sigmaLocNoiseWOLA = np.zeros((1, p.nSensors))
+        sigmaAllNoiseWOLA = np.zeros((1, p.nSensors))
     else:
-        sigmaNrWOLA = np.zeros((p.wolaParams.nPosFreqs, p.nSensors))
+        sigmaSelfNoiseWOLA = np.zeros((p.wolaParams.nPosFreqs, p.nSensors))
+        sigmaLocNoiseWOLA = np.zeros((p.wolaParams.nPosFreqs, p.nSensors))
+        sigmaAllNoiseWOLA = np.zeros((p.wolaParams.nPosFreqs, p.nSensors))
     if np.iscomplex(cleanSigs).any():
         noiseSignals = np.zeros((nSamplesMax, p.nSensors), dtype=np.complex128)
     else:
         noiseSignals = np.zeros((nSamplesMax, p.nSensors))
-    for n in range(p.nSensors):
-        # Generate random sequence with unit power
-        if np.iscomplex(cleanSigs).any():
-            randSequence = np.random.normal(size=nSamplesMax) +\
-                1j * np.random.normal(size=nSamplesMax)
-            
+    
+    # If localized noise source, generate random sequence with desired power
+    if p.localizedNoiseSource:
+        localizedNoiseSignal = _gen_noise(
+            nSamplesMax,
+            p.localizedNoiseSourcePower,
+            complexType=np.iscomplex(cleanSigs).any()
+        )
+        # Get powers
+        sigmaLocNoise, sigmaLocNoise = _get_powers(
+            localizedNoiseSignal,
+            p.wolaParams
+        )
+        if 'complex' in p.targetSignalType:
+            scalingsNoise = np.random.uniform(0.5, 1, size=p.nSensors) +\
+                1j * np.random.uniform(0.5, 1, size=p.nSensors)
         else:
-            randSequence = np.random.normal(size=nSamplesMax)
-        # Make unit power
-        randSequence /= np.sqrt(np.mean(np.abs(randSequence) ** 2))
-        # Scale to desired power
-        noiseSignals[:, n] = randSequence * np.sqrt(p.selfNoisePower)
-        # Check power
-        sigmaNr[n] = np.sqrt(np.mean(np.abs(noiseSignals[:, n]) ** 2))
-        if np.abs(sigmaNr[n] ** 2 - p.selfNoisePower) > 1e-6:
-            raise ValueError(f'Noise signal power is {sigmaNr[n] ** 2} instead of {p.selfNoisePower}')
-        sigmaNrWOLA[:, n] = get_sigma_wola(
+            scalingsNoise = np.random.uniform(0.5, 1, size=p.nSensors)
+    else:
+        scalingsNoise = None
+
+
+    # Generate noise
+    for n in range(p.nSensors):
+        # Generate self-noise
+        selfNoise = _gen_noise(  # one independent noise signal per sensor
+            nSamplesMax,
+            p.selfNoisePower,
+            complexType=np.iscomplex(cleanSigs).any()
+        )
+        # Get powers
+        sigmaSelfNoise[n], sigmaSelfNoiseWOLA[:, n] = _get_powers(
+            selfNoise,
+            p.wolaParams
+        )
+        # Add to noise signal
+        noiseSignals[:, n] = selfNoise
+        
+        if p.localizedNoiseSource:
+            # Add to noise signal
+            noiseSignals[:, n] += localizedNoiseSignal * scalingsNoise[n]
+        # Get powers
+        sigmaAllNoise[n], sigmaAllNoiseWOLA[:, n] = _get_powers(
             noiseSignals[:, n],
             p.wolaParams
         )
 
-    return cleanSigs, noiseSignals, scalings, sigmaSr, sigmaNr, sigmaSrWOLA, sigmaNrWOLA, vad
+    # Group powers
+    powers = {
+        'clean': sigmaSr,
+        'cleanWOLA': sigmaSrWOLA,
+        'selfNoise': sigmaSelfNoise,
+        'selfNoiseWOLA': sigmaSelfNoiseWOLA,
+        'locNoise': sigmaLocNoise,
+        'locNoiseWOLA': sigmaLocNoiseWOLA,
+        'allNoise': sigmaAllNoise,
+        'allNoiseWOLA': sigmaAllNoiseWOLA
+    }
+
+    return cleanSigs, noiseSignals, scalings, scalingsNoise, powers, vad
 
 
 def compute_filter(
@@ -687,35 +750,69 @@ def get_metrics(
         filters,
         scalings,
         sigma_sr,
-        sigma_nr,
+        RnnOracle,
         channelToNodeMap,
         filterType: FilterType,
         computeForComparisonWithDANSE=True,
-        exportDiffPerFilter=False
+        exportDiffPerFilter=False,
+        sigma_nr=None,
     ):
     
-    # Compute FAS + SPF (baseline)
+    # Compute baseline (FAS + SPF)
+    RnnInv = np.linalg.inv(RnnOracle)  # inverse of noise covariance matrix
+    # # Round entries up to closest integer
+    # RnnInv = np.round(RnnInv)
     if filterType.wola:
-        nBins = sigma_nr.shape[0]  # number of frequency bins
+        nBins = RnnOracle.shape[0]  # number of frequency bins
         if np.any(np.iscomplex(filters)):
             baseline = np.zeros((nSensors, nSensors, nBins), dtype=np.complex128)
+            baseline2 = np.zeros((nSensors, nSensors, nBins), dtype=np.complex128)
         else:
             baseline = np.zeros((nSensors, nSensors, nBins))
+            baseline2 = np.zeros((nSensors, nSensors, nBins))
+
         for m in range(nSensors):
-            rtf = scalings / scalings[m]
-            hs = (rtf.T.conj() @ rtf) * sigma_sr[:, m] ** 2
-            spf = hs / (hs + sigma_nr[:, m] ** 2)  # spectral post-filter (real-valued)
-            baseline[:, m, :] = np.outer(rtf / (rtf.T.conj() @ rtf), spf)  # FAS BF + spectral post-filter
+            h = scalings / scalings[m]  # RTF
+            # Matched filter
+            mf = (RnnInv @ h) / (h.T.conj() @ RnnInv @ h)[:, np.newaxis]
+            # Spectral post-filter
+            spf = sigma_sr[:, m] ** 2 / (
+                sigma_sr[:, m] ** 2 + 1 / (h.T.conj() @ RnnInv @ h)
+            )
+            spf = np.real_if_close(spf)  # real-valued
+            baseline[:, m, :] = (mf * spf[:, np.newaxis]).T  # FAS BF + spectral post-filter
+
+            # mf = h / (h.T.conj() @ h)  # matched filter
+            # spf = sigma_sr[:, m] ** 2 / (
+            #     sigma_sr[:, m] ** 2 + RnnOracle[:, m, m] / (h.T.conj() @ h)
+            # )
+            # baseline2[:, m, :] = np.outer(mf, spf)  # FAS BF + spectral post-filter
+            # hs = (h.T.conj() @ h) * sigma_sr[:, m] ** 2
+            # spf = hs / (hs + sigma_nr[:, m] ** 2)  # spectral post-filter (real-valued)
+            # # spf = hs / (hs + RnnOracle[:, m, m])  # spectral post-filter (real-valued)
+            # baseline[:, m, :] = np.outer(h / (h.T.conj() @ h), spf)  # FAS BF + spectral post-filter
     else:
         if np.any(np.iscomplex(filters)):
             baseline = np.zeros((nSensors, nSensors), dtype=np.complex128)
+            # baseline2 = np.zeros((nSensors, nSensors), dtype=np.complex128)
         else:
             baseline = np.zeros((nSensors, nSensors))
+            # baseline2 = np.zeros((nSensors, nSensors))
         for m in range(nSensors):
-            rtf = scalings / scalings[m]
-            hs = (rtf.T.conj() @ rtf) * sigma_sr[m] ** 2
-            spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter (real-valued)
-            baseline[:, m] = rtf / (rtf.T.conj() @ rtf) * spf  # FAS BF + spectral post-filter
+            h = scalings / scalings[m]  # RTF
+
+            # Matched filter
+            mf = (RnnInv @ h) / (h.T.conj() @ RnnInv @ h)
+            # Spectral post-filter
+            spf = sigma_sr[m] ** 2 / (
+                sigma_sr[m] ** 2 + 1 / (h.T.conj() @ RnnInv @ h)
+            )
+            baseline[:, m] = mf * spf  # FAS BF + spectral post-filter
+
+            # hs = (h.T.conj() @ h) * sigma_sr[m] ** 2
+            # # spf = hs / (hs + sigma_nr[m] ** 2)  # spectral post-filter (real-valued)
+            # spf = hs / (hs + 1)  # spectral post-filter (real-valued)
+            # baseline2[:, m] = h / (h.T.conj() @ h) * spf  # FAS BF + spectral post-filter
 
     # Compute difference between normalized estimated filters
     # and normalized expected filters
@@ -838,7 +935,7 @@ def get_sigma_wola(x, params: WOLAparameters):
         idxStart = i * params.hop
         idxEnd = idxStart + params.nfft
         windowedChunk = x[idxStart:idxEnd, :] * win[:, np.newaxis]
-        Chunk = np.fft.fft(windowedChunk, axis=0)
+        Chunk = np.fft.fft(windowedChunk, axis=0) / np.sqrt(params.hop)
         sigmasSquared[i, :, :] = np.abs(Chunk) ** 2
     
     # Only keep positive frequencies
@@ -1275,3 +1372,41 @@ def normalize_toint16(nparray):
     nparrayNormalized = (amplitude * nparray / \
         np.amax(nparray) * 0.5).astype(np.int16)  # 0.5 to avoid clipping
     return nparrayNormalized
+
+
+def get_oracle_noise_covariance_matrices(
+        powers: dict,
+        scalingsLocNoise=None
+    ):
+    """Computes the oracle noise covariance matrix from a noise signal."""
+
+    nSensors = powers['selfNoise'].shape[0]
+    Rnn = powers['selfNoise'] ** 2 * np.eye(nSensors)
+    if scalingsLocNoise is not None:
+        Rnn += powers['locNoise'] ** 2 * np.outer(
+            scalingsLocNoise, scalingsLocNoise
+        )
+    
+    RnnWOLA = np.zeros(
+        (powers['selfNoiseWOLA'].shape[0], nSensors, nSensors),
+        dtype=np.complex128
+    )
+    for kappa in range(powers['selfNoiseWOLA'].shape[0]):
+        RnnWOLA[kappa, :, :] = powers['selfNoiseWOLA'][kappa, :] ** 2 * np.eye(nSensors)
+        if scalingsLocNoise is not None:
+            RnnWOLA[kappa, :, :] += powers['locNoiseWOLA'][kappa, :] ** 2 * np.outer(
+                scalingsLocNoise, scalingsLocNoise
+            )
+    # Re-set as real-valued if possible
+    RnnWOLA = np.real_if_close(RnnWOLA)
+        
+    return Rnn, RnnWOLA
+
+
+def _get_powers(x, wolaParams: WOLAparameters):
+    # Get power
+    sigma = np.sqrt(np.mean(np.abs(x) ** 2))
+    # Get power for the WOLA case
+    sigmaWOLA = get_sigma_wola(x, wolaParams)
+
+    return sigma, sigmaWOLA

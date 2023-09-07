@@ -10,18 +10,17 @@ Mk:
 # - 1
 b: 0.1
 minDuration: 3
-maxDuration: 20
+maxDuration: 15
 nDurationsBatch: 2  # linearly spaced from `minDuration` to `maxDuration`
 exportFigures: true
 exportFolder: 97_tests/06_pure_linalg/20230630_rank1model/out/20230906_tests/test2_16kHz
 fs: 16000.0
 ignoreFusionForSSNodes: true
 nMC: 1
-nNodes: 3
-nSensors: 5
+# nNodes: 3
+# nSensors: 5
 randomDelays: false
 seed: 0
-selfNoisePower: 0.25
 showDeltaPerNode: false
 targetSignalType: speech
 # signalType: noise_complex
@@ -29,8 +28,12 @@ targetSignalType: speech
 # signalType: interrupt_noise_complex
 # signalType: interrupt_noise_real
 #
-speechPlots: true               # <-- plot boolean
+speechPlots: false               # <-- plot boolean
 exportFilteredSignals: true
+# vvvv related to noise vvvv
+selfNoisePower: 1
+localizedNoiseSource: false
+localizedNoiseSourcePower: 1
 #
 interruptionDuration: 1  # [s]
 interruptionPeriod: 2   # [s]

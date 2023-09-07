@@ -96,8 +96,8 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             pCurr = copy.deepcopy(p)
             pCurr.wolaParams = wolaParamsCurr
             # TODO: make that prettier vvvvvvvvv
-            cleanSigs, noiseSignals, scalings, sigmaSr, sigmaNr,\
-                sigmaSrWOLA, sigmaNrWOLA, vad = generate_signals(pCurr)
+            cleanSigs, noiseSignals, scalings, scalingsNoise, powers, vad =\
+                generate_signals(pCurr)
 
             # Compute desired filters
             allFilters = get_filters(
@@ -117,31 +117,37 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
             )
 
             # Compute metrics
+            RnnOracle, RnnOracleWOLA = get_oracle_noise_covariance_matrices(
+                powers, scalingsNoise
+            )
             for filterType in p.toCompute:
                 currFilters = allFilters[filterType.to_str()]
                 if filterType.indiv_frames():  # online or WOLA in non-batch mode
                     for idxTau in range(len(p.taus)):
                         if filterType.online:
+                            # Compute oracle noise covariance matrix
                             currMetrics = get_metrics(
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :],
                                 scalings,
-                                sigmaSr,
-                                sigmaNr,
+                                powers['clean'],
+                                RnnOracle,
                                 channelToNodeMap,
                                 filterType=filterType,
-                                exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
+                                exportDiffPerFilter=p.showDeltaPerNode,  # export all differences individually
+                                sigma_nr=powers['allNoise']
                             )
                         elif filterType.wola:
                             currMetrics = get_metrics(
                                 p.nSensors,
                                 currFilters[idxTau, :, :, :, :],
                                 scalings,
-                                sigmaSrWOLA,
-                                sigmaNrWOLA,
+                                powers['cleanWOLA'],
+                                RnnOracleWOLA,
                                 channelToNodeMap,
                                 filterType=filterType,
-                                exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
+                                exportDiffPerFilter=p.showDeltaPerNode,  # export all differences individually
+                                sigma_nr=powers['allNoiseWOLA']
                             )
                         if p.showDeltaPerNode:
                             metricsData[filterType.to_str()][idxMC, :, idxTau, :] = currMetrics
@@ -150,11 +156,13 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                 else:  # batch mode (WOLA or not)
                     for idxDur in range(len(p.durations)):
                         if filterType.wola:
-                            sigmaSrEffective = copy.deepcopy(sigmaSrWOLA)
-                            sigmaNrEffective = copy.deepcopy(sigmaNrWOLA)
+                            sigmaSrEffective = copy.deepcopy(powers['cleanWOLA'])
+                            # sigmaNrEffective = copy.deepcopy(sigmaNrWOLA)
+                            RnnOracleEffective = copy.deepcopy(RnnOracleWOLA)
                         else:
-                            sigmaSrEffective = copy.deepcopy(sigmaSr)
-                            sigmaNrEffective = copy.deepcopy(sigmaNr)
+                            sigmaSrEffective = copy.deepcopy(powers['clean'])
+                            # sigmaNrEffective = copy.deepcopy(sigmaNr)
+                            RnnOracleEffective = copy.deepcopy(RnnOracle)
 
                         currFiltCurrDur = currFilters[idxDur, :, :]
                         currMetrics = get_metrics(
@@ -162,10 +170,11 @@ def main(pathToYaml: str = PATH_TO_YAML, p: ScriptParameters = None):
                             currFiltCurrDur,
                             scalings,
                             sigmaSrEffective,
-                            sigmaNrEffective,
+                            RnnOracleEffective,
                             channelToNodeMap,
                             filterType=filterType,
-                            exportDiffPerFilter=p.showDeltaPerNode  # export all differences individually
+                            exportDiffPerFilter=p.showDeltaPerNode,  # export all differences individually
+                            sigma_nr=powers['allNoiseWOLA'] if filterType.wola else powers['allNoise']
                         )
                         if p.showDeltaPerNode:
                             metricsData[filterType.to_str()][idxMC, idxDur, :] = currMetrics

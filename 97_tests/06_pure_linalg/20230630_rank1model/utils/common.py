@@ -73,12 +73,14 @@ def update_cov_mats(
     # else:
     #     # If both are full rank, update both
     #     updateRyy, updateRnn = True, True
-    updateRyy, updateRnn = True, True
+    # updateRyy, updateRnn = True, True
 
     # Initialize
     einSumOp = 'ij,ik->jk'
+    normFact = p.nPosFreqs
     if wolaMode:
         einSumOp = 'ij,ik->ijk'
+        normFact = yCurr.shape[1]
     beta = p.betaMwf
     # In DANSE, update the top-left Mk x Mk block of Ryy with betaDanse,
     # the rest with betaExt
@@ -91,10 +93,10 @@ def update_cov_mats(
     if vadCurr is not None:
         # Compute covariance matrices following VAD
         if vadCurr:
-            RyyCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
+            RyyCurr = 1 / normFact * np.einsum(einSumOp, yCurr, yCurr.conj())
             nUpdatesRyy += 1
         else:
-            RnnCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
+            RnnCurr = 1 / normFact * np.einsum(einSumOp, yCurr, yCurr.conj())
             nUpdatesRnn += 1
         updateFilter = nUpdatesRnn > 0 and nUpdatesRyy > 0
         # Condition to start exponential averaging
@@ -102,8 +104,8 @@ def update_cov_mats(
         startExpAvgCondRnn = nUpdatesRnn > 0
     else:
         # Compute covariance matrices using oracle noise knowledge
-        RyyCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, yCurr, yCurr.conj())
-        RnnCurr = 1 / p.nPosFreqs * np.einsum(einSumOp, nCurr, nCurr.conj())
+        RyyCurr = 1 / normFact * np.einsum(einSumOp, yCurr, yCurr.conj())
+        RnnCurr = 1 / normFact * np.einsum(einSumOp, nCurr, nCurr.conj())
         nUpdatesRyy += 1
         nUpdatesRnn += 1
         updateFilter = True
@@ -111,25 +113,25 @@ def update_cov_mats(
         startExpAvgCondRyy = i > p.startExpAvgAfter
         startExpAvgCondRnn = i > p.startExpAvgAfter
     
-    if updateRyy:
-        if startExpAvgCondRyy and not skipExpAvg:
-            Ryy = beta * Ryy + (1 - beta) * RyyCurr
-        else:
-            if verbose:
-                print(f'i={i}, not yet starting exponential averaging for Ryy')
-            Ryy = copy.deepcopy(RyyCurr)
-    elif verbose:
-        print(f'i={i}, not updating Ryy (already full rank while Rnn is not)')
+    # if updateRyy:
+    if startExpAvgCondRyy and not skipExpAvg:
+        Ryy = beta * Ryy + (1 - beta) * RyyCurr
+    else:
+        if verbose:
+            print(f'i={i}, not yet starting exponential averaging for Ryy')
+        Ryy = copy.deepcopy(RyyCurr)
+    # elif verbose:
+    #     print(f'i={i}, not updating Ryy (already full rank while Rnn is not)')
     
-    if updateRnn:
-        if startExpAvgCondRnn and not skipExpAvg:
-            Rnn = beta * Rnn + (1 - beta) * RnnCurr
-        else:
-            if verbose:
-                print(f'i={i}, not yet starting exponential averaging for Rnn')
-            Rnn = copy.deepcopy(RnnCurr)
-    elif verbose:
-        print(f'i={i}, not updating Rnn (already full rank while Ryy is not)')
+    # if updateRnn:
+    if startExpAvgCondRnn and not skipExpAvg:
+        Rnn = beta * Rnn + (1 - beta) * RnnCurr
+    else:
+        if verbose:
+            print(f'i={i}, not yet starting exponential averaging for Rnn')
+        Rnn = copy.deepcopy(RnnCurr)
+    # elif verbose:
+    #     print(f'i={i}, not updating Rnn (already full rank while Ryy is not)')
 
     if updateFilter:  # Check rank of updated covariance matrices
         if np.any(np.linalg.matrix_rank(Ryy) < Ryy.shape[-1]) or\
