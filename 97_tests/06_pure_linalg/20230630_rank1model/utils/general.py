@@ -325,7 +325,7 @@ def generate_signals_rank1model(p: ScriptParameters):
             complexType=np.iscomplex(cleanSigs).any()
         )
         # Get powers
-        sigmaLocNoise, sigmaLocNoise = _get_powers(
+        sigmaLocNoise, sigmaLocNoiseWOLA = _get_powers(
             localizedNoiseSignal,
             p.wolaParams
         )
@@ -1383,8 +1383,10 @@ def get_oracle_noise_covariance_matrices(
     nSensors = powers['selfNoise'].shape[0]
     Rnn = powers['selfNoise'] ** 2 * np.eye(nSensors)
     if scalingsLocNoise is not None:
+        if any(np.iscomplex(scalingsLocNoise)):
+            Rnn = Rnn.astype(np.complex128)
         Rnn += powers['locNoise'] ** 2 * np.outer(
-            scalingsLocNoise, scalingsLocNoise
+            scalingsLocNoise, scalingsLocNoise.conj()
         )
     
     RnnWOLA = np.zeros(
@@ -1394,8 +1396,8 @@ def get_oracle_noise_covariance_matrices(
     for kappa in range(powers['selfNoiseWOLA'].shape[0]):
         RnnWOLA[kappa, :, :] = powers['selfNoiseWOLA'][kappa, :] ** 2 * np.eye(nSensors)
         if scalingsLocNoise is not None:
-            RnnWOLA[kappa, :, :] += powers['locNoiseWOLA'][kappa, :] ** 2 * np.outer(
-                scalingsLocNoise, scalingsLocNoise
+            RnnWOLA[kappa, :, :] += powers['locNoiseWOLA'][kappa] ** 2 * np.outer(
+                scalingsLocNoise, scalingsLocNoise.conj()
             )
     # Re-set as real-valued if possible
     RnnWOLA = np.real_if_close(RnnWOLA)

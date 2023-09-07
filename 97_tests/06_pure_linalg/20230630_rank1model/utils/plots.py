@@ -46,6 +46,7 @@ def plot_final(
     fig, axes = plt.subplots(1, 1)
     fig.set_size_inches(8.5, 4)
     allLineStyles = ['-', '--', '-.', ':']
+    xAxis = None # useful initialization for x-axis limits, below
     for idxFilter, filterKey in enumerate(toPlot.keys()):
         baseColor = f'C{idxFilter}'
         if ('online' in filterKey or 'wola' in filterKey) and\
@@ -163,7 +164,10 @@ def plot_final(
     # if flagBatchModeIncluded:# and vad is None:
     #     axes.set_xlim([np.amin(durations), np.amax(durations)])
     # else:
-    axes.set_xlim([0, np.amax([np.amax(xAxis), np.amax(durations)])])
+    if xAxis is not None:
+        axes.set_xlim([0, np.amax([np.amax(xAxis), np.amax(durations)])])
+    else:
+        axes.set_xlim([0, np.amax(durations)])
     
     if ('online' in filterKey or 'wola' in filterKey) and\
         'batch' not in filterKey:
