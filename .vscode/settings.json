@@ -7,5 +7,7 @@
         "./01_algorithms/03_signal_gen/01_acoustic_scenes/rimPypack",
         "./_third_parties",
         "./01_algorithms/01_NR/02_distributed/danse_utilities"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "off",
+    "git.ignoreLimitWarning": true
 }
