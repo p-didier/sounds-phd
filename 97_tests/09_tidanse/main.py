@@ -6,6 +6,7 @@
 import sys
 import numpy as np
 import scipy.signal as sig
+import scipy.linalg as sla
 import matplotlib.pyplot as plt
 
 SEED = 0
@@ -14,7 +15,7 @@ ROOM_DIM = 10  # [m]
 FS = 16000
 NSAMPLES = 10000
 #
-K = 5  # Number of nodes
+K = 15  # Number of nodes
 MK = 5 # Number of microphones per node (same for all nodes)
 #
 N = 1024  # STFT window length
@@ -26,14 +27,15 @@ SNSNR = 5  # [dB] SNR of self-noise signals
 #
 ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
 MODE = 'batch'  # 'wola' or 'online' or 'batch'
-GEVD = False  # Use GEVD-MWF instead of MWF
+# GEVD = True  # Use GEVD-MWF
+GEVD = False  # Use MWF
 
 class Node:
     # Class to store node information (from create_wasn())
     def __init__(self, signal, noiseOnly, neighbors):
         self.signal = signal
         self.noiseOnly = noiseOnly
-        self.desired = (signal - noiseOnly)[REFSENSORIDX, :]
+        self.desiredOnly = signal - noiseOnly
         self.neighbors = neighbors
 
 class WASN:
@@ -105,45 +107,44 @@ def batch_run(wasn: WASN):
         stopcond = False
         while not stopcond:
             # Compute compressed signals
-            z = np.zeros((K, NSAMPLES))
+            z_desired = np.zeros((K, NSAMPLES))
             z_noise = np.zeros((K, NSAMPLES))
             for k in range(K):
-                yk = wasn.nodes[k].signal
+                sk = wasn.nodes[k].desiredOnly
                 nk = wasn.nodes[k].noiseOnly
                 if algo == 'danse':
                     pk = wTilde[k][:MK]  # DANSE fusion vector
                 elif algo == 'ti-danse':
                     pk = wTilde[k][:MK] / wTilde[k][-1]  # TI-DANSE fusion vector
-                    # pk = wTilde[k][:MK]# / wTilde[k][-1]  # TI-DANSE fusion vector
                 # Inner product of pk and yk across channels (fused signals)
-                zk = np.sum(yk * pk[:, None], axis=0)
+                zk_desired = np.sum(sk * pk[:, None], axis=0)
                 zk_noise = np.sum(nk * pk[:, None], axis=0)
-                z[k, :] = zk
+                z_desired[k, :] = zk_desired
                 z_noise[k, :] = zk_noise
             
             if algo == 'ti-danse':
                 # Compute eta
-                eta = np.sum(z, axis=0)
+                eta_desired = np.sum(z_desired, axis=0)
                 eta_noise = np.sum(z_noise, axis=0)
 
-            yTilde = [_ for _ in wasn.nodes]
+            sTilde = [_ for _ in wasn.nodes]
             nTilde = [_ for _ in wasn.nodes]
             for k in range(K):
                 if algo == 'danse':
-                    zMk = z[np.arange(K) != k, :]
+                    zMk_desired = z_desired[np.arange(K) != k, :]
                     zMk_noise = z_noise[np.arange(K) != k, :]
-                    yTilde[k] = np.concatenate((
-                        wasn.nodes[k].signal,
-                        zMk
+                    sTilde[k] = np.concatenate((
+                        wasn.nodes[k].desiredOnly,
+                        zMk_desired
                     ), axis=0)
                     nTilde[k] = np.concatenate((
                         wasn.nodes[k].noiseOnly,
                         zMk_noise
                     ), axis=0)
                 elif algo == 'ti-danse':
-                    yTilde[k] = np.concatenate((
-                        wasn.nodes[k].signal,
-                        (eta - z[k, :])[np.newaxis, :]
+                    sTilde[k] = np.concatenate((
+                        wasn.nodes[k].desiredOnly,
+                        (eta_desired - z_desired[k, :])[np.newaxis, :]
                     ), axis=0)
                     nTilde[k] = np.concatenate((
                         wasn.nodes[k].noiseOnly,
@@ -152,31 +153,25 @@ def batch_run(wasn: WASN):
 
                 if k == q:
                     # Compute batch covariance matrix
-                    Ryy = yTilde[k] @ yTilde[k].T.conj()
+                    Rss = sTilde[k] @ sTilde[k].T.conj()
                     Rnn = nTilde[k] @ nTilde[k].T.conj()
                     # Update MMSE filter
                     ek = np.zeros(dimTilde)
                     ek[REFSENSORIDX] = 1
+                    Ryy = Rss + Rnn
                     wTilde[k] = filter_update(Ryy, Rnn, gevd=GEVD) @ ek
 
             # Compute MMSE estimate of desired signal
             for k in range(K):
-                # Filter `yTilde` with MMSE filter
-                dHat = wTilde[k] @ yTilde[k]
-                # Compute MMSE
-                currMMSE = np.mean(np.abs(dHat - wasn.nodes[k].desired) ** 2)
-                if np.isnan(currMMSE):
-                    raise ValueError("MMSE is NaN")
-                else:
-                    mmse[k].append(currMMSE)
+                dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
+                currMMSE = np.mean(np.abs(dHat - wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2)
+                mmse[k].append(currMMSE)
             
             # Print progress
-            print(f"i = {i}, q = {q}, mmse = {[me[-1] for me in mmse]}")
-            # Update DANSE iteration index
+            print(f"i = {i}, q = {q}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
+            # Update indices
             i += 1
-            # Update node index
             q = (q + 1) % K
-            # Check stopping condition
             if i > K:
                 stopcond = i >= MAXITER or np.all([np.abs(me[-1] - me[-1-K]) < EPS for me in mmse])
                 
@@ -190,7 +185,6 @@ def batch_run(wasn: WASN):
 def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
     """Plot results."""
     if onlyLoss:
-        symbols = ['o', 's', 'd', 'v', '^', '<', '>', 'p', 'h', '8']
         fig, axes = plt.subplots(1, 1)
         fig.set_size_inches(6.5, 3.5)
         for idxAlgo in range(len(ALGOS)):
@@ -198,7 +192,7 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
             data = np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0)
             axes.loglog(
                 data,
-                f'{symbols[idxAlgo]}-C{idxAlgo}',
+                f'-C{idxAlgo}',
                 label=f'{ALGOS[idxAlgo].upper()} ({len(data)} iters, $\\mathcal{{L}}=${"{:.3g}".format(data[-1], -4)})'
             )
         axes.hlines(np.mean(mmseCentral), 0, xmax, 'k', linestyle="--", label="Centralized")
@@ -207,6 +201,7 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
         axes.legend(loc='upper right')
         axes.set_xlim([0, xmax])
         axes.grid()
+        axes.set_title(f'$K={K}$ nodes, $M={MK}$ sensors each, {NSAMPLES} samples, $\\mathrm{{SNR}}={SNR}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={SNSNR}$ dB, $\\mathrm{{GEVD}}={GEVD}$')
     else:
         fig, axes = plt.subplots(2, len(ALGOS))
         fig.set_size_inches(8.5, 3.5)
@@ -270,7 +265,7 @@ def create_scene():
     # Generate microphone signals
     x = []
     n = []
-    for k in range(K):
+    for _ in range(K):
         # Create random mixing matrix
         mixingMatrix = np.random.randn(MK, 1)
         # Compute microphone signals
@@ -286,30 +281,41 @@ def create_scene():
 
 def get_centr_cost(wasn: WASN):
     """Compute centralized cost (MMSE) for each node."""
-    y = np.concatenate(tuple(
-        wasn.nodes[k].signal
+    s = np.concatenate(tuple(
+        wasn.nodes[k].desiredOnly
         for k in range(K)
     ), axis=0)
     n = np.concatenate(tuple(
         wasn.nodes[k].noiseOnly
         for k in range(K)
     ), axis=0)
-    Ryy = y @ y.T.conj()
+    Rss = s @ s.T.conj()
     Rnn = n @ n.T.conj()
-    wCentral = filter_update(Ryy, Rnn, gevd=GEVD)
+    wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
     mmseCentral = np.zeros(K)
     for k in range(K):
         ek = np.zeros(K * MK)
         ek[k * MK + REFSENSORIDX] = 1
-        mmseCentral[k] = np.mean(np.abs((wCentral @ ek).T.conj() @ y - wasn.nodes[k].desired) ** 2)
+        mmseCentral[k] = np.mean(
+            np.abs((wCentral @ ek).T.conj() @ (s + n) -\
+                   wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2
+        )
     
     return mmseCentral
 
 
-def filter_update(Ryy, Rnn, gevd=False):
+def filter_update(Ryy, Rnn, gevd=False, rank=1):
     """Update filter using GEVD-MWF or MWF."""
     if gevd:
-        raise NotImplementedError  # TODO: implement GEVD
+        s, Xmat = sla.eigh(Ryy, Rnn)
+        idx = np.flip(np.argsort(s))
+        s = s[idx]
+        Xmat = Xmat[:, idx]
+        Qmat = np.linalg.inv(Xmat.T.conj())
+        Dmat = np.zeros_like(Ryy)
+        for r in range(rank):
+            Dmat[r, r] = 1 - 1 / s[r]
+        return Xmat @ Dmat @ Qmat.T.conj()
     else:
         return np.linalg.inv(Ryy) @ (Ryy - Rnn)
 
