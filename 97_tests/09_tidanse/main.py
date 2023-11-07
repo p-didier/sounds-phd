@@ -14,10 +14,13 @@ ROOM_DIM = 10  # [m]
 FS = 16000
 NSAMPLES = 10000
 K = 5  # Number of nodes
-MK = 1 # Number of microphones per node (same for all nodes)
+MK = 5 # Number of microphones per node (same for all nodes)
 N = 1024  # STFT window length
 N_NOISE_SOURCES = 2
+EPS = 1e-6  # Stopping criterion constant
+MAXITER = 100  # Maximum number of iterations
 #
+ALGO = 'danse'  # 'danse' or 'tidanse'
 MODE = 'batch'  # 'wola' or 'online' or 'batch'
 
 class Node:
@@ -66,27 +69,51 @@ def main():
     wasn.compute_stft_signals()
 
     # TI-DANSE
-    batch_ti_danse(wasn)
+    run(wasn)
 
 
-def ti_danse(wasn: WASN):
+def run(wasn: WASN):
     if MODE == 'wola':
         raise NotImplementedError  # TODO: implement TI-DANSE with WOLA
     elif MODE == 'online':
         raise NotImplementedError  # TODO: implement TI-DANSE online
     elif MODE == 'batch':
-        batch_ti_danse(wasn)
+        batch_run(wasn)
 
 
-def batch_ti_danse(wasn: WASN):
+def batch_run(wasn: WASN):
+
+    # Compute centralized cost
+    y = np.concatenate(tuple(
+        wasn.nodes[k].signal
+        for k in range(K)
+    ), axis=0)
+    n = np.concatenate(tuple(
+        wasn.nodes[k].noiseOnly
+        for k in range(K)
+    ), axis=0)
+    Ryy = y @ y.T.conj()
+    Rnn = n @ n.T.conj()
+    wCentral = np.linalg.inv(Ryy) @ (Ryy - Rnn)
+    mmseCentral = np.zeros(K)
+    for k in range(K):
+        ek = np.zeros(K * MK)
+        ek[k * MK + REFSENSORIDX] = 1
+        mmseCentral[k] = np.mean(np.abs((wCentral @ ek).T.conj() @ y - wasn.nodes[k].desired) ** 2)
+    # print(f"Centralized MMSE = {mmseCentral}")
+
+    if ALGO == 'danse':
+        dimTilde = MK + K - 1  # fully connected
+    else:
+        dimTilde = MK + 1
     wTilde = [
-        np.ones((MK + 1)) / 100  # initialize wTilde to 1
+        np.ones(dimTilde) / 100  # initialize wTilde to 1
         for _ in range(K)
     ]
     i = 0  # DANSE iteration index
     q = 0  # currently updating node index
     mmse = [[1] for _ in range(K)]  # MMSE (arbitrary init. value)
-    stopcond = np.all([me[-1] < 1e-9 for me in mmse])
+    stopcond = False
     while not stopcond:
         print(f"i = {i}, q = {q}, mmse = {[me[-1] for me in mmse]}")
         # Compute compressed signals
@@ -95,35 +122,51 @@ def batch_ti_danse(wasn: WASN):
         for k in range(K):
             yk = wasn.nodes[k].signal
             nk = wasn.nodes[k].noiseOnly
-            pk = wTilde[k][:-1] / wTilde[k][-1]  # TI-DANSE fusion vector
+            if ALGO == 'danse':
+                pk = wTilde[k][:MK]  # DANSE fusion vector
+            elif ALGO == 'tidanse':
+                pk = wTilde[k][:MK] / wTilde[k][-1]  # TI-DANSE fusion vector
             # Inner product of pk and yk across channels (fused signals)
             zk = np.sum(yk * pk[:, None], axis=0)
             zk_noise = np.sum(nk * pk[:, None], axis=0)
             z[k, :] = zk
             z_noise[k, :] = zk_noise
         
-        # Compute eta
-        eta = np.sum(z, axis=0)
-        eta_noise = np.sum(z_noise, axis=0)
+        if ALGO == 'tidanse':
+            # Compute eta
+            eta = np.sum(z, axis=0)
+            eta_noise = np.sum(z_noise, axis=0)
 
         yTilde = [_ for _ in wasn.nodes]
         nTilde = [_ for _ in wasn.nodes]
         for k in range(K):
-            yTilde[k] = np.concatenate((
-                wasn.nodes[k].signal,
-                (eta - z[k, :])[np.newaxis, :]
-            ), axis=0)
-            nTilde[k] = np.concatenate((
-                wasn.nodes[k].noiseOnly,
-                (eta_noise - z_noise[k, :])[np.newaxis, :]
-            ), axis=0)
+            if ALGO == 'danse':
+                zMk = z[np.arange(K) != k, :]
+                zMk_noise = z_noise[np.arange(K) != k, :]
+                yTilde[k] = np.concatenate((
+                    wasn.nodes[k].signal,
+                    zMk
+                ), axis=0)
+                nTilde[k] = np.concatenate((
+                    wasn.nodes[k].noiseOnly,
+                    zMk_noise
+                ), axis=0)
+            elif ALGO == 'tidanse':
+                yTilde[k] = np.concatenate((
+                    wasn.nodes[k].signal,
+                    (eta - z[k, :])[np.newaxis, :]
+                ), axis=0)
+                nTilde[k] = np.concatenate((
+                    wasn.nodes[k].noiseOnly,
+                    (eta_noise - z_noise[k, :])[np.newaxis, :]
+                ), axis=0)
 
             if k == q:
                 # Compute batch covariance matrix
                 Ryy = yTilde[k] @ yTilde[k].T.conj()
                 Rnn = nTilde[k] @ nTilde[k].T.conj()
                 # Update MMSE filter
-                ek = np.zeros((MK + 1))
+                ek = np.zeros(dimTilde)
                 ek[REFSENSORIDX] = 1
                 wTilde[k] = np.linalg.inv(Ryy) @ (Ryy - Rnn) @ ek
 
@@ -142,6 +185,32 @@ def batch_ti_danse(wasn: WASN):
         i += 1
         # Update node index
         q = (q + 1) % K
+        # Check stopping condition
+        if i > K:
+            stopcond = i >= MAXITER or np.all([np.abs(me[-1] - me[-1-K]) < EPS for me in mmse])
+
+    # Plot
+    fig, axes = plt.subplots(2,1)
+    fig.set_size_inches(8.5, 3.5)
+    for k in range(K):
+        axes[0].plot(mmse[k], f'o-C{k}', label=f"Node {k}")
+        axes[0].hlines(mmseCentral[k], 0, len(mmse[0])-1, f'C{k}', linestyle="--")
+    axes[0].set_xlabel("DANSE iteration index")
+    axes[0].set_ylabel("MMSE per node")
+    axes[0].legend()
+    axes[0].set_xlim([0, len(mmse[0])-1])
+    axes[0].grid()
+    #
+    axes[1].plot(np.mean(np.array(mmse), axis=0), 'o-k', label=ALGO.capitalize())
+    axes[1].hlines(np.mean(mmseCentral), 0, len(mmse[0])-1, 'b', linestyle="--", label="Centralized")
+    axes[1].set_xlabel("DANSE iteration index")
+    axes[1].set_ylabel("Cost")
+    axes[1].legend()
+    axes[1].set_xlim([0, len(mmse[0])-1])
+    axes[1].grid()
+    #
+    fig.tight_layout()	
+    plt.show()
 
 def create_wasn(x, n):
     # Create line topology
