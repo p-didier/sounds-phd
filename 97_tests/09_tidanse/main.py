@@ -17,16 +17,22 @@ NSAMPLES = 10000
 #
 K = 15  # Number of nodes
 MK = 5 # Number of microphones per node (same for all nodes)
+# Online processing
+B = 100  # Block size (number of samples per block)
+OVERLAP_B = 0.5  # Overlap between blocks (in percentage)
+BETA = 0.99  # Forgetting factor for batch covariance matrix
 #
-N = 1024  # STFT window length
+N_STFT = 1024  # STFT window length
 N_NOISE_SOURCES = 2
 EPS = 1e-5  # Stopping criterion constant
 MAXITER = 1000  # Maximum number of iterations
 SNR = 10  # [dB] SNR of desired signal
 SNSNR = 5  # [dB] SNR of self-noise signals
 #
-ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
-MODE = 'batch'  # 'wola' or 'online' or 'batch'
+# ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
+ALGOS = ['danse']  # 'danse' or 'ti-danse'
+# MODE = 'batch'  # 'wola' or 'online' or 'batch'
+MODE = 'online'  # 'wola' or 'online' or 'batch'
 # GEVD = True  # Use GEVD-MWF
 GEVD = False  # Use MWF
 
@@ -44,7 +50,7 @@ class WASN:
         self.nodes: list[Node] = []
         self.ySTFT = []
 
-    def compute_stft_signals(self, L=N, hop=N // 2):
+    def compute_stft_signals(self, L=N_STFT, hop=N_STFT // 2):
         nFrames = self.nodes[0].signal.shape[1] // hop + 1
         for k in range(len(self.nodes)):
             ySTFTcurr = np.zeros((MK, L // 2 + 1, nFrames), dtype=np.complex)
@@ -77,17 +83,18 @@ def main():
 
 
 def run(wasn: WASN):
+    """Run simulation."""
     if MODE == 'wola':
         # Compute STFT signals
         wasn.compute_stft_signals()
         raise NotImplementedError  # TODO: implement TI-DANSE with WOLA
-    elif MODE == 'online':
-        raise NotImplementedError  # TODO: implement TI-DANSE online
-    elif MODE == 'batch':
-        batch_run(wasn)
+    elif MODE in ['batch','online']:
+        mmsePerAlgo, mmseCentral = batch_or_online_run(wasn)
+    # Plot
+    plot_results(mmsePerAlgo, mmseCentral, onlyLoss=True)
 
 
-def batch_run(wasn: WASN):
+def batch_or_online_run(wasn: WASN):
     # Compute centralized cost
     mmseCentral = get_centr_cost(wasn)
 
@@ -97,75 +104,57 @@ def batch_run(wasn: WASN):
             dimTilde = MK + K - 1  # fully connected
         else:
             dimTilde = MK + 1
+        eq = np.zeros(dimTilde)
+        eq[REFSENSORIDX] = 1  # reference sensor selection vector
         wTilde = [
             np.ones(dimTilde) / 100  # initialize wTilde to 1
             for _ in range(K)
         ]
+        Rss = np.zeros((dimTilde, dimTilde))
+        Rnn = np.zeros((dimTilde, dimTilde))
         i = 0  # DANSE iteration index
         q = 0  # currently updating node index
         mmse = [[] for _ in range(K)]  # MMSE
         stopcond = False
         while not stopcond:
             # Compute compressed signals
-            z_desired = np.zeros((K, NSAMPLES))
-            z_noise = np.zeros((K, NSAMPLES))
+            if MODE == 'batch':
+                z_desired = np.zeros((K, NSAMPLES))
+                z_noise = np.zeros((K, NSAMPLES))
+                idxBegFrame, idxEndFrame = 0, NSAMPLES
+            elif MODE == 'online':
+                z_desired = np.zeros((K, B))
+                z_noise = np.zeros((K, B))
+                idxBegFrame = int(i * B * (1 - OVERLAP_B))
+                idxEndFrame = int(idxBegFrame + B)
             for k in range(K):
-                sk = wasn.nodes[k].desiredOnly
-                nk = wasn.nodes[k].noiseOnly
-                if algo == 'danse':
-                    pk = wTilde[k][:MK]  # DANSE fusion vector
-                elif algo == 'ti-danse':
-                    pk = wTilde[k][:MK] / wTilde[k][-1]  # TI-DANSE fusion vector
-                # Inner product of pk and yk across channels (fused signals)
-                zk_desired = np.sum(sk * pk[:, None], axis=0)
-                zk_noise = np.sum(nk * pk[:, None], axis=0)
-                z_desired[k, :] = zk_desired
-                z_noise[k, :] = zk_noise
-            
-            if algo == 'ti-danse':
-                # Compute eta
-                eta_desired = np.sum(z_desired, axis=0)
-                eta_noise = np.sum(z_noise, axis=0)
+                if MODE == 'batch':
+                    sk = wasn.nodes[k].desiredOnly
+                    nk = wasn.nodes[k].noiseOnly
+                elif MODE == 'online':
+                    sk = wasn.nodes[k].desiredOnly[:, idxBegFrame:idxEndFrame]
+                    nk = wasn.nodes[k].noiseOnly[:, idxBegFrame:idxEndFrame]
+                z_desired[k, :], z_noise[k, :] = get_compressed_signals(
+                    sk, nk, algo, wTilde[k]
+                )
 
-            sTilde = [_ for _ in wasn.nodes]
-            nTilde = [_ for _ in wasn.nodes]
+            # Compute sTilde and nTilde
+            sTilde, nTilde = get_tildes(algo, z_desired, z_noise, wasn, idxBegFrame, idxEndFrame)
+
+            # Compute batch covariance matrix at updating node `q`
+            if MODE == 'batch':
+                Rss = sTilde[q] @ sTilde[q].T.conj()
+                Rnn = nTilde[q] @ nTilde[q].T.conj()
+            elif MODE == 'online':
+                Rss = BETA * Rss + (1 - BETA) * sTilde[q] @ sTilde[q].T.conj() / B
+                Rnn = BETA * Rnn + (1 - BETA) * nTilde[q] @ nTilde[q].T.conj() / B
+            # Update MMSE filter
+            wTilde[q] = filter_update(Rss + Rnn, Rnn, gevd=GEVD) @ eq
+
+            # Compute MMSE estimate of desired signal at each node
+            mmses = get_mmse(wTilde, sTilde, nTilde, wasn, idxBegFrame, idxEndFrame)
             for k in range(K):
-                if algo == 'danse':
-                    zMk_desired = z_desired[np.arange(K) != k, :]
-                    zMk_noise = z_noise[np.arange(K) != k, :]
-                    sTilde[k] = np.concatenate((
-                        wasn.nodes[k].desiredOnly,
-                        zMk_desired
-                    ), axis=0)
-                    nTilde[k] = np.concatenate((
-                        wasn.nodes[k].noiseOnly,
-                        zMk_noise
-                    ), axis=0)
-                elif algo == 'ti-danse':
-                    sTilde[k] = np.concatenate((
-                        wasn.nodes[k].desiredOnly,
-                        (eta_desired - z_desired[k, :])[np.newaxis, :]
-                    ), axis=0)
-                    nTilde[k] = np.concatenate((
-                        wasn.nodes[k].noiseOnly,
-                        (eta_noise - z_noise[k, :])[np.newaxis, :]
-                    ), axis=0)
-
-                if k == q:
-                    # Compute batch covariance matrix
-                    Rss = sTilde[k] @ sTilde[k].T.conj()
-                    Rnn = nTilde[k] @ nTilde[k].T.conj()
-                    # Update MMSE filter
-                    ek = np.zeros(dimTilde)
-                    ek[REFSENSORIDX] = 1
-                    Ryy = Rss + Rnn
-                    wTilde[k] = filter_update(Ryy, Rnn, gevd=GEVD) @ ek
-
-            # Compute MMSE estimate of desired signal
-            for k in range(K):
-                dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
-                currMMSE = np.mean(np.abs(dHat - wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2)
-                mmse[k].append(currMMSE)
+                mmse[k].append(mmses[k])
             
             # Print progress
             print(f"i = {i}, q = {q}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
@@ -173,13 +162,72 @@ def batch_run(wasn: WASN):
             i += 1
             q = (q + 1) % K
             if i > K:
-                stopcond = i >= MAXITER or np.all([np.abs(me[-1] - me[-1-K]) < EPS for me in mmse])
+                stopcond = i >= MAXITER or\
+                    np.all([np.abs(me[-1] - me[-1-K]) < EPS for me in mmse]) or\
+                    (MODE == 'online' and int(i * B * (1 - OVERLAP_B) + B) >= NSAMPLES)
                 
         # Store MMSE
         mmsePerAlgo[ALGOS.index(algo)] = mmse
     
-    # Plot
-    plot_results(mmsePerAlgo, mmseCentral, onlyLoss=True)
+    return mmsePerAlgo, mmseCentral
+
+
+def get_compressed_signals(sk, nk, algo, wTildek):
+    """Compute compressed signals using the given desired source-only and
+    noise-only data."""
+    if algo == 'danse':
+        pk = wTildek[:MK]  # DANSE fusion vector
+    elif algo == 'ti-danse':
+        pk = wTildek[:MK] / wTildek[-1]  # TI-DANSE fusion vector
+    # Inner product of pk and yk across channels (fused signals)
+    zk_desired = np.sum(sk * pk[:, None], axis=0)
+    zk_noise = np.sum(nk * pk[:, None], axis=0)
+    return zk_desired, zk_noise
+
+
+def get_mmse(wTilde, sTilde, nTilde, wasn: WASN, idxBeginFrame=0, idxEndFrame=NSAMPLES):
+    """Compute MMSE."""
+    currMMSEs = np.zeros(K)
+    for k in range(K):
+        dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
+        currMMSEs[k] = np.mean(np.abs(
+            dHat - wasn.nodes[k].desiredOnly[REFSENSORIDX, idxBeginFrame:idxEndFrame]
+        ) ** 2)
+    return currMMSEs
+
+
+def get_tildes(algo, z_desired, z_noise, wasn: WASN, idxBegFrame=0, idxEndFrame=B):
+    """Compute `sTilde` and `nTilde`."""
+    sTilde = [_ for _ in range(K)]
+    nTilde = [_ for _ in range(K)]
+    if algo == 'ti-danse':
+        # Compute eta
+        eta_desired = np.sum(z_desired, axis=0)
+        eta_noise = np.sum(z_noise, axis=0)
+    for k in range(K):
+        xk = wasn.nodes[k].desiredOnly[:, idxBegFrame:idxEndFrame]
+        nk = wasn.nodes[k].noiseOnly[:, idxBegFrame:idxEndFrame]
+        if algo == 'danse':
+            zMk_desired = z_desired[np.arange(K) != k, :]
+            zMk_noise = z_noise[np.arange(K) != k, :]
+            sTilde[k] = np.concatenate((
+                xk,
+                zMk_desired
+            ), axis=0)
+            nTilde[k] = np.concatenate((
+                nk,
+                zMk_noise
+            ), axis=0)
+        elif algo == 'ti-danse':
+            sTilde[k] = np.concatenate((
+                xk,
+                (eta_desired - z_desired[k, :])[np.newaxis, :]
+            ), axis=0)
+            nTilde[k] = np.concatenate((
+                nk,
+                (eta_noise - z_noise[k, :])[np.newaxis, :]
+            ), axis=0)
+    return sTilde, nTilde
 
 
 def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
@@ -281,25 +329,28 @@ def create_scene():
 
 def get_centr_cost(wasn: WASN):
     """Compute centralized cost (MMSE) for each node."""
-    s = np.concatenate(tuple(
-        wasn.nodes[k].desiredOnly
-        for k in range(K)
-    ), axis=0)
-    n = np.concatenate(tuple(
-        wasn.nodes[k].noiseOnly
-        for k in range(K)
-    ), axis=0)
-    Rss = s @ s.T.conj()
-    Rnn = n @ n.T.conj()
-    wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
-    mmseCentral = np.zeros(K)
-    for k in range(K):
-        ek = np.zeros(K * MK)
-        ek[k * MK + REFSENSORIDX] = 1
-        mmseCentral[k] = np.mean(
-            np.abs((wCentral @ ek).T.conj() @ (s + n) -\
-                   wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2
-        )
+    if MODE == 'batch':
+        s = np.concatenate(tuple(
+            wasn.nodes[k].desiredOnly
+            for k in range(K)
+        ), axis=0)
+        n = np.concatenate(tuple(
+            wasn.nodes[k].noiseOnly
+            for k in range(K)
+        ), axis=0)
+        Rss = s @ s.T.conj()
+        Rnn = n @ n.T.conj()
+        wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
+        mmseCentral = np.zeros(K)
+        for k in range(K):
+            ek = np.zeros(K * MK)
+            ek[k * MK + REFSENSORIDX] = 1
+            mmseCentral[k] = np.mean(
+                np.abs((wCentral @ ek).T.conj() @ (s + n) -\
+                    wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2
+            )
+    elif MODE == 'online':
+        raise NotImplementedError  # TODO: implement centralized cost for online processing
     
     return mmseCentral
 
