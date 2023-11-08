@@ -4,6 +4,7 @@
 # (c) Paul Didier, SOUNDS ETN, KU Leuven ESAT STADIUS
 
 import sys
+import copy
 import numpy as np
 import scipy.signal as sig
 import scipy.linalg as sla
@@ -13,19 +14,21 @@ SEED = 0
 REFSENSORIDX = 0  # Reference sensor index (for desired signal)
 ROOM_DIM = 10  # [m]
 FS = 16000
-NSAMPLES = 10000
+NSAMPLES = 10000  # Number of samples
 #
 K = 15  # Number of nodes
 MK = 5 # Number of microphones per node (same for all nodes)
-# Online processing
-B = 100  # Block size (number of samples per block)
-OVERLAP_B = 0.5  # Overlap between blocks (in percentage)
-BETA = 0.99  # Forgetting factor for batch covariance matrix
+# K = 3  # Number of nodes
+# MK = 2 # Number of microphones per node (same for all nodes)
+# ----- Online processing
+B = 50  # Block size (number of samples per block)
+OVERLAP_B = 0  # Overlap between blocks (in percentage)
+BETA = 0.8  # Forgetting factor for online covariance matrix
 #
 N_STFT = 1024  # STFT window length
-N_NOISE_SOURCES = 2
+N_NOISE_SOURCES = 1  # Number of noise sources
 EPS = 1e-5  # Stopping criterion constant
-MAXITER = 1000  # Maximum number of iterations
+MAXITER = 2000  # Maximum number of iterations
 SNR = 10  # [dB] SNR of desired signal
 SNSNR = 5  # [dB] SNR of self-noise signals
 #
@@ -35,6 +38,19 @@ ALGOS = ['danse']  # 'danse' or 'ti-danse'
 MODE = 'online'  # 'wola' or 'online' or 'batch'
 # GEVD = True  # Use GEVD-MWF
 GEVD = False  # Use MWF
+NU = 'sim'  # Node-updating strategy: 'sim' or 'seq'
+# NU = 'seq'  # Node-updating strategy: 'sim' or 'seq'
+# ----- External filter relaxation for simultaneous node-updating
+BETAEXT = 0.8  # Forgetting factor for external filter relaxation
+ALPHAEXT = 0.5  # External filter relaxation factor
+TEXT = 0.01  # Update external filter every `TEXT` seconds
+# ----- Plot booleans
+PLOT_ONLY_COST = True  # Plot only cost (no per-node MMSE)
+# PLOT_ONLY_COST = False  # Plot only cost (no per-node MMSE)
+
+# Set random seed
+np.random.seed(SEED)
+RNG_STATE = np.random.get_state()
 
 class Node:
     # Class to store node information (from create_wasn())
@@ -70,8 +86,6 @@ class WASN:
 def main():
     """Main function (called by default when running script)."""
     
-    np.random.seed(SEED)
-
     # Create acoustic scene
     x, n = create_scene()
 
@@ -91,7 +105,7 @@ def run(wasn: WASN):
     elif MODE in ['batch','online']:
         mmsePerAlgo, mmseCentral = batch_or_online_run(wasn)
     # Plot
-    plot_results(mmsePerAlgo, mmseCentral, onlyLoss=True)
+    plot_results(mmsePerAlgo, mmseCentral, onlyLoss=PLOT_ONLY_COST)
 
 
 def batch_or_online_run(wasn: WASN):
@@ -104,14 +118,20 @@ def batch_or_online_run(wasn: WASN):
             dimTilde = MK + K - 1  # fully connected
         else:
             dimTilde = MK + 1
-        eq = np.zeros(dimTilde)
-        eq[REFSENSORIDX] = 1  # reference sensor selection vector
+        e = np.zeros(dimTilde)
+        e[REFSENSORIDX] = 1  # reference sensor selection vector
         wTilde = [
             np.ones(dimTilde) / 100  # initialize wTilde to 1
             for _ in range(K)
         ]
-        Rss = np.zeros((dimTilde, dimTilde))
-        Rnn = np.zeros((dimTilde, dimTilde))
+        wTildeExt = copy.deepcopy(wTilde)
+        wTildeExtTarget = copy.deepcopy(wTilde)
+        np.random.set_state(RNG_STATE)
+        if MODE == 'online':
+            singleSCM = np.random.randn(dimTilde, dimTilde)
+            Rss = [copy.deepcopy(singleSCM) for _ in range(K)]
+            singleSCM = np.random.randn(dimTilde, dimTilde)
+            Rnn = [copy.deepcopy(singleSCM) for _ in range(K)]
         i = 0  # DANSE iteration index
         q = 0  # currently updating node index
         mmse = [[] for _ in range(K)]  # MMSE
@@ -135,21 +155,39 @@ def batch_or_online_run(wasn: WASN):
                     sk = wasn.nodes[k].desiredOnly[:, idxBegFrame:idxEndFrame]
                     nk = wasn.nodes[k].noiseOnly[:, idxBegFrame:idxEndFrame]
                 z_desired[k, :], z_noise[k, :] = get_compressed_signals(
-                    sk, nk, algo, wTilde[k]
+                    sk, nk, algo, wTildeExt[k]
                 )
 
             # Compute sTilde and nTilde
             sTilde, nTilde = get_tildes(algo, z_desired, z_noise, wasn, idxBegFrame, idxEndFrame)
 
-            # Compute batch covariance matrix at updating node `q`
-            if MODE == 'batch':
-                Rss = sTilde[q] @ sTilde[q].T.conj()
-                Rnn = nTilde[q] @ nTilde[q].T.conj()
-            elif MODE == 'online':
-                Rss = BETA * Rss + (1 - BETA) * sTilde[q] @ sTilde[q].T.conj() / B
-                Rnn = BETA * Rnn + (1 - BETA) * nTilde[q] @ nTilde[q].T.conj() / B
-            # Update MMSE filter
-            wTilde[q] = filter_update(Rss + Rnn, Rnn, gevd=GEVD) @ eq
+            # Compute batch covariance matrix at updating node(s)
+            if NU == 'seq':
+                upNodes = np.array([q])
+            elif NU == 'sim':
+                upNodes = np.arange(K)
+            
+            for u in upNodes:
+                if MODE == 'batch':
+                    Rss = sTilde[u] @ sTilde[u].T.conj()
+                    Rnn = nTilde[u] @ nTilde[u].T.conj()
+                    # Update MMSE filter
+                    wTilde[u] = filter_update(Rss + Rnn, Rnn, gevd=GEVD) @ e
+                elif MODE == 'online':
+                    Rss[u] = BETA * Rss[u] + (1 - BETA) * sTilde[u] @ sTilde[u].T.conj() / B
+                    Rnn[u] = BETA * Rnn[u] + (1 - BETA) * nTilde[u] @ nTilde[u].T.conj() / B
+                    # Update MMSE filter
+                    wTilde[u] = filter_update(Rss[u] + Rnn[u], Rnn[u], gevd=GEVD) @ e
+            
+            # Update external filter
+            for u in upNodes:
+                if NU == 'sim':
+                    if i % int(TEXT * FS / B) == 0:
+                        # Update target every `TEXT` seconds
+                        wTildeExtTarget[u] = ALPHAEXT * wTildeExtTarget[u] + (1 - ALPHAEXT) * wTilde[u]
+                    wTildeExt[u] = BETAEXT * wTildeExt[u] + (1 - BETAEXT) * wTildeExtTarget[u]
+                elif NU == 'seq':
+                    wTildeExt[u] = wTilde[u]
 
             # Compute MMSE estimate of desired signal at each node
             mmses = get_mmse(wTilde, sTilde, nTilde, wasn, idxBegFrame, idxEndFrame)
@@ -157,7 +195,7 @@ def batch_or_online_run(wasn: WASN):
                 mmse[k].append(mmses[k])
             
             # Print progress
-            print(f"i = {i}, q = {q}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
+            print(f"i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
             # Update indices
             i += 1
             q = (q + 1) % K
@@ -172,13 +210,13 @@ def batch_or_online_run(wasn: WASN):
     return mmsePerAlgo, mmseCentral
 
 
-def get_compressed_signals(sk, nk, algo, wTildek):
+def get_compressed_signals(sk, nk, algo, wk):
     """Compute compressed signals using the given desired source-only and
     noise-only data."""
     if algo == 'danse':
-        pk = wTildek[:MK]  # DANSE fusion vector
+        pk = wk[:MK]  # DANSE fusion vector
     elif algo == 'ti-danse':
-        pk = wTildek[:MK] / wTildek[-1]  # TI-DANSE fusion vector
+        pk = wk[:MK] / wk[-1]  # TI-DANSE fusion vector
     # Inner product of pk and yk across channels (fused signals)
     zk_desired = np.sum(sk * pk[:, None], axis=0)
     zk_noise = np.sum(nk * pk[:, None], axis=0)
@@ -196,7 +234,7 @@ def get_mmse(wTilde, sTilde, nTilde, wasn: WASN, idxBeginFrame=0, idxEndFrame=NS
     return currMMSEs
 
 
-def get_tildes(algo, z_desired, z_noise, wasn: WASN, idxBegFrame=0, idxEndFrame=B):
+def get_tildes(algo, z_desired, z_noise, wasn: WASN, idxBegFrame=0, idxEndFrame=NSAMPLES):
     """Compute `sTilde` and `nTilde`."""
     sTilde = [_ for _ in range(K)]
     nTilde = [_ for _ in range(K)]
@@ -243,13 +281,21 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
                 f'-C{idxAlgo}',
                 label=f'{ALGOS[idxAlgo].upper()} ({len(data)} iters, $\\mathcal{{L}}=${"{:.3g}".format(data[-1], -4)})'
             )
-        axes.hlines(np.mean(mmseCentral), 0, xmax, 'k', linestyle="--", label="Centralized")
+        if MODE == 'batch':
+            axes.hlines(np.mean(mmseCentral), 0, xmax, 'k', linestyle="--", label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(mmseCentral), -4)})')
+        elif MODE == 'online':
+            axes.loglog(np.mean(mmseCentral, axis=0), '--k', label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(mmseCentral, axis=0)[-1], -4)})')
         axes.set_xlabel("Iteration index")
         axes.set_ylabel("Cost")
         axes.legend(loc='upper right')
         axes.set_xlim([0, xmax])
         axes.grid()
-        axes.set_title(f'$K={K}$ nodes, $M={MK}$ sensors each, {NSAMPLES} samples, $\\mathrm{{SNR}}={SNR}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={SNSNR}$ dB, $\\mathrm{{GEVD}}={GEVD}$')
+        ti_str = f'$K={K}$, $M={MK}$ mics/node, $\\mathrm{{SNR}}={SNR}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={SNSNR}$ dB, $\\mathrm{{GEVD}}={GEVD}$'
+        if MODE == 'online':
+            ti_str += f', $B={B}$ ({int(OVERLAP_B * 100)}%ovlp), $\\beta={BETA}$'
+        elif MODE == 'batch':
+            ti_str += f', {NSAMPLES} samples'
+        axes.set_title(ti_str)
     else:
         fig, axes = plt.subplots(2, len(ALGOS))
         fig.set_size_inches(8.5, 3.5)
@@ -260,16 +306,22 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
                 currAx = axes[:, idxAlgo]
             xmax = len(mmsePerAlgo[idxAlgo][0])-1
             for k in range(K):
-                currAx[0].loglog(mmsePerAlgo[idxAlgo][k], f'o-C{k}', label=f"Node {k}")
-                currAx[0].hlines(mmseCentral[k], 0, xmax, f'C{k}', linestyle="--")
+                currAx[0].loglog(mmsePerAlgo[idxAlgo][k], f'-C{k}', label=f"Node {k}")
+                if MODE == 'batch':
+                    currAx[0].hlines(mmseCentral[k], 0, xmax, f'C{k}', linestyle="--")
+                elif MODE == 'online':
+                    currAx[0].loglog(mmseCentral[k, :], f'--C{k}')
             currAx[0].set_xlabel(f"{ALGOS[idxAlgo].upper()} iteration index")
             currAx[0].set_ylabel("MMSE per node")
             currAx[0].legend(loc='upper right')
             currAx[0].set_xlim([0, xmax])
             currAx[0].grid()
             #
-            currAx[1].loglog(np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0), 'o-k', label=ALGOS[idxAlgo].upper())
-            currAx[1].hlines(np.mean(mmseCentral), 0, xmax, 'b', linestyle="--", label="Centralized")
+            currAx[1].loglog(np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0), '-k', label=ALGOS[idxAlgo].upper())
+            if MODE == 'batch':
+                currAx[1].hlines(np.mean(mmseCentral), 0, xmax, 'k', linestyle="--", label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(mmseCentral), -4)})')
+            elif MODE == 'online':
+                currAx[1].loglog(np.mean(mmseCentral, axis=0), '--k', label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(mmseCentral, axis=0)[-1], -4)})')
             currAx[1].set_xlabel(f"{ALGOS[idxAlgo].upper()} iteration index")
             currAx[1].set_ylabel("Cost")
             currAx[1].legend(loc='upper right')
@@ -329,29 +381,50 @@ def create_scene():
 
 def get_centr_cost(wasn: WASN):
     """Compute centralized cost (MMSE) for each node."""
+
+    # Full observation matrices
+    s = np.concatenate(tuple(wasn.nodes[k].desiredOnly for k in range(K)), axis=0)
+    n = np.concatenate(tuple(wasn.nodes[k].noiseOnly for k in range(K)), axis=0)
+    nSensors = K * MK
+
     if MODE == 'batch':
-        s = np.concatenate(tuple(
-            wasn.nodes[k].desiredOnly
-            for k in range(K)
-        ), axis=0)
-        n = np.concatenate(tuple(
-            wasn.nodes[k].noiseOnly
-            for k in range(K)
-        ), axis=0)
         Rss = s @ s.T.conj()
         Rnn = n @ n.T.conj()
         wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
         mmseCentral = np.zeros(K)
         for k in range(K):
-            ek = np.zeros(K * MK)
+            ek = np.zeros(nSensors)
             ek[k * MK + REFSENSORIDX] = 1
             mmseCentral[k] = np.mean(
                 np.abs((wCentral @ ek).T.conj() @ (s + n) -\
                     wasn.nodes[k].desiredOnly[REFSENSORIDX, :]) ** 2
             )
     elif MODE == 'online':
-        raise NotImplementedError  # TODO: implement centralized cost for online processing
-    
+        np.random.set_state(RNG_STATE)
+        singleSCM = np.random.randn(nSensors, nSensors)
+        Rss = copy.deepcopy(singleSCM)
+        Rnn = copy.deepcopy(singleSCM)
+        mmseCentral = [[] for _ in range(K)]
+        stopcond = False
+        i = 0
+        while not stopcond:
+            idxBegFrame = int(i * B * (1 - OVERLAP_B))
+            idxEndFrame = int(idxBegFrame + B)
+            sCurr = s[:, idxBegFrame:idxEndFrame]
+            nCurr = n[:, idxBegFrame:idxEndFrame]
+            Rss = BETA * Rss + (1 - BETA) * sCurr @ sCurr.T.conj() / B
+            Rnn = BETA * Rnn + (1 - BETA) * nCurr @ nCurr.T.conj() / B
+            wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
+            for k in range(K):
+                ek = np.zeros(nSensors)
+                ek[k * MK + REFSENSORIDX] = 1
+                mmseCentral[k].append(np.mean(
+                    np.abs((wCentral @ ek).T.conj() @ (sCurr + nCurr) -\
+                        wasn.nodes[k].desiredOnly[REFSENSORIDX, idxBegFrame:idxEndFrame]) ** 2
+                ))
+            i += 1
+            stopcond = i >= MAXITER or int(i * B * (1 - OVERLAP_B) + B) >= NSAMPLES
+        mmseCentral = np.array(mmseCentral)
     return mmseCentral
 
 
