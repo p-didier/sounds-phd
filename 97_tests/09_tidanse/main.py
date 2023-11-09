@@ -18,8 +18,8 @@ NSAMPLES_TOT_ONLINE = 1000000  # Total number of samples for online processing
 #
 K = 2  # Number of nodes
 MK = 1 # Number of microphones per node (same for all nodes)
-K = 3  # Number of nodes
-MK = 10 # Number of microphones per node (same for all nodes)
+# K = 3  # Number of nodes
+# MK = 10 # Number of microphones per node (same for all nodes)
 # K = 3  # Number of nodes
 # MK = 5 # Number of microphones per node (same for all nodes)
 # ---- Online processing
@@ -35,8 +35,8 @@ SNR = 10  # [dB] SNR of desired signal
 SNSNR = 5  # [dB] SNR of self-noise signals
 #
 # ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
-# ALGOS = ['ti-danse']  # 'danse' or 'ti-danse'
-ALGOS = ['danse']  # 'danse' or 'ti-danse'
+ALGOS = ['ti-danse']  # 'danse' or 'ti-danse'
+# ALGOS = ['danse']  # 'danse' or 'ti-danse'
 # MODE = 'batch'  # 'wola' or 'online' or 'batch'
 MODE = 'online'  # 'wola' or 'online' or 'batch'
 # GEVD = True  # Use GEVD-MWF
@@ -219,16 +219,16 @@ def batch_or_online_run(wasn: WASN):
 
 
             # if i % 100 == 0:
-            # A = np.linalg.norm(wTildeExt[0][-1])
+            A = np.linalg.norm(wTilde[0][-1])
             # A = 879
             # else:
-            # A = 1.0 
+            # A = 1.0
 
             # Update external filters
             wTildeExt = copy.deepcopy(wTilde)  # default (used, e.g., if `NU == 'seq'`)
-            # # if i % 2 == 1:
-            # for k in range(K):
-            #     wTildeExt[k][-1] /= A  # normalize `gk` coefficient
+            # if i % 2 == 1:
+            for k in range(K):
+                wTildeExt[k][-1] /= A  # normalize `gk` coefficient
 
             for u in upNodes:
                 if NU == 'sim':
@@ -238,22 +238,22 @@ def batch_or_online_run(wasn: WASN):
                         wTildeExtTarget[u] = ALPHAEXT * wTildeExtTarget[u] + (1 - ALPHAEXT) * wTilde[u]
                     wTildeExt[u] = BETAEXT * wTildeExt[u] + (1 - BETAEXT) * wTildeExtTarget[u]
 
-            # # Normalize to avoid divergence in TI-DANSE
-            # if algo == 'ti-danse':# and i > 0:
-            #     if NU == 'sim':
-            #         raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
-            #     elif NU == 'seq':# and i % NORM_GK_EVERY == 0:
-            #         for k in range(K):
-            #             # # Normalize all gk's with respect to `upNodes[0]`'s (== `q`'s)
-            #             # wTilde[k][-1] /= np.linalg.norm(wTilde[q][-1])
-            #             # wTilde[k][-1] *= 0.5 * (i + 1)
-            #             # sTilde[k][-1, :] /= np.linalg.norm(sTilde[q][-1, :])
-            #             # nTilde[k][-1, :] /= np.linalg.norm(nTilde[q][-1, :])
-            #             # if k in upNodes:
-            #             #     wTilde[k][-1] /= A ** i
-            #             # else:
-            #             wTilde[k][-1] /= A
-            #             # pass
+            # Normalize to avoid divergence in TI-DANSE
+            if algo == 'ti-danse':# and i % 2 == 1:
+                if NU == 'sim':
+                    raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
+                elif NU == 'seq':# and i % NORM_GK_EVERY == 0:
+                    for k in range(K):
+                        # # Normalize all gk's with respect to `upNodes[0]`'s (== `q`'s)
+                        # wTilde[k][-1] /= np.linalg.norm(wTilde[q][-1])
+                        # wTilde[k][-1] *= 0.5 * (i + 1)
+                        # sTilde[k][-1, :] /= np.linalg.norm(sTilde[q][-1, :])
+                        # nTilde[k][-1, :] /= np.linalg.norm(nTilde[q][-1, :])
+                        # if k in upNodes:
+                        #     wTilde[k][-1] /= A ** i
+                        # else:
+                        wTilde[k][-1] /= A
+                        # pass
 
             # Compute MMSE estimate of desired signal at each node
             mmses = get_mmse(wTilde, sTilde, nTilde, wasn, indices)
@@ -275,7 +275,7 @@ def batch_or_online_run(wasn: WASN):
         # Store MMSE
         mmsePerAlgo[ALGOS.index(algo)] = mmse
 
-        if algo == 'ti-danse' and MODE == 'online' and K * MK < 20:
+        if algo == 'ti-danse' and MODE == 'online':
             fig, axes = plt.subplots(1, K, sharey=True, sharex=True)
             fig.set_size_inches(8.5, 3.5)
             for k in range(K):
@@ -285,9 +285,9 @@ def batch_or_online_run(wasn: WASN):
             fig.tight_layout()
             plt.show()
 
-        if algo == 'ti-danse':
+        if K * MK < 20:
             # Plot network-wide filters
-            fig, axes = plt.subplots(2, K)
+            fig, axes = plt.subplots(2, K, sharey=True, sharex=True)
             fig.set_size_inches(8.5, 3.5)
             for k in range(K):
                 # TI-DANSE coefficients
@@ -308,9 +308,9 @@ def batch_or_online_run(wasn: WASN):
                 # Network-wide filter coefficients
                 counter = np.zeros(K, dtype=int)
                 for m in range(MK * K):
-                    if m in np.arange(k * MK, (k + 1) * MK):
+                    if m // MK == k:
                         axes[1, k].semilogy(
-                            np.array(wTildeSaved[k])[:, counter[k]],
+                            np.array(wTildeSaved[k])[1:, counter[k]],
                             label=f'$w_{{kk,{counter[k]}}}$'
                         )
                         counter[k] += 1
@@ -318,10 +318,14 @@ def batch_or_online_run(wasn: WASN):
                         neigIdx = m // MK
                         wqq = np.array(wTildeExtSaved[neigIdx])[:-1, counter[neigIdx]]
                         gq = np.array(wTildeExtSaved[neigIdx])[:-1, -1]
+                        if algo == 'ti-danse':
+                            nwFilt = wqq / gq * np.array(wTildeSaved[k])[1:, -1]
+                        elif algo == 'danse':
+                            nwFilt = wqq * np.array(wTildeSaved[k])[1:, -1]
                         axes[1, k].semilogy(
-                            wqq / gq * np.array(wTildeSaved[k])[1:, -1],
+                            nwFilt,
                             '--',
-                            label=f'$w_{{{neigIdx}{neigIdx},{counter[neigIdx]}}}g_{{{neigIdx}}}^{{-1}}g_k$'
+                            label=f'$w_{{{neigIdx}{neigIdx},{counter[neigIdx]}}}^{{i-1}}(g_{{{neigIdx}}}^{{i-1}})^{{-1}}g_k^i$'
                         )
                         counter[neigIdx] += 1
                 axes[1, k].grid()
