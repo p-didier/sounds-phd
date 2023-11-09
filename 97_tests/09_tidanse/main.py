@@ -12,41 +12,54 @@ import matplotlib.pyplot as plt
 
 SEED = 0
 REFSENSORIDX = 0  # Reference sensor index (for desired signal)
-ROOM_DIM = 10  # [m]
 FS = 16000
-NSAMPLES = 10000  # Number of samples
+NSAMPLES_TOT = 10000  # Total number of samples for batch processing
+NSAMPLES_TOT_ONLINE = 1000000  # Total number of samples for online processing
 #
-K = 15  # Number of nodes
-MK = 5 # Number of microphones per node (same for all nodes)
+K = 2  # Number of nodes
+MK = 1 # Number of microphones per node (same for all nodes)
+K = 3  # Number of nodes
+MK = 10 # Number of microphones per node (same for all nodes)
 # K = 3  # Number of nodes
-# MK = 2 # Number of microphones per node (same for all nodes)
-# ----- Online processing
-B = 50  # Block size (number of samples per block)
+# MK = 5 # Number of microphones per node (same for all nodes)
+# ---- Online processing
+B = 100  # Block size (number of samples per block)
 OVERLAP_B = 0  # Overlap between blocks (in percentage)
-BETA = 0.8  # Forgetting factor for online covariance matrix
+BETA = 0.98  # Forgetting factor for online covariance matrix
 #
 N_STFT = 1024  # STFT window length
 N_NOISE_SOURCES = 1  # Number of noise sources
-EPS = 1e-5  # Stopping criterion constant
+EPS = 1e-4  # Stopping criterion constant
 MAXITER = 2000  # Maximum number of iterations
 SNR = 10  # [dB] SNR of desired signal
 SNSNR = 5  # [dB] SNR of self-noise signals
 #
 # ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
+# ALGOS = ['ti-danse']  # 'danse' or 'ti-danse'
 ALGOS = ['danse']  # 'danse' or 'ti-danse'
 # MODE = 'batch'  # 'wola' or 'online' or 'batch'
 MODE = 'online'  # 'wola' or 'online' or 'batch'
 # GEVD = True  # Use GEVD-MWF
 GEVD = False  # Use MWF
-NU = 'sim'  # Node-updating strategy: 'sim' or 'seq'
-# NU = 'seq'  # Node-updating strategy: 'sim' or 'seq'
+# NU = 'sim'  # Node-updating strategy: 'sim' or 'seq'
+NU = 'seq'  # Node-updating strategy: 'sim' or 'seq'
 # ----- External filter relaxation for simultaneous node-updating
-BETAEXT = 0.8  # Forgetting factor for external filter relaxation
+BETAEXT = 0.7  # Forgetting factor for external filter relaxation
 ALPHAEXT = 0.5  # External filter relaxation factor
-TEXT = 0.01  # Update external filter every `TEXT` seconds
+T_EXT = 0.4  # Update external filter every `TEXT` seconds
+# BETAEXT = 0.  # Forgetting factor for external filter relaxation
+# ALPHAEXT = 0.  # External filter relaxation factor
+# T_EXT = 0.  # Update external filter every `TEXT` seconds
+# ----- Tests / debug
+NORM_GK_EVERY = 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+A = 1#/100  # test normalization factor
 # ----- Plot booleans
-PLOT_ONLY_COST = True  # Plot only cost (no per-node MMSE)
-# PLOT_ONLY_COST = False  # Plot only cost (no per-node MMSE)
+# PLOT_ONLY_COST = True  # Plot only cost (no per-node MMSE)
+PLOT_ONLY_COST = False  # Plot only cost (no per-node MMSE)
+
+# ----- Checks to ensure correct parameters combinations
+if K > 10:
+    PLOT_ONLY_COST = True
 
 # Set random seed
 np.random.seed(SEED)
@@ -113,6 +126,8 @@ def batch_or_online_run(wasn: WASN):
     mmseCentral = get_centr_cost(wasn)
 
     mmsePerAlgo = [[] for _ in range(len(ALGOS))]
+    eta_desired = [np.array([]) for _ in range(K)]
+    eta_noise = [np.array([]) for _ in range(K)]
     for algo in ALGOS:
         if algo == 'danse':
             dimTilde = MK + K - 1  # fully connected
@@ -120,10 +135,7 @@ def batch_or_online_run(wasn: WASN):
             dimTilde = MK + 1
         e = np.zeros(dimTilde)
         e[REFSENSORIDX] = 1  # reference sensor selection vector
-        wTilde = [
-            np.ones(dimTilde) / 100  # initialize wTilde to 1
-            for _ in range(K)
-        ]
+        wTilde = [np.ones(dimTilde) for _ in range(K)]
         wTildeExt = copy.deepcopy(wTilde)
         wTildeExtTarget = copy.deepcopy(wTilde)
         np.random.set_state(RNG_STATE)
@@ -136,135 +148,272 @@ def batch_or_online_run(wasn: WASN):
         q = 0  # currently updating node index
         mmse = [[] for _ in range(K)]  # MMSE
         stopcond = False
+        wTildeSaved = [[] for _ in range(K)]
+        wTildeExtSaved = [[] for _ in range(K)]
         while not stopcond:
             # Compute compressed signals
             if MODE == 'batch':
-                z_desired = np.zeros((K, NSAMPLES))
-                z_noise = np.zeros((K, NSAMPLES))
-                idxBegFrame, idxEndFrame = 0, NSAMPLES
+                z_desired = np.zeros((K, NSAMPLES_TOT))
+                z_noise = np.zeros((K, NSAMPLES_TOT))
+                indices = np.arange(0, NSAMPLES_TOT)
             elif MODE == 'online':
                 z_desired = np.zeros((K, B))
                 z_noise = np.zeros((K, B))
-                idxBegFrame = int(i * B * (1 - OVERLAP_B))
-                idxEndFrame = int(idxBegFrame + B)
+                idxBegFrame = int(i * B * (1 - OVERLAP_B)) % NSAMPLES_TOT_ONLINE
+                idxEndFrame = int(idxBegFrame + B) % NSAMPLES_TOT_ONLINE
+                if idxEndFrame < idxBegFrame:
+                    indices = np.concatenate((
+                        np.arange(idxBegFrame, NSAMPLES_TOT_ONLINE),
+                        np.arange(0, idxEndFrame)
+                    ))
+                else:
+                    indices = np.arange(idxBegFrame, idxEndFrame)
             for k in range(K):
                 if MODE == 'batch':
-                    sk = wasn.nodes[k].desiredOnly
-                    nk = wasn.nodes[k].noiseOnly
+                    sk = wasn.nodes[k].desiredOnly[:, :NSAMPLES_TOT]
+                    nk = wasn.nodes[k].noiseOnly[:, :NSAMPLES_TOT]
                 elif MODE == 'online':
-                    sk = wasn.nodes[k].desiredOnly[:, idxBegFrame:idxEndFrame]
-                    nk = wasn.nodes[k].noiseOnly[:, idxBegFrame:idxEndFrame]
+                    sk = wasn.nodes[k].desiredOnly[:, indices]
+                    nk = wasn.nodes[k].noiseOnly[:, indices]
+                
                 z_desired[k, :], z_noise[k, :] = get_compressed_signals(
                     sk, nk, algo, wTildeExt[k]
                 )
 
-            # Compute sTilde and nTilde
-            sTilde, nTilde = get_tildes(algo, z_desired, z_noise, wasn, idxBegFrame, idxEndFrame)
+            # Compute `sTilde` and `nTilde`
+            sTilde, nTilde = get_tildes(algo, z_desired, z_noise, wasn, indices)
 
-            # Compute batch covariance matrix at updating node(s)
+            if algo == 'ti-danse' and MODE == 'online':
+                # Save `eta` in one long file
+                for k in range(K):
+                    eta_desired[k] = np.concatenate((eta_desired[k], sTilde[k][-1, :].T))
+                    eta_noise[k] = np.concatenate((eta_noise[k], nTilde[k][-1, :].T))
+
+            # Update covariance matrices
+            if MODE == 'batch':
+                Rss = sTilde[u] @ sTilde[u].T.conj()
+                Rnn = nTilde[u] @ nTilde[u].T.conj()
+            elif MODE == 'online':
+                for k in range(K):
+                    Rss[k] = BETA * Rss[k] + (1 - BETA) * sTilde[k] @ sTilde[k].T.conj()
+                    Rnn[k] = BETA * Rnn[k] + (1 - BETA) * nTilde[k] @ nTilde[k].T.conj()
+
+            # Perform filter updates
             if NU == 'seq':
                 upNodes = np.array([q])
             elif NU == 'sim':
                 upNodes = np.arange(K)
-            
             for u in upNodes:
                 if MODE == 'batch':
-                    Rss = sTilde[u] @ sTilde[u].T.conj()
-                    Rnn = nTilde[u] @ nTilde[u].T.conj()
                     # Update MMSE filter
-                    wTilde[u] = filter_update(Rss + Rnn, Rnn, gevd=GEVD) @ e
+                    if GEVD and not check_matrix_validity(Rss + Rnn, Rnn):
+                        print(f"i={i} [batch] -- Warning: matrices are not valid for GEVD-based filter update.")
+                    else:
+                        wTilde[u] = filter_update(Rss + Rnn, Rnn, gevd=GEVD) @ e
                 elif MODE == 'online':
-                    Rss[u] = BETA * Rss[u] + (1 - BETA) * sTilde[u] @ sTilde[u].T.conj() / B
-                    Rnn[u] = BETA * Rnn[u] + (1 - BETA) * nTilde[u] @ nTilde[u].T.conj() / B
                     # Update MMSE filter
-                    wTilde[u] = filter_update(Rss[u] + Rnn[u], Rnn[u], gevd=GEVD) @ e
-            
-            # Update external filter
+                    if GEVD and not check_matrix_validity(Rss[u] + Rnn[u], Rnn[u]):
+                        print(f"i={i} [online] -- Warning: matrices are not valid for GEVD-based filter update.")
+                    else:
+                        wTilde[u] = filter_update(Rss[u] + Rnn[u], Rnn[u], gevd=GEVD) @ e
+
+
+            # if i % 100 == 0:
+            # A = np.linalg.norm(wTildeExt[0][-1])
+            # A = 879
+            # else:
+            # A = 1.0 
+
+            # Update external filters
+            wTildeExt = copy.deepcopy(wTilde)  # default (used, e.g., if `NU == 'seq'`)
+            # # if i % 2 == 1:
+            # for k in range(K):
+            #     wTildeExt[k][-1] /= A  # normalize `gk` coefficient
+
             for u in upNodes:
                 if NU == 'sim':
-                    if i % int(TEXT * FS / B) == 0:
+                    if (int(T_EXT * FS / B) != 0 and i % int(T_EXT * FS / B) == 0) or\
+                        (int(T_EXT * FS / B) == 0):
                         # Update target every `TEXT` seconds
                         wTildeExtTarget[u] = ALPHAEXT * wTildeExtTarget[u] + (1 - ALPHAEXT) * wTilde[u]
                     wTildeExt[u] = BETAEXT * wTildeExt[u] + (1 - BETAEXT) * wTildeExtTarget[u]
-                elif NU == 'seq':
-                    wTildeExt[u] = wTilde[u]
+
+            # # Normalize to avoid divergence in TI-DANSE
+            # if algo == 'ti-danse':# and i > 0:
+            #     if NU == 'sim':
+            #         raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
+            #     elif NU == 'seq':# and i % NORM_GK_EVERY == 0:
+            #         for k in range(K):
+            #             # # Normalize all gk's with respect to `upNodes[0]`'s (== `q`'s)
+            #             # wTilde[k][-1] /= np.linalg.norm(wTilde[q][-1])
+            #             # wTilde[k][-1] *= 0.5 * (i + 1)
+            #             # sTilde[k][-1, :] /= np.linalg.norm(sTilde[q][-1, :])
+            #             # nTilde[k][-1, :] /= np.linalg.norm(nTilde[q][-1, :])
+            #             # if k in upNodes:
+            #             #     wTilde[k][-1] /= A ** i
+            #             # else:
+            #             wTilde[k][-1] /= A
+            #             # pass
 
             # Compute MMSE estimate of desired signal at each node
-            mmses = get_mmse(wTilde, sTilde, nTilde, wasn, idxBegFrame, idxEndFrame)
+            mmses = get_mmse(wTilde, sTilde, nTilde, wasn, indices)
             for k in range(K):
                 mmse[k].append(mmses[k])
             
             # Print progress
-            print(f"i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
+            print(f"[{algo.upper()} {MODE} {NU}] i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
             # Update indices
             i += 1
             q = (q + 1) % K
-            if i > K:
-                stopcond = i >= MAXITER or\
-                    np.all([np.abs(me[-1] - me[-1-K]) < EPS for me in mmse]) or\
-                    (MODE == 'online' and int(i * B * (1 - OVERLAP_B) + B) >= NSAMPLES)
-                
+            stopcond = update_stop_condition(i, mmse)
+
+            # Save `wTilde` and `wTildeExt`
+            for k in range(K):
+                wTildeSaved[k].append(wTilde[k])
+                wTildeExtSaved[k].append(wTildeExt[k])
+            
         # Store MMSE
         mmsePerAlgo[ALGOS.index(algo)] = mmse
+
+        if algo == 'ti-danse' and MODE == 'online' and K * MK < 20:
+            fig, axes = plt.subplots(1, K, sharey=True, sharex=True)
+            fig.set_size_inches(8.5, 3.5)
+            for k in range(K):
+                axes[k].semilogy(np.abs(np.array(eta_desired[k]).flatten()))
+                axes[k].grid()
+                axes[k].set_title(f'$\\eta_{{-k}}$ Node {k}')
+            fig.tight_layout()
+            plt.show()
+
+        if algo == 'ti-danse':
+            # Plot network-wide filters
+            fig, axes = plt.subplots(2, K)
+            fig.set_size_inches(8.5, 3.5)
+            for k in range(K):
+                # TI-DANSE coefficients
+                for m in range(MK + 1):
+                    if m < MK:
+                        lab = f'$w_{{kk,{m}}}$'
+                    else:
+                        lab = '$g_k$'
+                    axes[0, k].semilogy(
+                        np.array(wTildeSaved[k])[:, m],
+                        label=lab
+                    )
+                axes[0, k].grid()
+                axes[0, k].legend(loc='upper right')
+                axes[0, k].set_xlabel('Iteration index')
+                axes[0, k].set_ylabel('TI-DANSE coefficient')
+                axes[0, k].set_title(f'Node {k}')
+                # Network-wide filter coefficients
+                counter = np.zeros(K, dtype=int)
+                for m in range(MK * K):
+                    if m in np.arange(k * MK, (k + 1) * MK):
+                        axes[1, k].semilogy(
+                            np.array(wTildeSaved[k])[:, counter[k]],
+                            label=f'$w_{{kk,{counter[k]}}}$'
+                        )
+                        counter[k] += 1
+                    else:
+                        neigIdx = m // MK
+                        wqq = np.array(wTildeExtSaved[neigIdx])[:-1, counter[neigIdx]]
+                        gq = np.array(wTildeExtSaved[neigIdx])[:-1, -1]
+                        axes[1, k].semilogy(
+                            wqq / gq * np.array(wTildeSaved[k])[1:, -1],
+                            '--',
+                            label=f'$w_{{{neigIdx}{neigIdx},{counter[neigIdx]}}}g_{{{neigIdx}}}^{{-1}}g_k$'
+                        )
+                        counter[neigIdx] += 1
+                axes[1, k].grid()
+                axes[1, k].legend(loc='upper right')
+                axes[1, k].set_xlabel('Iteration index')
+                axes[1, k].set_ylabel('Net.-wide coefficient')
+                axes[1, k].set_title(f'Node {k}')
+            fig.tight_layout()
+            plt.show()
     
     return mmsePerAlgo, mmseCentral
 
 
-def get_compressed_signals(sk, nk, algo, wk):
+def update_stop_condition(i, mmse):
+    """Stop condition for DANSE `while`-loops."""
+    if i > K:
+        return i >= MAXITER or\
+            any([np.isnan(me[-1]) for me in mmse]) or\
+            np.all([
+                np.abs(me[-1] - me[-1-K]) / np.abs(me[-1-K]) < EPS for me in mmse
+            ])
+    else:
+        return False
+
+
+def check_matrix_validity(Ryy, Rnn):
+    """Check if `Ryy` is valid for GEVD-based filter updates."""
+    def _is_hermitian_and_posdef(x):
+        """Finds out whether 3D complex matrix `x` is Hermitian along 
+        the two last axes, as well as positive definite."""
+        # Get rid of machine-precision residual imaginary parts
+        x = np.real_if_close(x)
+        # Assess Hermitian-ness
+        b1 = np.allclose(x.T.conj(), x)
+        # Assess positive-definiteness
+        b2 = not any(np.linalg.eigvalsh(x) < 0)
+        return b1 and b2
+    def __full_rank_check(mat):
+        """Helper subfunction: check full-rank property."""
+        return (np.linalg.matrix_rank(mat) == mat.shape[-1]).all()
+    check1 = _is_hermitian_and_posdef(Rnn)
+    check2 = _is_hermitian_and_posdef(Ryy)
+    check3 = __full_rank_check(Rnn)
+    check4 = __full_rank_check(Ryy)
+    return check1 and check2 and check3 and check4
+
+
+def get_compressed_signals(sk, nk, algo, wkEXT):
     """Compute compressed signals using the given desired source-only and
     noise-only data."""
     if algo == 'danse':
-        pk = wk[:MK]  # DANSE fusion vector
+        pk = wkEXT[:MK]  # DANSE fusion vector
     elif algo == 'ti-danse':
-        pk = wk[:MK] / wk[-1]  # TI-DANSE fusion vector
-    # Inner product of pk and yk across channels (fused signals)
-    zk_desired = np.sum(sk * pk[:, None], axis=0)
-    zk_noise = np.sum(nk * pk[:, None], axis=0)
+        pk = wkEXT[:MK] / wkEXT[-1]  # TI-DANSE fusion vector
+    # Inner product of `pk` and `yk` across channels (fused signals)
+    zk_desired = np.sum(sk * pk[:, np.newaxis], axis=0)
+    zk_noise = np.sum(nk * pk[:, np.newaxis], axis=0)
     return zk_desired, zk_noise
 
 
-def get_mmse(wTilde, sTilde, nTilde, wasn: WASN, idxBeginFrame=0, idxEndFrame=NSAMPLES):
+def get_mmse(wTilde, sTilde, nTilde, wasn: WASN, indices):
     """Compute MMSE."""
     currMMSEs = np.zeros(K)
     for k in range(K):
         dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
         currMMSEs[k] = np.mean(np.abs(
-            dHat - wasn.nodes[k].desiredOnly[REFSENSORIDX, idxBeginFrame:idxEndFrame]
+            dHat - wasn.nodes[k].desiredOnly[REFSENSORIDX, indices]
         ) ** 2)
     return currMMSEs
 
 
-def get_tildes(algo, z_desired, z_noise, wasn: WASN, idxBegFrame=0, idxEndFrame=NSAMPLES):
+def get_tildes(algo, z_desired, z_noise, wasn: WASN, indices):
     """Compute `sTilde` and `nTilde`."""
     sTilde = [_ for _ in range(K)]
     nTilde = [_ for _ in range(K)]
-    if algo == 'ti-danse':
-        # Compute eta
-        eta_desired = np.sum(z_desired, axis=0)
-        eta_noise = np.sum(z_noise, axis=0)
     for k in range(K):
-        xk = wasn.nodes[k].desiredOnly[:, idxBegFrame:idxEndFrame]
-        nk = wasn.nodes[k].noiseOnly[:, idxBegFrame:idxEndFrame]
+        # Local signals
+        xk = wasn.nodes[k].desiredOnly[:, indices]
+        nk = wasn.nodes[k].noiseOnly[:, indices]
+        # $z_{-k}$ compressed signal vectors
+        zMk_desired = z_desired[np.arange(K) != k, :]
+        zMk_noise = z_noise[np.arange(K) != k, :]
         if algo == 'danse':
-            zMk_desired = z_desired[np.arange(K) != k, :]
-            zMk_noise = z_noise[np.arange(K) != k, :]
-            sTilde[k] = np.concatenate((
-                xk,
-                zMk_desired
-            ), axis=0)
-            nTilde[k] = np.concatenate((
-                nk,
-                zMk_noise
-            ), axis=0)
+            sTilde[k] = np.concatenate((xk, zMk_desired), axis=0)
+            nTilde[k] = np.concatenate((nk, zMk_noise), axis=0)
         elif algo == 'ti-danse':
-            sTilde[k] = np.concatenate((
-                xk,
-                (eta_desired - z_desired[k, :])[np.newaxis, :]
-            ), axis=0)
-            nTilde[k] = np.concatenate((
-                nk,
-                (eta_noise - z_noise[k, :])[np.newaxis, :]
-            ), axis=0)
+            # vvv `sum(zMk_desired)` == $\eta_{-k}$ vvv
+            etaMk_desired = np.sum(zMk_desired, axis=0)[np.newaxis, :]
+            etaMk_noise = np.sum(zMk_noise, axis=0)[np.newaxis, :]
+            sTilde[k] = np.concatenate((xk, etaMk_desired), axis=0)
+            nTilde[k] = np.concatenate((nk, etaMk_noise), axis=0)
+    
     return sTilde, nTilde
 
 
@@ -274,7 +423,10 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
         fig, axes = plt.subplots(1, 1)
         fig.set_size_inches(6.5, 3.5)
         for idxAlgo in range(len(ALGOS)):
-            xmax = len(mmsePerAlgo[idxAlgo][0])-1
+            if MODE == 'batch':
+                xmax = len(mmsePerAlgo[idxAlgo][0])-1
+            elif MODE == 'online':
+                xmax = np.amax([len(mmsePerAlgo[idxAlgo][0])-1, len(mmseCentral[0])-1])
             data = np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0)
             axes.loglog(
                 data,
@@ -294,7 +446,7 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
         if MODE == 'online':
             ti_str += f', $B={B}$ ({int(OVERLAP_B * 100)}%ovlp), $\\beta={BETA}$'
         elif MODE == 'batch':
-            ti_str += f', {NSAMPLES} samples'
+            ti_str += f', {NSAMPLES_TOT} samples'
         axes.set_title(ti_str)
     else:
         fig, axes = plt.subplots(2, len(ALGOS))
@@ -304,7 +456,10 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
                 currAx = axes
             else:
                 currAx = axes[:, idxAlgo]
-            xmax = len(mmsePerAlgo[idxAlgo][0])-1
+            if MODE == 'batch':
+                xmax = len(mmsePerAlgo[idxAlgo][0])-1
+            elif MODE == 'online':
+                xmax = np.amax([len(mmsePerAlgo[idxAlgo][0])-1, len(mmseCentral[0])-1])
             for k in range(K):
                 currAx[0].loglog(mmsePerAlgo[idxAlgo][k], f'-C{k}', label=f"Node {k}")
                 if MODE == 'batch':
@@ -317,7 +472,7 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
             currAx[0].set_xlim([0, xmax])
             currAx[0].grid()
             #
-            currAx[1].loglog(np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0), '-k', label=ALGOS[idxAlgo].upper())
+            currAx[1].loglog(np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0), '-k', label=f'{ALGOS[idxAlgo].upper()} ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(np.array(mmsePerAlgo[idxAlgo]), axis=0)[-1], -4)})')
             if MODE == 'batch':
                 currAx[1].hlines(np.mean(mmseCentral), 0, xmax, 'k', linestyle="--", label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(mmseCentral), -4)})')
             elif MODE == 'online':
@@ -357,10 +512,10 @@ def create_wasn(x, n):
 def create_scene():
     """Create acoustic scene."""
     # Generate desired source signal (random)
-    desired = np.random.randn(NSAMPLES, 1)
+    desired = np.random.randn(NSAMPLES_TOT_ONLINE, 1)
 
     # Generate noise signals (random)
-    noise = np.random.randn(NSAMPLES, N_NOISE_SOURCES)
+    noise = np.random.randn(NSAMPLES_TOT_ONLINE, N_NOISE_SOURCES)
 
     # Generate microphone signals
     x = []
@@ -372,8 +527,10 @@ def create_scene():
         x.append(mixingMatrix @ desired.T)
         # Create noise signals
         mixingMatrix = np.random.randn(MK, N_NOISE_SOURCES)
-        noiseAtMic = mixingMatrix @ noise.T + np.random.randn(MK, NSAMPLES) * 10 ** (-SNSNR / 20)
-        noiseAtMic *= 10 ** (-SNR / 20)
+        # noiseAtMic = mixingMatrix @ noise.T +\
+        #     np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNSNR / 20)
+        # noiseAtMic *= 10 ** (-SNR / 20)
+        noiseAtMic = np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNR / 20)
         n.append(noiseAtMic)
 
     return x, n
@@ -405,25 +562,37 @@ def get_centr_cost(wasn: WASN):
         Rss = copy.deepcopy(singleSCM)
         Rnn = copy.deepcopy(singleSCM)
         mmseCentral = [[] for _ in range(K)]
+        wCentral = np.zeros((nSensors, nSensors))
         stopcond = False
         i = 0
         while not stopcond:
-            idxBegFrame = int(i * B * (1 - OVERLAP_B))
-            idxEndFrame = int(idxBegFrame + B)
-            sCurr = s[:, idxBegFrame:idxEndFrame]
-            nCurr = n[:, idxBegFrame:idxEndFrame]
-            Rss = BETA * Rss + (1 - BETA) * sCurr @ sCurr.T.conj() / B
-            Rnn = BETA * Rnn + (1 - BETA) * nCurr @ nCurr.T.conj() / B
-            wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
+            idxBegFrame = int(i * B * (1 - OVERLAP_B)) % NSAMPLES_TOT_ONLINE
+            idxEndFrame = int(idxBegFrame + B) % NSAMPLES_TOT_ONLINE
+            if idxEndFrame < idxBegFrame:
+                indices = np.concatenate((
+                    np.arange(idxBegFrame, NSAMPLES_TOT_ONLINE),
+                    np.arange(0, idxEndFrame)
+                ))
+            else:
+                indices = np.arange(idxBegFrame, idxEndFrame)
+            sCurr = s[:, indices]
+            nCurr = n[:, indices]
+            Rss = BETA * Rss + (1 - BETA) * sCurr @ sCurr.T.conj()
+            Rnn = BETA * Rnn + (1 - BETA) * nCurr @ nCurr.T.conj()
+            if GEVD and not check_matrix_validity(Rss + Rnn, Rnn):
+                print(f"i={i} [centr online] -- Warning: matrices are not valid for GEVD-based filter update.")
+            else:
+                wCentral = filter_update(Rss + Rnn, Rnn, gevd=GEVD)
             for k in range(K):
                 ek = np.zeros(nSensors)
                 ek[k * MK + REFSENSORIDX] = 1
                 mmseCentral[k].append(np.mean(
                     np.abs((wCentral @ ek).T.conj() @ (sCurr + nCurr) -\
-                        wasn.nodes[k].desiredOnly[REFSENSORIDX, idxBegFrame:idxEndFrame]) ** 2
+                        wasn.nodes[k].desiredOnly[REFSENSORIDX, indices]) ** 2
                 ))
+            print(f"[Centr. {MODE}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
             i += 1
-            stopcond = i >= MAXITER or int(i * B * (1 - OVERLAP_B) + B) >= NSAMPLES
+            stopcond = update_stop_condition(i, mmseCentral)
         mmseCentral = np.array(mmseCentral)
     return mmseCentral
 
