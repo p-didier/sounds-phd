@@ -10,7 +10,11 @@ import scipy.signal as sig
 import scipy.linalg as sla
 import matplotlib.pyplot as plt
 
-SEED = 0
+REPORT_MODE = True  # Report mode (adapted plot titles, etc.)
+
+# ----- Parameters
+MC_RUNS = 1  # Number of Monte-Carlo runs
+ORIGINAL_SEED = 0
 REFSENSORIDX = 0  # Reference sensor index (for desired signal)
 FS = 16000
 NSAMPLES_TOT = 1000  # Total number of samples for batch processing
@@ -38,13 +42,13 @@ N_NOISE_SOURCES = 1  # Number of noise sources
 EPS = 1e-4  # Stopping criterion constant
 MAXITER = 2000  # Maximum number of iterations
 SNR = 10  # [dB] SNR of desired signal
-SNSNR = 5  # [dB] SNR of self-noise signals
+SNSNR = 20  # [dB] SNR of self-noise signals
 #
 ALGOS = ['danse', 'ti-danse']  # 'danse' or 'ti-danse'
 # ALGOS = ['ti-danse']  # 'danse' or 'ti-danse'
 # ALGOS = ['danse']  # 'danse' or 'ti-danse'
-# MODE = 'batch'  # 'wola' or 'online' or 'batch'
-MODE = 'online'  # 'wola' or 'online' or 'batch'
+MODE = 'batch'  # 'wola' or 'online' or 'batch'
+# MODE = 'online'  # 'wola' or 'online' or 'batch'
 # GEVD = True  # Use GEVD-MWF
 GEVD = False  # Use MWF
 # NU = 'sim'  # Node-updating strategy: 'sim' or 'seq'
@@ -69,7 +73,7 @@ if K > 10:
     PLOT_ONLY_COST = True
 
 # Set random seed
-np.random.seed(SEED)
+np.random.seed(ORIGINAL_SEED)
 RNG_STATE = np.random.get_state()
 
 class Node:
@@ -144,8 +148,8 @@ def batch_or_online_run(wasn: WASN):
             dimTilde = MK + 1
         e = np.zeros(dimTilde)
         e[REFSENSORIDX] = 1  # reference sensor selection vector
-        wTilde = [e for _ in range(K)]
-        # wTilde = [np.ones(dimTilde) for _ in range(K)]
+        # wTilde = [e for _ in range(K)]
+        wTilde = [np.ones(dimTilde) for _ in range(K)]
         wTildeExt = copy.deepcopy(wTilde)
         wTildeExtTarget = copy.deepcopy(wTilde)
         np.random.set_state(RNG_STATE)
@@ -197,7 +201,7 @@ def batch_or_online_run(wasn: WASN):
             # Compute `sTilde` and `nTilde`
             sTilde, nTilde = get_tildes(algo, z_desired, z_noise, wasn, indices)
 
-            if algo == 'ti-danse':
+            if algo == 'ti-danse' and MODE == 'online':
                 betaNf = np.amin([1 - GAMMA ** i, MAXBETA_NF])  # slowly increase `betaNf` from 0 towards 0.75
                 nfCurr = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))#*\
                     # np.mean(np.abs((sTilde[0] + nTilde[0])[:MK, :]))
@@ -301,7 +305,7 @@ def batch_or_online_run(wasn: WASN):
         # Store MMSE
         mmsePerAlgo[ALGOS.index(algo)] = mmse
 
-        if algo == 'ti-danse':
+        if algo == 'ti-danse' and MODE == 'online':
             fig, axes = plt.subplots(1,1)
             fig.set_size_inches(8.5, 3.5)
             axes.semilogy(normFact)
@@ -504,6 +508,9 @@ def plot_results(mmsePerAlgo, mmseCentral, onlyLoss=False):
         axes.legend(loc='upper right')
         axes.set_xlim([0, xmax])
         axes.grid()
+        # if REPORT_MODE:
+        #     ti_str = f'$K={K}$, $M={MK}$ mics/node, $\\mathrm{{SNR}}={SNR}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={SNSNR}$ dB, $\\mathrm{{GEVD}}={GEVD}$'
+        # else:
         ti_str = f'$K={K}$, $M={MK}$ mics/node, $\\mathrm{{SNR}}={SNR}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={SNSNR}$ dB, $\\mathrm{{GEVD}}={GEVD}$'
         if MODE == 'online':
             ti_str += f', $B={B}$ ({int(OVERLAP_B * 100)}%ovlp), $\\beta={BETA}$'
@@ -589,10 +596,9 @@ def create_scene():
         x.append(mixingMatrix @ desired.T)
         # Create noise signals
         mixingMatrix = np.random.randn(MK, N_NOISE_SOURCES)
-        # noiseAtMic = mixingMatrix @ noise.T +\
-        #     np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNSNR / 20)
-        # noiseAtMic *= 10 ** (-SNR / 20)
-        noiseAtMic = np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNR / 20)
+        noiseAtMic = mixingMatrix @ noise.T * 10 ** (-SNR / 20) +\
+            np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNSNR / 20)
+        # noiseAtMic = np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNR / 20)
         n.append(noiseAtMic)
 
     return x, n
