@@ -1,3 +1,4 @@
+import os
 import yaml
 import numpy as np
 from typing import List
@@ -49,7 +50,6 @@ class Configuration:
         # Set seed
         np.random.seed(self.originalSeed)
         self.rngState = np.random.get_state()
-
         if self.plotOnlyCost:
             raise NotImplementedError("`plotOnlyCost` not implemented yet")
 

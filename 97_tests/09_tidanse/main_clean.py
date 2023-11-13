@@ -8,12 +8,16 @@
 
 import os
 import sys
+import datetime
 from utils.danse import Launcher
 from utils.scene import SceneCreator
 from utils.post import PostProcessor
 from utils.config import Configuration
 
-YAML_FILE = 'params.yaml'
+# Current working directory
+CWD = os.path.dirname(os.path.realpath(__file__))
+# YAML file containing configuration
+YAML_FILE = f'{CWD}/params.yaml'
 
 def main():
     """Main function (called by default when running script)."""
@@ -39,9 +43,10 @@ def main():
     # Export
     if not os.path.exists(cfg.exportFolder):
         os.makedirs(cfg.exportFolder)
-    fig.savefig(os.path.join(cfg.exportFolder, 'mmse.pdf'), bbox_inches='tight')
-
-
+    # Add datetime stamp
+    fname = f'mmse_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'
+    fig.savefig(os.path.join(cfg.exportFolder, fname + '.pdf'), bbox_inches='tight')
+    fig.savefig(os.path.join(cfg.exportFolder, fname + '.png'), bbox_inches='tight', dpi=300)
 
 
 def relative_to_absolute_path(path: str):

@@ -46,26 +46,30 @@ class PostProcessor:
             self.mmseCentralMax = np.amax(arrC, axis=0)
             self.mmseCentralMin = np.amin(arrC, axis=0)
         else:
-            self.mmseCentralMean = self.mmseCentral
-            self.mmseCentralStd = np.zeros_like(self.mmseCentral)
-            self.mmseCentralMax = self.mmseCentral
-            self.mmseCentralMin = self.mmseCentral
+            self.mmseCentralMean = self.mmseCentral[0]
+            self.mmseCentralStd = np.zeros_like(self.mmseCentral[0])
+            self.mmseCentralMax = self.mmseCentral[0]
+            self.mmseCentralMin = self.mmseCentral[0]
         
     def plot_mmse(self):
         """Plot results."""
         # Pre-process the mutiple MC runs
         self.pre_process_mc_runs()
+        if self.cfg.mcRuns > 1:
+            strLoss = 'E_\\mathrm{{MC\\,runs}}\\{{\\mathcal{{L}}\\}}'  # average over MC runs
+        else:
+            strLoss = '\\mathcal{{L}}'
+        
         if self.cfg.plotOnlyCost:
             fig, axes = plt.subplots(1, 1)
             fig.set_size_inches(6.5, 3.5)
             for idxAlgo in range(len(self.cfg.algos)):
                 # Current plot data
                 dataMean = np.mean(np.array(self.mmsePerAlgoMean[idxAlgo]), axis=0)
-                strELoss = 'E_\\mathrm{{MC\\,runs}}\\{{\\mathcal{{L}}\\}}'
                 axes.loglog(
                     dataMean,
                     f'-C{idxAlgo}',
-                    label=f'{self.cfg.algos[idxAlgo].upper()} (${strELoss}=${"{:.3g}".format(dataMean[-1], -4)})'
+                    label=f'{self.cfg.algos[idxAlgo].upper()} (${strLoss}=${"{:.3g}".format(dataMean[-1], -4)})'
                 )
                 # Add shaded area for min/max
                 dataMax = np.mean(np.array(self.mmsePerAlgoMax[idxAlgo]), axis=0)
@@ -78,17 +82,17 @@ class PostProcessor:
                     alpha=0.1
                 )
             if self.cfg.mode == 'batch':
-                axes.hlines(np.mean(self.mmseCentralMean), 0, self.cfg.maxIter, 'k', linestyle="--", label=f'Centralized (${strELoss}=${"{:.3g}".format(np.mean(self.mmseCentral), -4)})')
+                axes.hlines(np.mean(self.mmseCentralMean), 0, self.cfg.maxIter, 'k', linestyle="--", label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
             elif self.cfg.mode == 'online':
-                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized (${strELoss}=${"{:.3g}".format(np.mean(self.mmseCentral, axis=0)[-1], -4)})')
+                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
             axes.set_xlabel("Iteration index")
             axes.set_ylabel("Cost $\\mathcal{L}$")
             axes.legend(loc='upper right')
             axes.set_xlim([0, self.cfg.maxIter])
             axes.grid()
-            ti_str = f'$self.cfg.K={self.cfg.K}$, $M={self.cfg.Mk}$ mics/node, $\\mathrm{{self.cfg.snr}}={self.cfg.snr}$ dB, $\\mathrm{{self.cfg.snr}}_{{\\mathrm{{self}}}}={self.cfg.snSnr}$ dB, $\\mathrm{{self.cfg.gevd}}={self.cfg.gevd}$'
+            ti_str = f'$K={self.cfg.K}$, $M={self.cfg.Mk}$ mics/node, $\\mathrm{{SNR}}={self.cfg.snr}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={self.cfg.snSnr}$ dB, $\\mathrm{{GEVD}}={self.cfg.gevd}$'
             if self.cfg.mode == 'online':
-                ti_str += f', $self.cfg.B={self.cfg.B}$ ({int(self.cfg.overlapB * 100)}%ovlp), $\\beta={self.cfg.beta}$'
+                ti_str += f', $B={self.cfg.B}$ ({int(self.cfg.overlapB * 100)}%ovlp), $\\beta={self.cfg.beta}$'
             elif self.cfg.mode == 'batch':
                 ti_str += f', {self.cfg.nSamplesTot} samples'
             axes.set_title(ti_str)
