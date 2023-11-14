@@ -21,6 +21,15 @@ class Launcher:
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral = self.batch_or_online_run()
 
+    def query(self, k):
+        return self.wasn.nodes[k].query(
+            Mk=self.cfg.Mk,
+            B=self.cfg.B,
+            nNoiseSources=self.cfg.nNoiseSources,
+            snr=self.cfg.snr,
+            snSnr=self.cfg.snSnr
+        )
+
     def batch_or_online_run(self):
         # Compute centralized cost
         mmseCentral = self.get_centr_cost()
@@ -52,26 +61,27 @@ class Launcher:
                 if self.cfg.mode == 'batch':
                     z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesTot))
                     z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesTot))
-                    indices = np.arange(0, self.cfg.nSamplesTot)
                 elif self.cfg.mode == 'online':
                     z_desired = np.zeros((self.cfg.K, self.cfg.B))
                     z_noise = np.zeros((self.cfg.K, self.cfg.B))
-                    idxBegFrame = int(i * self.cfg.B * (1 - self.cfg.overlapB))\
-                        % self.cfg.nSamplesTotOnline
-                    idxEndFrame = int(idxBegFrame + self.cfg.B)\
-                        % self.cfg.nSamplesTotOnline
-                    if idxEndFrame < idxBegFrame:
-                        indices = np.concatenate((
-                            np.arange(idxBegFrame, self.cfg.nSamplesTotOnline),
-                            np.arange(0, idxEndFrame)
-                        ))
-                    else:
-                        indices = np.arange(idxBegFrame, idxEndFrame)
+                targetsMMSE = []
+                s, n = [], []
                 for k in range(self.cfg.K):
-                    sk = self.wasn.nodes[k].desiredOnly[:, indices]
-                    nk = self.wasn.nodes[k].noiseOnly[:, indices]
+                    if self.cfg.mode == 'batch':
+                        sk = self.wasn.nodes[k].desiredOnly
+                        nk = self.wasn.nodes[k].noiseOnly
+                    elif self.cfg.mode == 'online':
+                        sk, nk = self.query(k)  # Query new data
+                    # Save the signals for tilde-vectors computation
+                    s.append(sk)
+                    n.append(nk)
+                    # Save the target signal for MMSE computation
+                    targetsMMSE.append(sk[self.wasn.refSensorIdx, :])
                     z_desired[k, :], z_noise[k, :] = get_compressed_signals(
-                        sk, nk, algo, wTildeExt[k],
+                        sk,
+                        nk,
+                        algo,
+                        wTildeExt[k],
                         onlyWkk=(
                             (i < self.cfg.K * (self.cfg.nIterBetweenUpdates + 1)\
                             if self.cfg.nodeUpdating == 'seq' else i == 0)
@@ -80,16 +90,16 @@ class Launcher:
                     )
 
                 # Compute `sTilde` and `nTilde`
-                sTilde, nTilde = get_tildes(
-                    algo, z_desired, z_noise, self.wasn, indices
-                )
+                sTilde, nTilde = self.get_tildes(algo, s, n, z_desired, z_noise)
 
                 # Normalize `sTilde` and `nTilde` (TI-DANSE only)
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
                     and i > 0 and i % self.cfg.normGkEvery == 0:
                     betaNf = np.amin([1 - self.cfg.gamma ** i, self.cfg.maxBetaNf])  # slowly increase `betaNf` from 0 towards 0.75
-                    nfCurr = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))#*\
-                    nf = betaNf * nf + (1 - betaNf) * nfCurr / 1e6
+                    # nfCurr = np.abs(np.sum(z_desired + z_noise, axis=0))
+                    nfCurr = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
+                    # nfCurr = np.mean(np.sum(z_desired + z_noise, axis=0))
+                    nf = betaNf * nf + (1 - betaNf) * nfCurr
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'sim':
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
@@ -139,7 +149,9 @@ class Launcher:
                     wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (used, e.g., if `self.cfg.nodeUpdating == 'seq'`)
 
                 # Compute MMSE estimate of desired signal at each node
-                mmses = get_mmse(wTilde, sTilde, nTilde, self.wasn, indices)
+                mmses = self.get_mmse(
+                    wTilde, sTilde, nTilde, targetsMMSE
+                )
                 for k in range(self.cfg.K):
                     mmse[k].append(mmses[k])
                 
@@ -151,12 +163,6 @@ class Launcher:
                 # Randomly pick node to update
                 stopcond = self.update_stop_condition(i, mmse)
 
-                # # Save `wTilde` and `wTildeExt`
-                # for k in range(self.cfg.K):
-                #     wTildeSaved[k].append(wTilde[k])
-                #     wTildeExtSaved[k].append(wTildeExt[k])
-                #     avgAmpEtaMk[k].append(np.mean(np.abs(sTilde[k][-1, :])))
-                
             # Store MMSE
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
         
@@ -165,21 +171,21 @@ class Launcher:
     def get_centr_cost(self):
         """Compute centralized cost (MMSE) for each node."""
         # Full observation matrices
-        s = np.concatenate(tuple(self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)), axis=0)
-        n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
         nSensors = self.cfg.K * self.cfg.Mk
 
         if self.cfg.mode == 'batch':
-            Rss = s[:, :self.cfg.nSamplesTot] @ s[:, :self.cfg.nSamplesTot].T.conj()
-            Rnn = n[:, :self.cfg.nSamplesTot] @ n[:, :self.cfg.nSamplesTot].T.conj()
+            s = np.concatenate(tuple(self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)), axis=0)
+            n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
+            Rss = s @ s.T.conj()
+            Rnn = n @ n.T.conj()
             wCentral = filter_update(Rss + Rnn, Rnn, gevd=self.cfg.gevd)
             mmseCentral = np.zeros(self.cfg.K)
             for k in range(self.cfg.K):
                 ek = np.zeros(nSensors)
                 ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
                 mmseCentral[k] = np.mean(
-                    np.abs((wCentral @ ek).T.conj() @ (s + n)[:, :self.cfg.nSamplesTot] -\
-                        self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :self.cfg.nSamplesTot]) ** 2
+                    np.abs((wCentral @ ek).T.conj() @ (s + n) -\
+                        self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]) ** 2
                 )
         elif self.cfg.mode == 'online':
             np.random.set_state(self.cfg.rngState)
@@ -191,17 +197,12 @@ class Launcher:
             stopcond = False
             i = 0
             while not stopcond:
-                idxBegFrame = int(i * self.cfg.B * (1 - self.cfg.overlapB)) % self.cfg.nSamplesTotOnline
-                idxEndFrame = int(idxBegFrame + self.cfg.B) % self.cfg.nSamplesTotOnline
-                if idxEndFrame < idxBegFrame:
-                    indices = np.concatenate((
-                        np.arange(idxBegFrame, self.cfg.nSamplesTotOnline),
-                        np.arange(0, idxEndFrame)
-                    ))
-                else:
-                    indices = np.arange(idxBegFrame, idxEndFrame)
-                sCurr = s[:, indices]
-                nCurr = n[:, indices]
+                sCurr = np.concatenate(tuple(
+                    self.query(k)[0] for k in range(self.cfg.K)
+                ), axis=0)
+                nCurr = np.concatenate(tuple(
+                    self.query(k)[1] for k in range(self.cfg.K)
+                ), axis=0)
                 Rss = self.cfg.beta * Rss + (1 - self.cfg.beta) * sCurr @ sCurr.T.conj()
                 Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nCurr @ nCurr.T.conj()
                 if self.cfg.gevd and not check_matrix_validity(Rss + Rnn, Rnn):
@@ -211,10 +212,10 @@ class Launcher:
                 for k in range(self.cfg.K):
                     ek = np.zeros(nSensors)
                     ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
-                    mmseCentral[k].append(np.mean(
-                        np.abs((wCentral @ ek).T.conj() @ (sCurr + nCurr) -\
-                            self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, indices]) ** 2
-                    ))
+                    target = sCurr.T @ ek
+                    mmseCentral[k].append(np.mean(np.abs(
+                        (wCentral @ ek).T.conj() @ (sCurr + nCurr) - target
+                    ) ** 2))
                 print(f"[Centr. {self.cfg.mode}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
                 i += 1
                 stopcond = self.update_stop_condition(i, mmseCentral)
@@ -234,42 +235,55 @@ class Launcher:
                 ])
         else:
             return False
+        
+    def get_tildes(self, algo, sk_forAllk, nk_forAllk, z_desired, z_noise):
+        """Compute `sTilde` and `nTilde`."""
+        sTilde = [_ for _ in range(self.cfg.K)]
+        nTilde = [_ for _ in range(self.cfg.K)]
+        for k in range(self.cfg.K):
+            # Local signals
+            sk = sk_forAllk[k]
+            nk = nk_forAllk[k]
+            # $z_{-k}$ compressed signal vectors
+            zMk_desired = z_desired[np.arange(self.cfg.K) != k, :]
+            zMk_noise = z_noise[np.arange(self.cfg.K) != k, :]
+            if algo == 'danse':
+                sTilde[k] = np.concatenate((sk, zMk_desired), axis=0)
+                nTilde[k] = np.concatenate((nk, zMk_noise), axis=0)
+            elif algo == 'ti-danse':
+                # vvv `sum(zMk_desired)` == $\eta_{-k}$ vvv
+                etaMk_desired = np.sum(zMk_desired, axis=0)[np.newaxis, :]
+                etaMk_noise = np.sum(zMk_noise, axis=0)[np.newaxis, :]
+                sTilde[k] = np.concatenate((sk, etaMk_desired), axis=0)
+                nTilde[k] = np.concatenate((nk, etaMk_noise), axis=0)    
+        
+        return sTilde, nTilde
 
-def get_mmse(wTilde, sTilde, nTilde, wasn: WASN, indices):
-    """Compute MMSE."""
-    currMMSEs = np.zeros(len(wTilde))
-    for k in range(len(wTilde)):
-        dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
-        currMMSEs[k] = np.mean(np.abs(
-            dHat - wasn.nodes[k].desiredOnly[wasn.refSensorIdx, indices]
-        ) ** 2)
-    return currMMSEs
-
-
-def get_tildes(algo, z_desired, z_noise, wasn: WASN, indices):
-    """Compute `sTilde` and `nTilde`."""
-    nNodes = len(wasn.nodes)
-    sTilde = [_ for _ in range(nNodes)]
-    nTilde = [_ for _ in range(nNodes)]
-    for k in range(nNodes):
-        # Local signals
-        xk = wasn.nodes[k].desiredOnly[:, indices]
-        nk = wasn.nodes[k].noiseOnly[:, indices]
-        # $z_{-k}$ compressed signal vectors
-        zMk_desired = z_desired[np.arange(nNodes) != k, :]
-        zMk_noise = z_noise[np.arange(nNodes) != k, :]
-        if algo == 'danse':
-            sTilde[k] = np.concatenate((xk, zMk_desired), axis=0)
-            nTilde[k] = np.concatenate((nk, zMk_noise), axis=0)
-        elif algo == 'ti-danse':
-            # vvv `sum(zMk_desired)` == $\eta_{-k}$ vvv
-            etaMk_desired = np.sum(zMk_desired, axis=0)[np.newaxis, :]
-            etaMk_noise = np.sum(zMk_noise, axis=0)[np.newaxis, :]
-            sTilde[k] = np.concatenate((xk, etaMk_desired), axis=0)
-            nTilde[k] = np.concatenate((nk, etaMk_noise), axis=0)    
-    
-    return sTilde, nTilde
-
+    def get_mmse(self, wTilde, sTilde, nTilde, target):
+        """
+        Compute MMSE.
+        
+        Parameters
+        ----------
+        wTilde : list of array-like
+            List of external filters.
+        sTilde : list of array-like
+            List of compressed desired signals.
+        nTilde : list of array-like
+            List of compressed noise signals.
+        target : list of array-like
+            Desired signals at each node.
+        
+        Returns
+        -------
+        currMMSEs : array-like
+            MMSEs at each node.
+        """
+        currMMSEs = np.zeros(len(wTilde))
+        for k in range(len(wTilde)):
+            dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
+            currMMSEs[k] = np.mean(np.abs(dHat - target[k]) ** 2)
+        return currMMSEs
 
 def get_compressed_signals(sk, nk, algo, wkEXT, onlyWkk=False):
     """Compute compressed signals using the given desired source-only and

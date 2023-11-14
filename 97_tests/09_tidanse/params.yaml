@@ -3,19 +3,19 @@ originalSeed: 0
 refSensorIdx: 0  # Reference sensor index (for desired signal)
 fs: 16000
 nSamplesTot: 1000  # Total number of samples for batch processing
-nSamplesTotOnline: 1000000  # Total number of samples for online processing
+nSamplesTotOnline: 2000000  # Total number of samples for online processing
 
 K: 15  # Number of nodes
 Mk: 5  # Number of microphones per node (same for all nodes)
 
 # ---- Online processing
-B: 100  # Block size (number of samples per block)
+B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
 beta: 0.98  # Forgetting factor for online covariance matrix
 
 # ---- TI-DANSE eta normalization
 gamma: 0.0  # Constant to build adaptive forgetting factor for normalization factor (set to 0 for a constant forgetting factor == `MAXBETA_NF`)
-maxBetaNf: 0.6  # Maximum value for adaptive forgetting factor for normalization factor
+maxBetaNf: 0.0  # Maximum value for adaptive forgetting factor for normalization factor
 
 nStft: 1024  # STFT window length
 nNoiseSources: 1  # Number of noise sources
@@ -42,8 +42,8 @@ alphaExt: 0.5  # External filter relaxation factor
 tExt: 0.4  # Update external filter every `TEXT` seconds
 
 # ----- Tests / debug
-# normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
-normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+# normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 # ----- Plot booleans
 plotOnlyCost: true  # Plot only cost (no per-node MMSE)
 exportFolder: './97_tests/09_tidanse/figs'
