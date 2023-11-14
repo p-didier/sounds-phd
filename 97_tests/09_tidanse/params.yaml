@@ -13,10 +13,6 @@ B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
 beta: 0.0  # Forgetting factor for online covariance matrix
 
-# ---- TI-DANSE eta normalization
-gamma: 0.0  # Constant to build adaptive forgetting factor for normalization factor (set to 0 for a constant forgetting factor == `MAXBETA_NF`)
-maxBetaNf: 0.0  # Maximum value for adaptive forgetting factor for normalization factor
-
 nStft: 1024  # STFT window length
 nNoiseSources: 1  # Number of noise sources
 eps: 0.0001  # Stopping criterion constant

@@ -52,7 +52,6 @@ class Launcher:
             q = 0  # currently updating node index
             nf = 1  # normalization factor
             mmse = [[] for _ in range(self.cfg.K)]  # MMSE per node
-            normFact = []
             nIterSinceLastUp = [0 for _ in range(self.cfg.K)]
             stopcond = False
             while not stopcond:
@@ -94,16 +93,13 @@ class Launcher:
                 # Normalize `sTilde` and `nTilde` (TI-DANSE only)
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
                     and i > 0 and i % self.cfg.normGkEvery == 0:
-                    betaNf = np.amin([1 - self.cfg.gamma ** i, self.cfg.maxBetaNf])  # slowly increase `betaNf` from 0 towards 0.75
-                    nfCurr = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
-                    nf = betaNf * nf + (1 - betaNf) * nfCurr
+                    nf = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'sim':
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
                         elif self.cfg.nodeUpdating == 'seq':
                             sTilde[k][-1, :] /= nf
                             nTilde[k][-1, :] /= nf
-                    normFact.append(nf)
 
                 # Update covariance matrices
                 if self.cfg.nodeUpdating == 'seq':
