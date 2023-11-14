@@ -2,8 +2,7 @@ mcRuns: 1  # Number of Monte-Carlo runs
 originalSeed: 0
 refSensorIdx: 0  # Reference sensor index (for desired signal)
 fs: 16000
-nSamplesTot: 1000  # Total number of samples for batch processing
-nSamplesTotOnline: 2000000  # Total number of samples for online processing
+nSamplesBatch: 1000  # Total number of samples for batch processing
 
 K: 15  # Number of nodes
 Mk: 5  # Number of microphones per node (same for all nodes)
@@ -11,7 +10,7 @@ Mk: 5  # Number of microphones per node (same for all nodes)
 # ---- Online processing
 B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
-beta: 0.0  # Forgetting factor for online covariance matrix
+beta: 0.98  # Forgetting factor for online covariance matrix
 
 nStft: 1024  # STFT window length
 nNoiseSources: 1  # Number of noise sources
@@ -38,8 +37,8 @@ alphaExt: 0.5  # External filter relaxation factor
 tExt: 0.4  # Update external filter every `TEXT` seconds
 
 # ----- Tests / debug
-# normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
-normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+# normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 # ----- Plot booleans
 plotOnlyCost: true  # Plot only cost (no per-node MMSE)
 exportFolder: './97_tests/09_tidanse/out'

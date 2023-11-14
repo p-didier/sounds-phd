@@ -10,8 +10,7 @@ class Configuration:
     originalSeed: int = 0
     refSensorIdx: int = 0
     fs: int = 16000
-    nSamplesTot: int = 1000
-    nSamplesTotOnline: int = 1000000
+    nSamplesBatch: int = 1000
 
     K: int = 15
     Mk: int = 5

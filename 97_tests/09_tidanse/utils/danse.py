@@ -57,8 +57,8 @@ class Launcher:
             while not stopcond:
                 # Compute compressed signals
                 if self.cfg.mode == 'batch':
-                    z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesTot))
-                    z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesTot))
+                    z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
+                    z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
                 elif self.cfg.mode == 'online':
                     z_desired = np.zeros((self.cfg.K, self.cfg.B))
                     z_noise = np.zeros((self.cfg.K, self.cfg.B))
@@ -76,30 +76,23 @@ class Launcher:
                     # Save the target signal for MMSE computation
                     targetsMMSE.append(sk[self.wasn.refSensorIdx, :])
                     z_desired[k, :], z_noise[k, :] = get_compressed_signals(
-                        sk,
-                        nk,
-                        algo,
-                        wTildeExt[k],
-                        # onlyWkk=(
-                        #     (i < self.cfg.K * (self.cfg.nIterBetweenUpdates + 1)\
-                        #     if self.cfg.nodeUpdating == 'seq' else i == 0)
-                        # ) if self.cfg.mode == 'online' else False
-                        # # ^^^ in batch-mode, always use `wkk/gk` for TI-DANSE
+                        sk, nk, algo, wTildeExt[k]
                     )
 
                 # Compute `sTilde` and `nTilde`
                 sTilde, nTilde = self.get_tildes(algo, s, n, z_desired, z_noise)
 
-                # Normalize `sTilde` and `nTilde` (TI-DANSE only)
+                # Normalize \eta (TI-DANSE only)
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
-                    and i > 0 and i % self.cfg.normGkEvery == 0:
+                    and i % self.cfg.normGkEvery == 0:
+                    # Compute normalization factor
                     nf = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
                     for k in range(self.cfg.K):
-                        if self.cfg.nodeUpdating == 'sim':
-                            raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
-                        elif self.cfg.nodeUpdating == 'seq':
+                        if self.cfg.nodeUpdating == 'seq':
                             sTilde[k][-1, :] /= nf
                             nTilde[k][-1, :] /= nf
+                        elif self.cfg.nodeUpdating == 'sim':
+                            raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
 
                 # Update covariance matrices
                 if self.cfg.nodeUpdating == 'seq':
@@ -277,17 +270,14 @@ class Launcher:
             currMMSEs[k] = np.mean(np.abs(dHat - target[k]) ** 2)
         return currMMSEs
 
-def get_compressed_signals(sk, nk, algo, wkEXT, onlyWkk=False):
+def get_compressed_signals(sk, nk, algo, wkEXT):
     """Compute compressed signals using the given desired source-only and
     noise-only data."""
     Mk = sk.shape[0]
     if algo == 'danse':
         pk = wkEXT[:Mk]  # DANSE fusion vector
     elif algo == 'ti-danse':
-        if onlyWkk:
-            pk = wkEXT[:Mk]
-        else:
-            pk = wkEXT[:Mk] / wkEXT[-1]  # TI-DANSE fusion vector
+        pk = wkEXT[:Mk] / wkEXT[-1]  # TI-DANSE fusion vector
     # Inner product of `pk` and `yk` across channels (fused signals)
     zk_desired = np.sum(sk * pk[:, np.newaxis], axis=0)
     zk_noise = np.sum(nk * pk[:, np.newaxis], axis=0)

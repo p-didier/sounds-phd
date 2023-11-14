@@ -70,10 +70,10 @@ class SceneCreator:
         In online-mode, create the mixing matrices."""
         if self.cfg.mode == 'batch':
             # Generate desired source signal (random)
-            desired = np.random.randn(self.cfg.nSamplesTot, 1)
+            desired = np.random.randn(self.cfg.nSamplesBatch, 1)
             # Generate noise signals (random)
             noise = np.random.randn(
-                self.cfg.nSamplesTot,
+                self.cfg.nSamplesBatch,
                 self.cfg.nNoiseSources
             )
             # Generate microphone signals
@@ -90,7 +90,7 @@ class SceneCreator:
                 # Create noise signals
                 noiseAtMic = mixingMatrixNoise @ noise.T *\
                     10 ** (-self.cfg.snr / 20) +\
-                    np.random.randn(self.cfg.Mk, self.cfg.nSamplesTot) *\
+                    np.random.randn(self.cfg.Mk, self.cfg.nSamplesBatch) *\
                     10 ** (-self.cfg.snSnr / 20)
                 n.append(noiseAtMic)
             self.s, self.n = x, n  # Store
