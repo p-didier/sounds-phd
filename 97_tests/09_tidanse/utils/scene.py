@@ -12,19 +12,6 @@ class Node:
             self.desiredOnly = signal - noiseOnly
         self.Ak_s = smDesired   # steering matrix for desired signal
         self.Ak_n = smNoise     # steering matrix for noise
-    
-    def query(self, Mk, B, nNoiseSources, snr, snSnr):
-        """Query `B` samples from node."""
-        if self.Ak_s is None or self.Ak_n is None:
-            raise ValueError("Steering matrices not defined. Cannot query samples.")
-        # Query samples
-        s = self.Ak_s @ np.random.randn(1, B)
-        selfNoise = np.random.randn(Mk, B)
-        selfNoise *= 10 ** (-snSnr / 20)  # apply self-noise SNR
-        localizedNoise = self.Ak_n @ np.random.randn(nNoiseSources, B)
-        localizedNoise *= 10 ** (-snr / 20)  # apply noise SNR
-        n = localizedNoise + selfNoise
-        return s, n
 
 class WASN:
     # Class to store WASN information (from create_wasn())
@@ -50,6 +37,26 @@ class WASN:
                     padded=False,
                 )
             self.ySTFT.append(ySTFTcurr)
+    
+    def query(self, Mk, B, nNoiseSources, snr, snSnr):
+        """Query `B` samples from each node."""
+        desiredSigChunk =  np.random.randn(1, B)
+        noiseSigChunk = np.random.randn(nNoiseSources, B)
+        s, n = [], []
+        for k in range(len(self.nodes)):
+            if self.nodes[k].Ak_s is None or self.nodes[k].Ak_n is None:
+                raise ValueError(f"Steering matrices not defined at node {k}. Cannot query samples.")
+            # Query samples
+            sCurr = self.nodes[k].Ak_s @ desiredSigChunk
+            localizedNoise = self.nodes[k].Ak_n @ noiseSigChunk
+            localizedNoise *= 10 ** (-snr / 20)  # apply noise SNR
+            selfNoise = np.random.randn(Mk, B)
+            selfNoise *= 10 ** (-snSnr / 20)  # apply self-noise SNR
+            nCurr = localizedNoise + selfNoise
+            # Store
+            s.append(sCurr)
+            n.append(nCurr)
+        return s, n
 
 class SceneCreator:
     """Class to create acoustic scenes."""
@@ -77,15 +84,15 @@ class SceneCreator:
                 self.cfg.nNoiseSources
             )
             # Generate microphone signals
-            x, n = [], []
+            s, n = [], []
             for _ in range(self.cfg.K):
                 # Create random mixing matrix
-                mixingMatrix = np.random.randn(self.cfg.Mk, 1)
+                mixingMatrix = np.abs(np.random.randn(self.cfg.Mk, 1))
                 self.Ak_s.append(mixingMatrix)
                 # Compute microphone signals
-                x.append(mixingMatrix @ desired.T)
+                s.append(mixingMatrix @ desired.T)
                 # Create noise steering matrix
-                mixingMatrixNoise = np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources)
+                mixingMatrixNoise = np.abs(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources))
                 self.Ak_n.append(mixingMatrixNoise)
                 # Create noise signals
                 noiseAtMic = mixingMatrixNoise @ noise.T *\
@@ -93,14 +100,14 @@ class SceneCreator:
                     np.random.randn(self.cfg.Mk, self.cfg.nSamplesBatch) *\
                     10 ** (-self.cfg.snSnr / 20)
                 n.append(noiseAtMic)
-            self.s, self.n = x, n  # Store
+            self.s, self.n = s, n  # Store
 
         elif self.cfg.mode == 'online':
             mixMatDesired, mixMatNoise = [], []
             for _ in range(self.cfg.K):
                 # Create random mixing matrices
-                mixMatDesired.append(np.random.randn(self.cfg.Mk, 1))
-                mixMatNoise.append(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources))
+                mixMatDesired.append(np.abs(np.random.randn(self.cfg.Mk, 1)))
+                mixMatNoise.append(np.abs(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources)))
             self.Ak_s = mixMatDesired   # Store
             self.Ak_n = mixMatNoise     # Store
 
@@ -114,35 +121,11 @@ class SceneCreator:
                 self.wasn.nodes.append(Node(
                     signal=self.s[k] + self.n[k],
                     noiseOnly=self.n[k],
+                    smDesired=self.Ak_s[k],
+                    smNoise=self.Ak_n[k],
                 ))
             elif self.cfg.mode == 'online':
                 self.wasn.nodes.append(Node(
                     smDesired=self.Ak_s[k],
                     smNoise=self.Ak_n[k],
                 ))
-
-
-def create_scene(nSamples, nNoiseSources, K, Mk, snr, snrSelfNoise):
-    """Create acoustic scene."""
-    # Generate desired source signal (random)
-    desired = np.random.randn(nSamples, 1)
-
-    # Generate noise signals (random)
-    noise = np.random.randn(nSamples, nNoiseSources)
-
-    # Generate microphone signals
-    x = []
-    n = []
-    for _ in range(K):
-        # Create random mixing matrix
-        mixingMatrix = np.random.randn(Mk, 1)
-        # Compute microphone signals
-        x.append(mixingMatrix @ desired.T)
-        # Create noise signals
-        mixingMatrix = np.random.randn(Mk, nNoiseSources)
-        noiseAtMic = mixingMatrix @ noise.T * 10 ** (-snr / 20) +\
-            np.random.randn(Mk, nSamples) * 10 ** (-snrSelfNoise / 20)
-        # noiseAtMic = np.random.randn(MK, NSAMPLES_TOT_ONLINE) * 10 ** (-SNR / 20)
-        n.append(noiseAtMic)
-
-    return x, n

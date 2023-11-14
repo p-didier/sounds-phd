@@ -17,6 +17,8 @@ from utils.config import Configuration
 CWD = os.path.dirname(os.path.realpath(__file__))
 # YAML file containing configuration
 YAML_FILE = f'{CWD}/params.yaml'
+EXPORT = True
+SUFFIX = 'asprevious_withZeroInitSCMs'  # to add at the end of the export subfolder name
 
 def main():
     """Main function (called by default when running script)."""
@@ -38,7 +40,7 @@ def main():
         mmseCentral.append(sim.mmseCentral)
     
     # Post-process results
-    pp = PostProcessor(mmsePerAlgo, mmseCentral, cfg)
+    pp = PostProcessor(mmsePerAlgo, mmseCentral, cfg, export=EXPORT, suffix=SUFFIX)
     pp.perform_post_processing()
 
     return 0

@@ -11,7 +11,10 @@ class Launcher:
         self.wasn = scene.wasn
         self.mmsePerAlgo = None
         self.mmseCentral = None
-    
+        self.s = None  # Current desired signal chunk, for each node (`K`-elements list)
+        self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
+        self.startFilterUpdates = False
+
     def run(self):
         """Run simulation."""
         if self.cfg.mode == 'wola':
@@ -21,8 +24,9 @@ class Launcher:
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral = self.batch_or_online_run()
 
-    def query(self, k):
-        return self.wasn.nodes[k].query(
+    def query(self):
+        """Query new data from WASN."""
+        return self.wasn.query(
             Mk=self.cfg.Mk,
             B=self.cfg.B,
             nNoiseSources=self.cfg.nNoiseSources,
@@ -42,11 +46,13 @@ class Launcher:
             e[self.cfg.refSensorIdx] = 1  # reference sensor selection vector
             wTilde = [np.ones(dimTilde) for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
-
             if self.cfg.mode == 'online':
-                singleSCM = np.random.randn(dimTilde, dimTilde)
+                # singleSCM = np.random.randn(dimTilde, dimTilde)
+                singleSCM = gen_random_posdef_fullrank_matrix(dimTilde)
                 Rss = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
-                singleSCM = np.random.randn(dimTilde, dimTilde)
+                # singleSCM = np.random.randn(dimTilde, dimTilde)
+                # singleSCM = np.zeros((dimTilde, dimTilde))
+                singleSCM = gen_random_posdef_fullrank_matrix(dimTilde)
                 Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
             i = 0  # DANSE iteration index
             q = 0  # currently updating node index
@@ -54,37 +60,32 @@ class Launcher:
             mmse = [[] for _ in range(self.cfg.K)]  # MMSE per node
             nIterSinceLastUp = [0 for _ in range(self.cfg.K)]
             stopcond = False
+            self.startFilterUpdates = False
             while not stopcond:
-                # Compute compressed signals
-                if self.cfg.mode == 'batch':
-                    z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
-                    z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
-                elif self.cfg.mode == 'online':
+
+                # Get new data
+                if self.cfg.mode == 'online':
+                    self.s, self.n = self.query()
                     z_desired = np.zeros((self.cfg.K, self.cfg.B))
                     z_noise = np.zeros((self.cfg.K, self.cfg.B))
-                targetsMMSE = []
-                s, n = [], []
+                elif self.cfg.mode == 'batch':
+                    self.s = [self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)]
+                    self.n = [self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)]
+                    z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
+                    z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
+                
+                # Compute compressed signals
                 for k in range(self.cfg.K):
-                    if self.cfg.mode == 'batch':
-                        sk = self.wasn.nodes[k].desiredOnly
-                        nk = self.wasn.nodes[k].noiseOnly
-                    elif self.cfg.mode == 'online':
-                        sk, nk = self.query(k)  # Query new data
-                    # Save the signals for tilde-vectors computation
-                    s.append(sk)
-                    n.append(nk)
-                    # Save the target signal for MMSE computation
-                    targetsMMSE.append(sk[self.wasn.refSensorIdx, :])
                     z_desired[k, :], z_noise[k, :] = get_compressed_signals(
-                        sk, nk, algo, wTildeExt[k]
+                        self.s[k], self.n[k], algo, wTildeExt[k]
                     )
 
                 # Compute `sTilde` and `nTilde`
-                sTilde, nTilde = self.get_tildes(algo, s, n, z_desired, z_noise)
+                sTilde, nTilde = self.get_tildes(algo, z_desired, z_noise)
 
                 # Normalize \eta (TI-DANSE only)
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
-                    and i % self.cfg.normGkEvery == 0:
+                    and i > 0 and i % self.cfg.normGkEvery == 0:
                     # Compute normalization factor
                     nf = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
                     for k in range(self.cfg.K):
@@ -95,15 +96,6 @@ class Launcher:
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
 
                 # Update covariance matrices
-                if self.cfg.nodeUpdating == 'seq':
-                    if nIterSinceLastUp[q] >= self.cfg.nIterBetweenUpdates:
-                        upNodes = np.array([q])
-                        nIterSinceLastUp[q] = 0
-                    else:
-                        upNodes = np.array([])
-                        nIterSinceLastUp[q] += 1
-                elif self.cfg.nodeUpdating == 'sim':
-                    upNodes = np.arange(self.cfg.K)
                 if self.cfg.mode == 'batch':
                     Rss = sTilde[q] @ sTilde[q].T.conj()
                     Rnn = nTilde[q] @ nTilde[q].T.conj()
@@ -114,19 +106,33 @@ class Launcher:
                         Rnn[k] = self.cfg.beta * Rnn[k] +\
                             (1 - self.cfg.beta) * nTilde[k] @ nTilde[k].T.conj()
 
+                # Check if filter updates should start
+                if not self.startFilterUpdates:
+                    self.startFilterUpdates = True  # by default, start filter updates
+                    if self.cfg.mode == 'online' and self.cfg.gevd:
+                        for k in range(self.cfg.K):
+                            if not check_matrix_validity(Rss[k] + Rnn[k], Rnn[k]):
+                                print(f"i={i} [{self.cfg.mode}] -- Warning: matrices are not valid for gevd-based filter update.")
+                                self.startFilterUpdates = False
+                                break
+
                 # Perform filter updates
-                for u in upNodes:
-                    if self.cfg.mode == 'batch':
-                        if self.cfg.gevd and not check_matrix_validity(Rss + Rnn, Rnn):
-                            print(f"i={i} [batch] -- Warning: matrices are not valid for self.cfg.gevd-based filter update.")
-                        else:
+                if self.cfg.nodeUpdating == 'seq':
+                    if nIterSinceLastUp[q] >= self.cfg.nIterBetweenUpdates:
+                        upNodes = np.array([q])
+                        nIterSinceLastUp[q] = 0
+                    else:
+                        upNodes = np.array([])
+                        nIterSinceLastUp[q] += 1
+                elif self.cfg.nodeUpdating == 'sim':
+                    upNodes = np.arange(self.cfg.K)
+                if self.startFilterUpdates:
+                    for u in upNodes:
+                        if self.cfg.mode == 'batch':
                             wTilde[u] = filter_update(
                                 Rss + Rnn, Rnn, gevd=self.cfg.gevd
                             ) @ e
-                    elif self.cfg.mode == 'online':
-                        if self.cfg.gevd and not check_matrix_validity(Rss[u] + Rnn[u], Rnn[u]):
-                            print(f"i={i} [online] -- Warning: matrices are not valid for self.cfg.gevd-based filter update.")
-                        else:
+                        elif self.cfg.mode == 'online':
                             wTilde[u] = filter_update(
                                 Rss[u] + Rnn[u], Rnn[u], gevd=self.cfg.gevd
                             ) @ e
@@ -135,14 +141,15 @@ class Launcher:
                     wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (used, e.g., if `self.cfg.nodeUpdating == 'seq'`)
 
                 # Compute MMSE estimate of desired signal at each node
-                mmses = self.get_mmse(
-                    wTilde, sTilde, nTilde, targetsMMSE
-                )
+                mmses = self.get_mmse(wTilde, sTilde, nTilde)
                 for k in range(self.cfg.K):
                     mmse[k].append(mmses[k])
                 
                 # Print progress
-                print(f"[{algo.upper()} {self.cfg.mode} {self.cfg.nodeUpdating}] i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}")
+                toPrint = f"[{algo.upper()} {self.cfg.mode} {self.cfg.nodeUpdating}] i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}"
+                if not self.startFilterUpdates:
+                    toPrint += " (filter updates not started yet)"
+                print(toPrint)
                 # Update indices
                 i += 1
                 q = (q + 1) % self.cfg.K
@@ -181,25 +188,23 @@ class Launcher:
             wCentral = np.zeros((nSensors, nSensors))
             stopcond = False
             i = 0
-            while not stopcond:
-                sCurr = np.concatenate(tuple(
-                    self.query(k)[0] for k in range(self.cfg.K)
-                ), axis=0)
-                nCurr = np.concatenate(tuple(
-                    self.query(k)[1] for k in range(self.cfg.K)
-                ), axis=0)
-                Rss = self.cfg.beta * Rss + (1 - self.cfg.beta) * sCurr @ sCurr.T.conj()
-                Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nCurr @ nCurr.T.conj()
+            while not stopcond: 
+                s, n = self.query()  # Get new data
+                sStacked = np.concatenate(tuple(s[k] for k in range(self.cfg.K)), axis=0)
+                nStacked = np.concatenate(tuple(n[k] for k in range(self.cfg.K)), axis=0)
+                Rss = self.cfg.beta * Rss + (1 - self.cfg.beta) * sStacked @ sStacked.T.conj()
+                Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nStacked @ nStacked.T.conj()
                 if self.cfg.gevd and not check_matrix_validity(Rss + Rnn, Rnn):
                     print(f"i={i} [centr online] -- Warning: matrices are not valid for self.cfg.gevd-based filter update.")
                 else:
+                    self.startFilterUpdates = True
                     wCentral = filter_update(Rss + Rnn, Rnn, gevd=self.cfg.gevd)
                 for k in range(self.cfg.K):
                     ek = np.zeros(nSensors)
                     ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
-                    target = sCurr.T @ ek
+                    target = sStacked.T @ ek
                     mmseCentral[k].append(np.mean(np.abs(
-                        (wCentral @ ek).T.conj() @ (sCurr + nCurr) - target
+                        (wCentral @ ek).T.conj() @ (sStacked + nStacked) - target
                     ) ** 2))
                 print(f"[Centr. {self.cfg.mode}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
                 i += 1
@@ -217,58 +222,42 @@ class Launcher:
                         me[-1] - me[-1 - self.cfg.K]
                     ) / np.abs(me[-1 - self.cfg.K]) < self.cfg.eps
                     for me in mmse
-                ])
+                ])\
+                and self.startFilterUpdates  # <-- important: don't stop before the updates have started
         else:
             return False
-        
-    def get_tildes(self, algo, sk_forAllk, nk_forAllk, z_desired, z_noise):
+    
+
+    def get_tildes(self, algo, z_desired, z_noise):
         """Compute `sTilde` and `nTilde`."""
         sTilde = [_ for _ in range(self.cfg.K)]
         nTilde = [_ for _ in range(self.cfg.K)]
         for k in range(self.cfg.K):
-            # Local signals
-            sk = sk_forAllk[k]
-            nk = nk_forAllk[k]
             # $z_{-k}$ compressed signal vectors
             zMk_desired = z_desired[np.arange(self.cfg.K) != k, :]
             zMk_noise = z_noise[np.arange(self.cfg.K) != k, :]
             if algo == 'danse':
-                sTilde[k] = np.concatenate((sk, zMk_desired), axis=0)
-                nTilde[k] = np.concatenate((nk, zMk_noise), axis=0)
+                sTilde[k] = np.concatenate((self.s[k], zMk_desired), axis=0)
+                nTilde[k] = np.concatenate((self.n[k], zMk_noise), axis=0)
             elif algo == 'ti-danse':
                 # vvv `sum(zMk_desired)` == $\eta_{-k}$ vvv
                 etaMk_desired = np.sum(zMk_desired, axis=0)[np.newaxis, :]
                 etaMk_noise = np.sum(zMk_noise, axis=0)[np.newaxis, :]
-                sTilde[k] = np.concatenate((sk, etaMk_desired), axis=0)
-                nTilde[k] = np.concatenate((nk, etaMk_noise), axis=0)    
+                sTilde[k] = np.concatenate((self.s[k], etaMk_desired), axis=0)
+                nTilde[k] = np.concatenate((self.n[k], etaMk_noise), axis=0)    
         
         return sTilde, nTilde
 
-    def get_mmse(self, wTilde, sTilde, nTilde, target):
-        """
-        Compute MMSE.
-        
-        Parameters
-        ----------
-        wTilde : list of array-like
-            List of external filters.
-        sTilde : list of array-like
-            List of compressed desired signals.
-        nTilde : list of array-like
-            List of compressed noise signals.
-        target : list of array-like
-            Desired signals at each node.
-        
-        Returns
-        -------
-        currMMSEs : array-like
-            MMSEs at each node.
-        """
+
+    def get_mmse(self, wTilde, sTilde, nTilde):
+        """Compute MMSE."""
         currMMSEs = np.zeros(len(wTilde))
         for k in range(len(wTilde)):
-            dHat = wTilde[k] @ (sTilde[k] + nTilde[k])
-            currMMSEs[k] = np.mean(np.abs(dHat - target[k]) ** 2)
+            dHat = wTilde[k] @ (sTilde[k] + nTilde[k]).conj()
+            target = self.s[k][self.wasn.refSensorIdx, :]
+            currMMSEs[k] = np.mean(np.abs(dHat - target) ** 2)
         return currMMSEs
+
 
 def get_compressed_signals(sk, nk, algo, wkEXT):
     """Compute compressed signals using the given desired source-only and
@@ -286,23 +275,16 @@ def get_compressed_signals(sk, nk, algo, wkEXT):
 
 def check_matrix_validity(Ryy, Rnn):
     """Check if `Ryy` is valid for GEVD-based filter updates."""
-    def _is_hermitian_and_posdef(x):
-        """Finds out whether 3D complex matrix `x` is Hermitian along 
-        the two last axes, as well as positive definite."""
-        # Get rid of machine-precision residual imaginary parts
-        x = np.real_if_close(x)
-        # Assess Hermitian-ness
-        b1 = np.allclose(x.T.conj(), x)
-        # Assess positive-definiteness
-        b2 = not any(np.linalg.eigvalsh(x) < 0)
-        return b1 and b2
-    def __full_rank_check(mat):
+    def _is_posdef(x):
+        """Check whether matrix `x` is positive definite."""
+        return not any(np.linalg.eigvalsh(np.real_if_close(x)) < 0)
+    def _has_full_rank(mat: np.ndarray):
         """Helper subfunction: check full-rank property."""
         return (np.linalg.matrix_rank(mat) == mat.shape[-1]).all()
-    check1 = _is_hermitian_and_posdef(Rnn)
-    check2 = _is_hermitian_and_posdef(Ryy)
-    check3 = __full_rank_check(Rnn)
-    check4 = __full_rank_check(Ryy)
+    check1 = _is_posdef(Rnn)
+    check2 = _is_posdef(Ryy)
+    check3 = _has_full_rank(Rnn)
+    check4 = _has_full_rank(Ryy)
     return check1 and check2 and check3 and check4
 
 
@@ -320,3 +302,10 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1):
         return Xmat @ Dmat @ Qmat.T.conj()
     else:
         return np.linalg.inv(Ryy) @ (Ryy - Rnn)
+    
+
+def gen_random_posdef_fullrank_matrix(n):
+    """Generates a full-rank, positive-definite matrix of size `n` with
+    random entries."""
+    A = np.random.randn(n, n)
+    return A @ A.T.conj() + np.eye(n) * 0.01

@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 from .config import Configuration
 
 class PostProcessor:
-    def __init__(self, mmsePerAlgo, mmseCentral, cfg: Configuration):
+    def __init__(self, mmsePerAlgo, mmseCentral, cfg: Configuration, export, suffix=''):
         self.mmsePerAlgo = mmsePerAlgo
         self.mmseCentral = mmseCentral
         self.cfg = cfg
+        self.export = export
+        self.suffix = suffix
 
     def perform_post_processing(self):
         """Perform post-processing of results."""
@@ -17,33 +19,42 @@ class PostProcessor:
         sf = self.cfg.exportFolder + '\\' +\
             Path(self.cfg.exportFolder).name + '_' +\
             datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Check if export folder exists
-        if not os.path.exists(sf):
-            os.makedirs(sf)
-        # Save results
-        np.save(os.path.join(sf, 'mmsePerAlgo.npy'), self.mmsePerAlgo)
-        np.save(os.path.join(sf, 'mmseCentral.npy'), self.mmseCentral)
-        # Save config as text file
-        with open(os.path.join(sf, 'config.txt'), 'w') as f:
-            f.write(self.cfg.to_string())
-        # Save config as YAML file
-        self.cfg.to_yaml(os.path.join(sf, 'config.yaml'))
+        if self.suffix != '':
+            sf += '__' + self.suffix
+        if self.export:
+            # Check if export folder exists
+            if not os.path.exists(sf):
+                os.makedirs(sf)
+            # Save results
+            np.save(os.path.join(sf, 'mmsePerAlgo.npy'), self.mmsePerAlgo)
+            np.save(os.path.join(sf, 'mmseCentral.npy'), self.mmseCentral)
+            # Save config as text file
+            with open(os.path.join(sf, 'config.txt'), 'w') as f:
+                f.write(self.cfg.to_string())
+            # Save config as YAML file
+            self.cfg.to_yaml(os.path.join(sf, 'config.yaml'))
         # Plot results
         fig, _ = self.plot_mmse()
-        # Add datetime stamp
-        fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
-        fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
+        if self.export:
+            fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
+            fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
     
     def pre_process_mc_runs(self):
+        # Find the maximum iteration reached by any MC run
+        maxIter = 0
+        for idxMC in range(len(self.mmsePerAlgo)):
+            for idxAlgo in range(len(self.cfg.algos)):
+                for k in range(self.cfg.K):
+                    maxIter = max(maxIter, len(self.mmsePerAlgo[idxMC][idxAlgo][k]))
         # Ensure every MC run has data for the max number of iterations
         for idxMC in range(len(self.mmsePerAlgo)):
             for idxAlgo in range(len(self.cfg.algos)):
                 for k in range(self.cfg.K):
-                    if len(self.mmsePerAlgo[idxMC][idxAlgo][k]) < self.cfg.maxIter:
+                    if len(self.mmsePerAlgo[idxMC][idxAlgo][k]) < maxIter:
                         self.mmsePerAlgo[idxMC][idxAlgo][k] = np.append(
                             self.mmsePerAlgo[idxMC][idxAlgo][k],
                             np.ones(
-                                self.cfg.maxIter-len(self.mmsePerAlgo[idxMC][idxAlgo][k])
+                                maxIter - len(self.mmsePerAlgo[idxMC][idxAlgo][k])
                             ) * self.mmsePerAlgo[idxMC][idxAlgo][k][-1]
                         )
         # Mean / STD / max value / min value over MC runs
@@ -77,10 +88,12 @@ class PostProcessor:
             self.mmseCentralMax = self.mmseCentral[0]
             self.mmseCentralMin = self.mmseCentral[0]
         
-    def plot_mmse(self):
+        return maxIter
+        
+    def plot_mmse(self, asLogLog=False):
         """Plot results."""
         # Pre-process the mutiple MC runs
-        self.pre_process_mc_runs()
+        maxIter = self.pre_process_mc_runs()
         if self.cfg.mcRuns > 1:
             strLoss = 'E_\\mathrm{{MC\\,runs}}\\{{\\mathcal{{L}}\\}}'  # average over MC runs
         else:
@@ -101,26 +114,29 @@ class PostProcessor:
                 dataMax = np.mean(np.array(self.mmsePerAlgoMax[idxAlgo]), axis=0)
                 dataMin = np.mean(np.array(self.mmsePerAlgoMin[idxAlgo]), axis=0)
                 axes.fill_between(
-                    np.arange(len(dataMean)),
+                    np.arange(maxIter),
                     dataMin,
                     dataMax,
                     color=f'C{idxAlgo}',
                     alpha=0.1
                 )
             if self.cfg.mode == 'batch':
-                axes.hlines(np.mean(self.mmseCentralMean), 0, self.cfg.maxIter, 'k', linestyle="--", label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
+                axes.hlines(np.mean(self.mmseCentralMean), 0, maxIter, 'k', linestyle="--", label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
             elif self.cfg.mode == 'online':
                 axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
             axes.set_xlabel("Iteration index")
             axes.set_ylabel("Cost $\\mathcal{L}$")
             axes.legend(loc='upper right')
-            axes.set_xlim([0, self.cfg.maxIter])
+            axes.set_xlim([0, maxIter])
             axes.grid()
+            if not asLogLog:
+                # Set x-axis to linear
+                axes.set_xscale('linear')
             ti_str = f'$K={self.cfg.K}$, $M={self.cfg.Mk}$ mics/node, $\\mathrm{{SNR}}={self.cfg.snr}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={self.cfg.snSnr}$ dB, $\\mathrm{{GEVD}}={self.cfg.gevd}$'
             if self.cfg.mode == 'online':
                 ti_str += f', $B={self.cfg.B}$ ({int(self.cfg.overlapB * 100)}%ovlp), $\\beta={self.cfg.beta}$'
             elif self.cfg.mode == 'batch':
-                ti_str += f', {self.cfg.nSamplesTot} samples'
+                ti_str += f', {self.cfg.nSamplesBatch} samples'
             axes.set_title(ti_str)
         else:
             fig, axes = plt.subplots(2, len(self.cfg.algos), sharey='row', sharex='col')
