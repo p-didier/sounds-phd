@@ -8,7 +8,6 @@
 
 import os
 import sys
-import datetime
 from utils.danse import Launcher
 from utils.scene import SceneCreator
 from utils.post import PostProcessor
@@ -39,14 +38,10 @@ def main():
         mmseCentral.append(sim.mmseCentral)
     
     # Post-process results
-    fig, axes = PostProcessor(mmsePerAlgo, mmseCentral, cfg).plot_mmse()
-    # Export
-    if not os.path.exists(cfg.exportFolder):
-        os.makedirs(cfg.exportFolder)
-    # Add datetime stamp
-    fname = f'mmse_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'
-    fig.savefig(os.path.join(cfg.exportFolder, fname + '.pdf'), bbox_inches='tight')
-    fig.savefig(os.path.join(cfg.exportFolder, fname + '.png'), bbox_inches='tight', dpi=300)
+    pp = PostProcessor(mmsePerAlgo, mmseCentral, cfg)
+    pp.perform_post_processing()
+
+    return 0
 
 
 def relative_to_absolute_path(path: str):

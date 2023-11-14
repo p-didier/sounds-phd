@@ -12,3 +12,4 @@ Results.json
 ProgramSettings.json
 *.npy
 *.npz
+97_tests/09_tidanse/out

@@ -42,7 +42,6 @@ class Launcher:
             e[self.cfg.refSensorIdx] = 1  # reference sensor selection vector
             wTilde = [np.ones(dimTilde) for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
-            # np.random.set_state(self.cfg.rngState)  # reset RNG state
 
             if self.cfg.mode == 'online':
                 singleSCM = np.random.randn(dimTilde, dimTilde)
@@ -82,11 +81,11 @@ class Launcher:
                         nk,
                         algo,
                         wTildeExt[k],
-                        onlyWkk=(
-                            (i < self.cfg.K * (self.cfg.nIterBetweenUpdates + 1)\
-                            if self.cfg.nodeUpdating == 'seq' else i == 0)
-                        ) if self.cfg.mode == 'online' else False
-                        # ^^^ in batch-mode, always use `wkk/gk` for TI-DANSE
+                        # onlyWkk=(
+                        #     (i < self.cfg.K * (self.cfg.nIterBetweenUpdates + 1)\
+                        #     if self.cfg.nodeUpdating == 'seq' else i == 0)
+                        # ) if self.cfg.mode == 'online' else False
+                        # # ^^^ in batch-mode, always use `wkk/gk` for TI-DANSE
                     )
 
                 # Compute `sTilde` and `nTilde`
@@ -96,9 +95,7 @@ class Launcher:
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
                     and i > 0 and i % self.cfg.normGkEvery == 0:
                     betaNf = np.amin([1 - self.cfg.gamma ** i, self.cfg.maxBetaNf])  # slowly increase `betaNf` from 0 towards 0.75
-                    # nfCurr = np.abs(np.sum(z_desired + z_noise, axis=0))
                     nfCurr = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
-                    # nfCurr = np.mean(np.sum(z_desired + z_noise, axis=0))
                     nf = betaNf * nf + (1 - betaNf) * nfCurr
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'sim':
@@ -188,7 +185,6 @@ class Launcher:
                         self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]) ** 2
                 )
         elif self.cfg.mode == 'online':
-            np.random.set_state(self.cfg.rngState)
             singleSCM = np.random.randn(nSensors, nSensors)
             Rss = copy.deepcopy(singleSCM)
             Rnn = copy.deepcopy(singleSCM)

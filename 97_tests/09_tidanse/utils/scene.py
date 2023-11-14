@@ -1,7 +1,6 @@
 
 import numpy as np
 import scipy.signal as sig
-from dataclasses import dataclass
 from .config import Configuration
 
 class Node:

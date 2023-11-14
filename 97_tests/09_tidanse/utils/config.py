@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 class Configuration:
     mcRuns: int = 1
     originalSeed: int = 0
-    rngState: np.random.RandomState = None  # initialized in __post_init__
     refSensorIdx: int = 0
     fs: int = 16000
     nSamplesTot: int = 1000
@@ -47,21 +46,28 @@ class Configuration:
     exportFolder: str = './figs'
 
     def __post_init__(self):
-        # Set seed
-        np.random.seed(self.originalSeed)
-        self.rngState = np.random.get_state()
+        np.random.seed(self.originalSeed)  # set RNG seed
         if self.plotOnlyCost:
             raise NotImplementedError("`plotOnlyCost` not implemented yet")
 
-
-    def __repr__(self):
-        """Return string representation of configuration."""
+    def to_string(self):
+        """Converts the configuration to a TXT-writable
+        nicely formatted string."""
         config_str = "Configuration:\n"
         config_str += "+----------------------+----------------------+\n"
         for key, value in self.__dict__.items():
             config_str += f"| {key.ljust(20)} | {str(value).ljust(20)} |\n"
         config_str += "+----------------------+----------------------+\n"
         return config_str
+    
+    def to_yaml(self, pathToYaml):
+        """Export configuration to yaml file."""
+        with open(pathToYaml, 'w') as f:
+            yaml.dump(self.__dict__, f)
+
+    def __repr__(self):
+        """Return string representation of configuration."""
+        return self.to_string()
 
     def from_yaml(self, pathToYaml: str = ''):
         """Read configuration from yaml file."""

@@ -1,12 +1,38 @@
-from .config import Configuration
-import matplotlib.pyplot as plt
+import os
+import datetime
 import numpy as np
+from pathlib import Path
+import matplotlib.pyplot as plt
+from .config import Configuration
 
 class PostProcessor:
     def __init__(self, mmsePerAlgo, mmseCentral, cfg: Configuration):
         self.mmsePerAlgo = mmsePerAlgo
         self.mmseCentral = mmseCentral
         self.cfg = cfg
+
+    def perform_post_processing(self):
+        """Perform post-processing of results."""
+        # Export subfolder path with date and time
+        sf = self.cfg.exportFolder + '\\' +\
+            Path(self.cfg.exportFolder).name + '_' +\
+            datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Check if export folder exists
+        if not os.path.exists(sf):
+            os.makedirs(sf)
+        # Save results
+        np.save(os.path.join(sf, 'mmsePerAlgo.npy'), self.mmsePerAlgo)
+        np.save(os.path.join(sf, 'mmseCentral.npy'), self.mmseCentral)
+        # Save config as text file
+        with open(os.path.join(sf, 'config.txt'), 'w') as f:
+            f.write(self.cfg.to_string())
+        # Save config as YAML file
+        self.cfg.to_yaml(os.path.join(sf, 'config.yaml'))
+        # Plot results
+        fig, _ = self.plot_mmse()
+        # Add datetime stamp
+        fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
+        fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
     
     def pre_process_mc_runs(self):
         # Ensure every MC run has data for the max number of iterations
