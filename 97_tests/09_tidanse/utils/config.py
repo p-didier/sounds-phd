@@ -1,16 +1,23 @@
-import os
+import ast
 import yaml
 import numpy as np
 from typing import List
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass
+
+@dataclass
+class SignalConfig:
+    desiredSignalType: str = 'noise'  # noise, speech, noise+pauses
+    fs: int = 16000
+    nSamplesBatch: int = 1000
+    pauseLength: int = 100  # in samples (used iff `desiredSignalType == noise+pauses`)
+    pauseSpacing: int = 100  # in samples (used iff `desiredSignalType == noise+pauses`)
 
 @dataclass
 class Configuration:
     mcRuns: int = 1
     originalSeed: int = 0
     refSensorIdx: int = 0
-    fs: int = 16000
-    nSamplesBatch: int = 1000
+    sigConfig: SignalConfig = SignalConfig()
 
     K: int = 15
     Mk: int = 5
@@ -70,7 +77,94 @@ class Configuration:
 
     def from_yaml(self, pathToYaml: str = ''):
         """Read configuration from yaml file."""
-        with open(pathToYaml, 'r') as f:
-            config = yaml.load(f, Loader=yaml.FullLoader)
-        for key, value in config.items():
-            setattr(self, key, value)
+        if pathToYaml == '':
+            pathToYaml = self.yamlFile
+        self.__dict__ = load_from_yaml(pathToYaml, self).__dict__
+        return self
+
+
+def load_from_yaml(path, myDataclass):
+    """Loads data from a YAML file into a dataclass.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the YAML file to be loaded.
+    myDataclass : instance of a dataclass
+        The dataclass to load the data into.
+
+    Returns
+    -------
+    myDataclass : instance of a dataclass
+        The dataclass with the data loaded into it.
+    """
+
+    with open(path, 'r') as f:
+        d = yaml.load(f, Loader=yaml.FullLoader)
+
+    def _interpret_lists(d):
+        """Interprets lists in the YAML file as lists of floats, not strings"""
+        for key in d:
+            if type(d[key]) is str and len(d[key]) >= 2:
+                if d[key][0] == '[' and d[key][-1] == ']':
+                    d[key] = ast.literal_eval(d[key])  # Convert string to list
+                    # Use of `literal_eval` hinted at by https://stackoverflow.com/a/1894296
+            elif type(d[key]) is dict:
+                d[key] = _interpret_lists(d[key])
+        return d
+
+    # Detect lists
+    d = _interpret_lists(d)
+
+    def _deal_with_arrays(d):
+        """Transforms lists that should be numpy arrays into numpy arrays"""
+        for key in d:
+            if type(d[key]) is list:
+                if myDataclass.__annotations__[key] is np.ndarray:
+                    d[key] = np.array(d[key])
+            elif type(d[key]) is dict:
+                d[key] = _deal_with_arrays(d[key])
+        return d
+
+    # Deal with expected numpy arrays
+    d = _deal_with_arrays(d)
+
+    def _load_into_dataclass(d, myDataclass):
+        """Loads data from a dict into a dataclass"""
+        for key in d:
+            if type(d[key]) is dict:
+                setattr(
+                    myDataclass,
+                    key,
+                    _load_into_dataclass(d[key], getattr(myDataclass, key))
+                )
+            else:
+                setattr(myDataclass, key, d[key])
+        return myDataclass
+
+    # myDataclass = dcw.fromdict(myDataclass, d)
+    myDataclass = _load_into_dataclass(d, myDataclass)
+    
+    # If there is a __post_init__ method, call it
+    if hasattr(myDataclass, '__post_init__'):
+        myDataclass.__post_init__()
+
+    return myDataclass
+
+
+def dataclasses_equal(d1, d2):
+    """
+    Assesses whether two dataclasses (and their nested dataclasses) are equal.
+    """
+    for k, v in d1.__dict__.items():
+        if is_dataclass(v):
+            if not dataclasses_equal(v, getattr(d2, k)):
+                return False
+        elif isinstance(d2.__dict__[k], np.ndarray):
+            if not d2.__dict__[k].shape == v.shape:
+                return False
+            if not np.allclose(d2.__dict__[k], v):
+                return False
+        elif d2.__dict__[k] != v:
+            return False
+    return True

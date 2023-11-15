@@ -17,7 +17,8 @@ from utils.config import Configuration
 CWD = os.path.dirname(os.path.realpath(__file__))
 # YAML file containing configuration
 YAML_FILE = f'{CWD}/params.yaml'
-EXPORT = True
+# EXPORT = True
+EXPORT = False
 SUFFIX = 'asprevious_withZeroInitSCMs'  # to add at the end of the export subfolder name
 
 def main():

@@ -1,8 +1,7 @@
 import copy
 import numpy as np
 import scipy.linalg as sla
-from .scene import SceneCreator, WASN
-import matplotlib.pyplot as plt
+from .scene import SceneCreator
 
 class Launcher:
     """Class to launch DANSE simulations."""
@@ -307,5 +306,5 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1):
 def gen_random_posdef_fullrank_matrix(n):
     """Generates a full-rank, positive-definite matrix of size `n` with
     random entries."""
-    A = np.random.randn(n, n)
-    return A @ A.T.conj() + np.eye(n) * 0.01
+    Amat = np.random.randn(n, n)
+    return Amat @ Amat.T.conj() + np.eye(n) * 0.01

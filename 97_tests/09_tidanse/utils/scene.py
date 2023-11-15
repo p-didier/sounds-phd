@@ -76,11 +76,11 @@ class SceneCreator:
         """Create acoustic scene. In batch-mode, create the signals.
         In online-mode, create the mixing matrices."""
         if self.cfg.mode == 'batch':
-            # Generate desired source signal (random)
-            desired = np.random.randn(self.cfg.nSamplesBatch, 1)
+            # Generate desired source signal
+            desired = self.get_desired_signal_batch()
             # Generate noise signals (random)
             noise = np.random.randn(
-                self.cfg.nSamplesBatch,
+                self.cfg.sigConfig.nSamplesBatch,
                 self.cfg.nNoiseSources
             )
             # Generate microphone signals
@@ -96,9 +96,9 @@ class SceneCreator:
                 self.Ak_n.append(mixingMatrixNoise)
                 # Create noise signals
                 noiseAtMic = mixingMatrixNoise @ noise.T *\
-                    10 ** (-self.cfg.snr / 20) +\
-                    np.random.randn(self.cfg.Mk, self.cfg.nSamplesBatch) *\
-                    10 ** (-self.cfg.snSnr / 20)
+                    10 ** (-self.cfg.snr / 20) + np.random.randn(
+                        self.cfg.Mk, self.cfg.sigConfig.nSamplesBatch
+                    ) * 10 ** (-self.cfg.snSnr / 20)
                 n.append(noiseAtMic)
             self.s, self.n = s, n  # Store
 
@@ -110,6 +110,25 @@ class SceneCreator:
                 mixMatNoise.append(np.abs(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources)))
             self.Ak_s = mixMatDesired   # Store
             self.Ak_n = mixMatNoise     # Store
+
+    def get_desired_signal_batch(self):
+        """Get desired signal for batch mode."""
+        c = self.cfg.sigConfig  # alias for brevity
+        if c.desiredSignalType == 'noise':
+            return np.random.randn(c.nSamplesBatch, 1)
+        elif c.desiredSignalType == 'speech':
+            raise NotImplementedError("Speech not implemented yet")
+        elif c.desiredSignalType == 'noise+pauses':
+            # Create noise signal
+            sig = np.random.randn(c.nSamplesBatch, 1)
+            # Create pauses
+            pauses = np.zeros((c.nSamplesBatch, 1))
+            for k in range(0, c.nSamplesBatch, c.pauseLength + c.pauseSpacing):
+                pauses[k:k + c.pauseLength] = 1
+            # Create desired signal
+            return sig * pauses
+        else:
+            raise ValueError(f"Unknown desired signal type: {self.cfg.sigConfig.desiredSignalType}")
 
     def create_wasn(self):
         """Create WASN."""
