@@ -4,8 +4,8 @@ refSensorIdx: 0  # Reference sensor index (for desired signal)
 sigConfig:
   fs: 16000
   nSamplesBatch: 10000  # Total number of samples for batch processing
-  # desiredSignalType: noise  # noise, speech, noise+pauses
-  desiredSignalType: noise+pauses  # noise, speech, noise+pauses
+  desiredSignalType: noise  # noise, speech, noise+pauses
+  # desiredSignalType: noise+pauses  # noise, speech, noise+pauses
   pauseLength: 100  # [samples]
   pauseSpacing: 100  # [samples]
 
@@ -31,8 +31,8 @@ algos:  # 'danse' and/or 'ti-danse'
 - danse
 - ti-danse
 
-mode: batch  # 'wola' or 'online' or 'batch'
-# mode: online  # 'wola' or 'online' or 'batch'
+# mode: batch  # 'wola' or 'online' or 'batch'
+mode: online  # 'wola' or 'online' or 'batch'
 
 gevd: true  # Use MWF
 # gevd: false  # Use MWF
@@ -49,5 +49,5 @@ tExt: 0.4  # Update external filter every `TEXT` seconds
 # normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 # ----- Plot booleans
-plotOnlyCost: false  # Plot only cost (no per-node MMSE)
+plotOnlyCost: true  # Plot only cost (no per-node MMSE)
 exportFolder: './97_tests/09_tidanse/out'

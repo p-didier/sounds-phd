@@ -136,7 +136,7 @@ class PostProcessor:
             if self.cfg.mode == 'online':
                 ti_str += f', $B={self.cfg.B}$ ({int(self.cfg.overlapB * 100)}%ovlp), $\\beta={self.cfg.beta}$'
             elif self.cfg.mode == 'batch':
-                ti_str += f', {self.cfg.nSamplesBatch} samples'
+                ti_str += f', {self.cfg.sigConfig.nSamplesBatch} samples'
             axes.set_title(ti_str)
         else:
             fig, axes = plt.subplots(2, len(self.cfg.algos), sharey='row', sharex='col')
@@ -153,9 +153,9 @@ class PostProcessor:
                 for k in range(self.cfg.K):
                     currAx[0].loglog(self.mmsePerAlgo[idxAlgo][k], f'-C{k}', label=f"Node {k}")
                     if self.cfg.mode == 'batch':
-                        currAx[0].hlines(self.mmseCentral[k], 0, xmax, f'C{k}', linestyle="--")
+                        currAx[0].hlines(self.mmseCentral[idxAlgo][k], 0, xmax, f'C{k}', linestyle="--")
                     elif self.cfg.mode == 'online':
-                        currAx[0].loglog(self.mmseCentral[k, :], f'--C{k}')
+                        currAx[0].loglog(self.mmseCentral[idxAlgo][k, :], f'--C{k}')
                 currAx[0].set_xlabel(f"{self.cfg.algos[idxAlgo].upper()} iteration index")
                 currAx[0].set_ylabel("MMSE per node")
                 currAx[0].legend(loc='upper right')

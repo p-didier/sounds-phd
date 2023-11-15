@@ -53,8 +53,6 @@ class Configuration:
 
     def __post_init__(self):
         np.random.seed(self.originalSeed)  # set RNG seed
-        if self.plotOnlyCost:
-            raise NotImplementedError("`plotOnlyCost` not implemented yet")
 
     def to_string(self):
         """Converts the configuration to a TXT-writable

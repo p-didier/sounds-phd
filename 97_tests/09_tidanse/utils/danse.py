@@ -11,7 +11,7 @@ class Launcher:
         self.vad = scene.vad
         self.mmsePerAlgo = None
         self.mmseCentral = None
-        self.s = None  # Current desired signal chunk, for each node (`K`-elements list)
+        self.y = None  # Current desired signal chunk, for each node (`K`-elements list)
         self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
         self.startFilterUpdates = False
 
@@ -50,7 +50,7 @@ class Launcher:
             wTildeExt = copy.deepcopy(wTilde)
             if self.cfg.mode == 'online':
                 singleSCM = random_posdef_fullrank_matrix(dimTilde)
-                Rss = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
+                Ryy = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
                 singleSCM = random_posdef_fullrank_matrix(dimTilde)
                 Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
             i = 0  # DANSE iteration index
@@ -64,44 +64,45 @@ class Launcher:
 
                 # Get new data
                 if self.cfg.mode == 'online':
-                    self.s, self.n = self.query()
-                    z_desired = np.zeros((self.cfg.K, self.cfg.B))
-                    z_noise = np.zeros((self.cfg.K, self.cfg.B))
+                    s, self.n = self.query()
+                    self.y = [s[k] + self.n[k] for k in range(self.cfg.K)]
+                    z_y = np.zeros((self.cfg.K, self.cfg.B))
+                    z_n = np.zeros((self.cfg.K, self.cfg.B))
                 elif self.cfg.mode == 'batch':
-                    self.s = [self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)]
+                    self.y = [self.wasn.nodes[k].signal for k in range(self.cfg.K)]
                     self.n = [self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)]
-                    z_desired = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
-                    z_noise = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
+                    z_y = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
+                    z_n = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
                 
                 # Compute compressed signals
                 for k in range(self.cfg.K):
-                    z_desired[k, :], z_noise[k, :] = get_compressed_signals(
-                        self.s[k], self.n[k], algo, wTildeExt[k]
+                    z_y[k, :], z_n[k, :] = get_compressed_signals(
+                        self.y[k], self.n[k], algo, wTildeExt[k]
                     )
 
                 # Compute `sTilde` and `nTilde`
-                sTilde, nTilde = self.get_tildes(algo, z_desired, z_noise)
+                yTilde, nTilde = self.get_tildes(algo, z_y, z_n)
 
                 # Normalize \eta (TI-DANSE only)
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
                     and i > 0 and i % self.cfg.normGkEvery == 0:
                     # Compute normalization factor
-                    nf = np.mean(np.abs(np.sum(z_desired + z_noise, axis=0)))
+                    nf = np.mean(np.abs(np.sum(z_y + z_n, axis=0)))
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'seq':
-                            sTilde[k][-1, :] /= nf
+                            yTilde[k][-1, :] /= nf
                             nTilde[k][-1, :] /= nf
                         elif self.cfg.nodeUpdating == 'sim':
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
 
                 # Update covariance matrices
                 if self.cfg.mode == 'batch':
-                    Rss = sTilde[q] @ sTilde[q].T.conj()
+                    Ryy = yTilde[q] @ yTilde[q].T.conj()
                     Rnn = nTilde[q] @ nTilde[q].T.conj()
                 elif self.cfg.mode == 'online':
                     for k in range(self.cfg.K):
-                        Rss[k] = self.cfg.beta * Rss[k] +\
-                            (1 - self.cfg.beta) * sTilde[k] @ sTilde[k].T.conj()
+                        Ryy[k] = self.cfg.beta * Ryy[k] +\
+                            (1 - self.cfg.beta) * yTilde[k] @ yTilde[k].T.conj()
                         Rnn[k] = self.cfg.beta * Rnn[k] +\
                             (1 - self.cfg.beta) * nTilde[k] @ nTilde[k].T.conj()
 
@@ -110,7 +111,7 @@ class Launcher:
                     self.startFilterUpdates = True  # by default, start filter updates
                     if self.cfg.mode == 'online' and self.cfg.gevd:
                         for k in range(self.cfg.K):
-                            if not check_matrix_validity(Rss[k] + Rnn[k], Rnn[k]):
+                            if not check_matrix_validity(Ryy[k], Rnn[k]):
                                 print(f"i={i} [{self.cfg.mode}] -- Warning: matrices are not valid for gevd-based filter update.")
                                 self.startFilterUpdates = False
                                 break
@@ -129,18 +130,18 @@ class Launcher:
                     for u in upNodes:
                         if self.cfg.mode == 'batch':
                             wTilde[u] = filter_update(
-                                Rss + Rnn, Rnn, gevd=self.cfg.gevd
+                                Ryy, Rnn, gevd=self.cfg.gevd
                             ) @ e
                         elif self.cfg.mode == 'online':
                             wTilde[u] = filter_update(
-                                Rss[u] + Rnn[u], Rnn[u], gevd=self.cfg.gevd
+                                Ryy[u], Rnn[u], gevd=self.cfg.gevd
                             ) @ e
 
                     # Update external filters
                     wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (used, e.g., if `self.cfg.nodeUpdating == 'seq'`)
 
                 # Compute MMSE estimate of desired signal at each node
-                mmses = self.get_mmse(wTilde, sTilde, nTilde)
+                mmses = self.get_mmse(wTilde, yTilde)
                 for k in range(self.cfg.K):
                     mmse[k].append(mmses[k])
                 
@@ -166,22 +167,22 @@ class Launcher:
         nSensors = self.cfg.K * self.cfg.Mk
 
         if self.cfg.mode == 'batch':
-            s = np.concatenate(tuple(self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)), axis=0)
+            y = np.concatenate(tuple(self.wasn.nodes[k].signal for k in range(self.cfg.K)), axis=0)
             n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
-            Rss = s @ s.T.conj()
+            Ryy = y @ y.T.conj()
             Rnn = n @ n.T.conj()
-            wCentral = filter_update(Rss + Rnn, Rnn, gevd=self.cfg.gevd)
+            wCentral = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
             mmseCentral = np.zeros(self.cfg.K)
             for k in range(self.cfg.K):
                 ek = np.zeros(nSensors)
                 ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
                 mmseCentral[k] = np.mean(
-                    np.abs((wCentral @ ek).T.conj() @ (s + n) -\
+                    np.abs((wCentral @ ek).T.conj() @ y -\
                         self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]) ** 2
                 )
         elif self.cfg.mode == 'online':
             singleSCM = np.random.randn(nSensors, nSensors)
-            Rss = copy.deepcopy(singleSCM)
+            Ryy = copy.deepcopy(singleSCM)
             Rnn = copy.deepcopy(singleSCM)
             mmseCentral = [[] for _ in range(self.cfg.K)]
             wCentral = np.zeros((nSensors, nSensors))
@@ -189,21 +190,22 @@ class Launcher:
             i = 0
             while not stopcond: 
                 s, n = self.query()  # Get new data
-                sStacked = np.concatenate(tuple(s[k] for k in range(self.cfg.K)), axis=0)
+                y = [s[k] + n[k] for k in range(self.cfg.K)]
+                yStacked = np.concatenate(tuple(y[k] for k in range(self.cfg.K)), axis=0)
                 nStacked = np.concatenate(tuple(n[k] for k in range(self.cfg.K)), axis=0)
-                Rss = self.cfg.beta * Rss + (1 - self.cfg.beta) * sStacked @ sStacked.T.conj()
+                Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * yStacked @ yStacked.T.conj()
                 Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nStacked @ nStacked.T.conj()
-                if self.cfg.gevd and not check_matrix_validity(Rss + Rnn, Rnn):
+                if self.cfg.gevd and not check_matrix_validity(Ryy, Rnn):
                     print(f"i={i} [centr online] -- Warning: matrices are not valid for self.cfg.gevd-based filter update.")
                 else:
                     self.startFilterUpdates = True
-                    wCentral = filter_update(Rss + Rnn, Rnn, gevd=self.cfg.gevd)
+                    wCentral = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
                 for k in range(self.cfg.K):
                     ek = np.zeros(nSensors)
                     ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
-                    target = sStacked.T @ ek
+                    target = (yStacked - nStacked).T @ ek
                     mmseCentral[k].append(np.mean(np.abs(
-                        (wCentral @ ek).T.conj() @ (sStacked + nStacked) - target
+                        (wCentral @ ek).T.conj() @ yStacked - target
                     ) ** 2))
                 print(f"[Centr. {self.cfg.mode}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
                 i += 1
@@ -226,49 +228,48 @@ class Launcher:
         else:
             return False
 
-    def get_tildes(self, algo, z_desired, z_noise):
-        """Compute `sTilde` and `nTilde`."""
-        sTilde = [_ for _ in range(self.cfg.K)]
+    def get_tildes(self, algo, z_y, z_n):
+        """Compute `yTilde` and `nTilde`."""
+        yTilde = [_ for _ in range(self.cfg.K)]
         nTilde = [_ for _ in range(self.cfg.K)]
         for k in range(self.cfg.K):
             # $z_{-k}$ compressed signal vectors
-            zMk_desired = z_desired[np.arange(self.cfg.K) != k, :]
-            zMk_noise = z_noise[np.arange(self.cfg.K) != k, :]
+            zMk_y = z_y[np.arange(self.cfg.K) != k, :]
+            zMk_n = z_n[np.arange(self.cfg.K) != k, :]
             if algo == 'danse':
-                sTilde[k] = np.concatenate((self.s[k], zMk_desired), axis=0)
-                nTilde[k] = np.concatenate((self.n[k], zMk_noise), axis=0)
+                yTilde[k] = np.concatenate((self.y[k], zMk_y), axis=0)
+                nTilde[k] = np.concatenate((self.n[k], zMk_n), axis=0)
             elif algo == 'ti-danse':
                 # vvv `sum(zMk_desired)` == $\eta_{-k}$ vvv
-                etaMk_desired = np.sum(zMk_desired, axis=0)[np.newaxis, :]
-                etaMk_noise = np.sum(zMk_noise, axis=0)[np.newaxis, :]
-                sTilde[k] = np.concatenate((self.s[k], etaMk_desired), axis=0)
-                nTilde[k] = np.concatenate((self.n[k], etaMk_noise), axis=0)    
-        
-        return sTilde, nTilde
+                etaMk_y = np.sum(zMk_y, axis=0)[np.newaxis, :]
+                etaMk_n = np.sum(zMk_n, axis=0)[np.newaxis, :]
+                yTilde[k] = np.concatenate((self.y[k], etaMk_y), axis=0)
+                nTilde[k] = np.concatenate((self.n[k], etaMk_n), axis=0)    
+        return yTilde, nTilde
 
 
-    def get_mmse(self, wTilde, sTilde, nTilde):
+    def get_mmse(self, wTilde, yTilde):
         """Compute MMSE."""
         currMMSEs = np.zeros(len(wTilde))
         for k in range(len(wTilde)):
-            dHat = wTilde[k] @ (sTilde[k] + nTilde[k]).conj()
-            target = self.s[k][self.wasn.refSensorIdx, :]
+            dHat = wTilde[k] @ yTilde[k].conj()
+            target = (self.y[k] - self.n[k])[self.wasn.refSensorIdx, :]
             currMMSEs[k] = np.mean(np.abs(dHat - target) ** 2)
         return currMMSEs
 
 
-def get_compressed_signals(sk, nk, algo, wkEXT):
+def get_compressed_signals(yk, nk, algo, wkEXT):
     """Compute compressed signals using the given desired source-only and
     noise-only data."""
-    Mk = sk.shape[0]
+    Mk = yk.shape[0]
     if algo == 'danse':
         pk = wkEXT[:Mk]  # DANSE fusion vector
     elif algo == 'ti-danse':
         pk = wkEXT[:Mk] / wkEXT[-1]  # TI-DANSE fusion vector
     # Inner product of `pk` and `yk` across channels (fused signals)
-    zk_desired = np.sum(sk * pk[:, np.newaxis], axis=0)
-    zk_noise = np.sum(nk * pk[:, np.newaxis], axis=0)
-    return zk_desired, zk_noise
+    zk_y = np.sum(yk * pk[:, np.newaxis], axis=0)
+    zk_n = np.sum(nk * pk[:, np.newaxis], axis=0)
+    return zk_y, zk_n
 
 
 def check_matrix_validity(Ryy, Rnn):
