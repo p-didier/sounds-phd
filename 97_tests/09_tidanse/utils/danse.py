@@ -8,6 +8,7 @@ class Launcher:
     def __init__(self, scene: SceneCreator):
         self.cfg = scene.cfg
         self.wasn = scene.wasn
+        self.vad = scene.vad
         self.mmsePerAlgo = None
         self.mmseCentral = None
         self.s = None  # Current desired signal chunk, for each node (`K`-elements list)
@@ -39,6 +40,8 @@ class Launcher:
 
         mmsePerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
+            # Check for VAD
+            flagVAD = self.vad is not None
             # Initialize DANSE variables
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
             e = np.zeros(dimTilde)
@@ -46,12 +49,9 @@ class Launcher:
             wTilde = [np.ones(dimTilde) for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
             if self.cfg.mode == 'online':
-                # singleSCM = np.random.randn(dimTilde, dimTilde)
-                singleSCM = gen_random_posdef_fullrank_matrix(dimTilde)
+                singleSCM = random_posdef_fullrank_matrix(dimTilde)
                 Rss = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
-                # singleSCM = np.random.randn(dimTilde, dimTilde)
-                # singleSCM = np.zeros((dimTilde, dimTilde))
-                singleSCM = gen_random_posdef_fullrank_matrix(dimTilde)
+                singleSCM = random_posdef_fullrank_matrix(dimTilde)
                 Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
             i = 0  # DANSE iteration index
             q = 0  # currently updating node index
@@ -70,8 +70,8 @@ class Launcher:
                 elif self.cfg.mode == 'batch':
                     self.s = [self.wasn.nodes[k].desiredOnly for k in range(self.cfg.K)]
                     self.n = [self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)]
-                    z_desired = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
-                    z_noise = np.zeros((self.cfg.K, self.cfg.nSamplesBatch))
+                    z_desired = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
+                    z_noise = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
                 
                 # Compute compressed signals
                 for k in range(self.cfg.K):
@@ -225,7 +225,6 @@ class Launcher:
                 and self.startFilterUpdates  # <-- important: don't stop before the updates have started
         else:
             return False
-    
 
     def get_tildes(self, algo, z_desired, z_noise):
         """Compute `sTilde` and `nTilde`."""
@@ -303,7 +302,7 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1):
         return np.linalg.inv(Ryy) @ (Ryy - Rnn)
     
 
-def gen_random_posdef_fullrank_matrix(n):
+def random_posdef_fullrank_matrix(n):
     """Generates a full-rank, positive-definite matrix of size `n` with
     random entries."""
     Amat = np.random.randn(n, n)

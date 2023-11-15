@@ -67,6 +67,7 @@ class SceneCreator:
         self.Ak_s = []  # Mixing matrices for desired signals, for each node (`K`-elements list)
         self.Ak_n = []  # Mixing matrices for noise signals, for each node (`K`-elements list)
         self.wasn = None
+        self.vad = None
 
     def prepare_scene(self):
         self.create_scene()
@@ -76,7 +77,7 @@ class SceneCreator:
         """Create acoustic scene. In batch-mode, create the signals.
         In online-mode, create the mixing matrices."""
         if self.cfg.mode == 'batch':
-            # Generate desired source signal
+            # Generate desired source signal (+ VAD if relevant)
             desired = self.get_desired_signal_batch()
             # Generate noise signals (random)
             noise = np.random.randn(
@@ -112,9 +113,10 @@ class SceneCreator:
             self.Ak_n = mixMatNoise     # Store
 
     def get_desired_signal_batch(self):
-        """Get desired signal for batch mode."""
+        """Get desired signal for batch mode. Computes VAD as well."""
         c = self.cfg.sigConfig  # alias for brevity
         if c.desiredSignalType == 'noise':
+            self.vad = None
             return np.random.randn(c.nSamplesBatch, 1)
         elif c.desiredSignalType == 'speech':
             raise NotImplementedError("Speech not implemented yet")
@@ -125,10 +127,24 @@ class SceneCreator:
             pauses = np.zeros((c.nSamplesBatch, 1))
             for k in range(0, c.nSamplesBatch, c.pauseLength + c.pauseSpacing):
                 pauses[k:k + c.pauseLength] = 1
+            self.vad = pauses  # Store VAD
             # Create desired signal
             return sig * pauses
         else:
             raise ValueError(f"Unknown desired signal type: {self.cfg.sigConfig.desiredSignalType}")
+
+    def get_vad(self):
+        """Get voice activity detection (VAD) for batch mode."""
+        c = self.cfg.sigConfig  # alias for brevity
+        if c.desiredSignalType == 'noise':
+            return None
+        elif c.desiredSignalType == 'speech':
+            raise NotImplementedError("Speech not implemented yet")
+        elif c.desiredSignalType == 'noise+pauses':
+            vad = np.zeros((c.nSamplesBatch, 1))
+            for k in range(0, c.nSamplesBatch, c.pauseLength + c.pauseSpacing):
+                vad[k:k + c.pauseLength] = 1
+            return vad
 
     def create_wasn(self):
         """Create WASN."""
