@@ -229,8 +229,8 @@ class Launcher:
                     target = (yStacked - nStacked).T @ ek
                     if np.allclose(np.abs(target), np.zeros_like(target)):
                         # If the target is zero (e.g., "off" period of speech),
-                        # keep the previous MMSE value.
-                        mmseCentral[k].append(mmseCentral[k][-1])
+                        # set the MMSE to `np.nan`.
+                        mmseCentral[k].append(np.nan)
                     else:
                         mmseCentral[k].append(np.mean(np.abs(
                             (wCentral @ ek).T.conj() @ yStacked - target

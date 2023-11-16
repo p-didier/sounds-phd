@@ -4,8 +4,8 @@ refSensorIdx: 0  # Reference sensor index (for desired signal)
 sigConfig:
   fs: 16000
   nSamplesBatch: 10000  # Total number of samples for batch processing
-  # desiredSignalType: noise  # noise, speech, noise+pauses
-  desiredSignalType: noise+pauses  # noise, speech, noise+pauses
+  desiredSignalType: noise  # noise, speech, noise+pauses
+  # desiredSignalType: noise+pauses  # noise, speech, noise+pauses
   pauseLength: 2000  # [samples]
   pauseSpacing: 2000  # [samples]
 

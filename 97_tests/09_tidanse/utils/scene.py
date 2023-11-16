@@ -77,67 +77,6 @@ class WASN:
             raise ValueError(f"Unknown desired signal type: {c.desiredSignalType}")
         c.sampleIdx += self.cfg.B  # Update sample index
         return d
-
-    # def create_pauses_online(self):
-    #     """Generate binary mask to add pauses to noise, for online mode
-    #     desired signal of type noise+pauses, taking into account the pauses
-    #     in the previous frame."""
-    #     c = self.cfg.sigConfig  # alias for brevity
-    #     pauses = np.zeros((self.cfg.B,))
-    #     # Depending on `samplesSinceLastPause`, add 1's to `pauses`
-    #     if c.samplesSinceLastPause == 0:
-    #         # The last frame's pause was finished exactly at the end of the
-    #         # frame. Add `pauseLength` 1's every `pauseLength + pauseSpacing`
-    #         # samples.
-    #         indicesIterator = range(
-    #             0,
-    #             self.cfg.B,
-    #             c.pauseLength + c.pauseSpacing
-    #         )
-    #     elif c.samplesSinceLastPause < 0:
-    #         # The last frame's pause was not finished. Only start adding
-    #         # 1's to `pauses` after `pauseLength - samplesSinceLastPause`
-    #         # samples, then every `pauseLength + pauseSpacing` samples.
-    #         indicesIterator = range(
-    #             c.pauseLength - c.samplesSinceLastPause,
-    #             self.cfg.B,
-    #             c.pauseLength + c.pauseSpacing
-    #         )
-    #     elif c.samplesSinceLastPause > 0:
-    #         # The last frame's pause was finished since
-    #         # `samplesSinceLastPause` samples already. Add 1's to `pauses`
-    #         # for the first `pauseLength - samplesSinceLastPause` samples,
-    #         # then add `pauseLength` 1's every `pauseLength + pauseSpacing`
-    #         # samples.
-    #         pauses[:c.pauseLength - c.samplesSinceLastPause] = 1
-    #         indicesIterator = range(
-    #             c.pauseLength - c.samplesSinceLastPause,
-    #             self.cfg.B,
-    #             c.pauseLength + c.pauseSpacing
-    #         )
-    #     # Add the ones
-    #     for ii in indicesIterator:
-    #         pauses[ii:ii + c.pauseLength] = 1
-        
-    #     # Update `samplesSinceLastPause` based on `pauses`
-    #     if pauses[-1] == 0:
-    #         # Count samples between the last 1 and the end of the frame
-    #         if 1 in pauses:
-    #             lastOneIdx = np.where(pauses == 1)[0][-1]
-    #             c.samplesSinceLastPause = -1 * (self.cfg.B - lastOneIdx)
-    #         else:
-    #             c.samplesSinceLastPause = -1 * self.cfg.B
-    #     elif pauses[-1] == 1:
-    #         # Count samples between the last 0 and the end of the frame
-    #         if 0 in pauses:
-    #             lastZeroIdx = np.where(pauses == 0)[0][-1]
-    #             c.samplesSinceLastPause = (self.cfg.B - lastZeroIdx) % c.pauseLength,
-    #         else:
-    #             c.samplesSinceLastPause = 0
-    #     if type(c.samplesSinceLastPause) is tuple:
-    #         c.samplesSinceLastPause = c.samplesSinceLastPause[0]
-
-    #     return pauses[np.newaxis, :]
     
     def create_pauses_online(self):
         """Generate binary mask to add pauses to noise, for online mode
