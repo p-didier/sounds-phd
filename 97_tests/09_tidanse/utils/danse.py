@@ -10,6 +10,9 @@ class Launcher:
         self.wasn = scene.wasn
         self.mmsePerAlgo = None
         self.mmseCentral = None
+        self.filtersPerAlgo = None
+        self.filtersCentral = None
+        self.vadSaved = None
         self.y = None  # Current desired signal chunk, for each node (`K`-elements list)
         self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
         self.startFilterUpdates = False
@@ -22,13 +25,16 @@ class Launcher:
             self.wasn.compute_stft_signals()
             raise NotImplementedError  # TODO: implement TI-DANSE with WOLA
         elif self.cfg.mode in ['batch', 'online']:
-            self.mmsePerAlgo, self.mmseCentral = self.batch_or_online_run()
+            self.mmsePerAlgo, self.mmseCentral,\
+                self.filtersPerAlgo, self.filtersCentral,\
+                    self.vadSaved = self.batch_or_online_run()
 
     def batch_or_online_run(self):
         # Compute centralized cost
-        mmseCentral = self.get_centr_cost()
+        mmseCentr, filterCoeffsCentr = self.get_centr_cost()
 
         mmsePerAlgo = [[] for _ in range(len(self.cfg.algos))]
+        filterCoeffsPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
             # Initialize DANSE variables
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
@@ -36,6 +42,8 @@ class Launcher:
             e[self.cfg.refSensorIdx] = 1  # reference sensor selection vector
             wTilde = [np.ones(dimTilde) for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
+            wTildeSaved = [copy.deepcopy(wTilde)]
+            vadSaved = []
             if self.cfg.mode == 'online':
                 singleSCM = random_posdef_fullrank_matrix(dimTilde)
                 singleSCM = np.zeros((dimTilde, dimTilde))
@@ -112,23 +120,21 @@ class Launcher:
                 if self.startFilterUpdates:
                     for u in upNodes:
                         if self.cfg.mode == 'batch':
-                            wTilde[u] = filter_update(
-                                Ryy, Rnn, gevd=self.cfg.gevd
-                            ) @ e
+                            mats = {'Ryy': Ryy, 'Rnn': Rnn}
                         elif self.cfg.mode == 'online':
-                            wTilde[u] = filter_update(
-                                Ryy[u], Rnn[u], gevd=self.cfg.gevd
-                            ) @ e
+                            mats = {'Ryy': Ryy[u], 'Rnn': Rnn[u]}
+                        out = filter_update(**mats, gevd=self.cfg.gevd)
+                        if out is None:
+                            pass  # <-- filter update failed
+                        else:
+                            wTilde[u] = out @ e
 
                     # Update external filters
-                    wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (used, e.g., if `self.cfg.nodeUpdating == 'seq'`)
+                    wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (actually purposeful if `self.cfg.nodeUpdating == 'sim'`)
 
                 # Compute MMSE estimate of desired signal at each node
                 mmses = self.get_mmse(wTilde, yTilde)
                 for k in range(self.cfg.K):
-                    # if mmses[k] is None:
-                    #     mmse[k].append(mmse[k][-1])  # keep previous value (e.g., "off" period of speech)
-                    # else: 
                     mmse[k].append(mmses[k])
                 
                 # Print progress
@@ -142,11 +148,16 @@ class Launcher:
                 # Randomly pick node to update
                 stopcond = self.update_stop_condition(i, mmse)
 
+                # Store filter coefficients
+                wTildeSaved.append(copy.deepcopy(wTilde))
+                vadSaved.append(copy.deepcopy(self.wasn.vadOnline))
+
             # Store MMSE
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
+            filterCoeffsPerAlgo[self.cfg.algos.index(algo)] = wTildeSaved
         
-        return mmsePerAlgo, mmseCentral
-    
+        return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr, vadSaved
+
     def update_scms(self, yTilde, nTilde, Ryy, Rnn):
         """Update spatial covariance matrices."""
         def _outer_prod(a: np.ndarray):
@@ -167,6 +178,7 @@ class Launcher:
                 Rnn = _outer_prod(yTilde[self.q][:, ~self.wasn.vadBatch])
         elif self.cfg.mode == 'online':
             b = self.cfg.beta  # forgetting factor (alias)
+            bRnn = self.cfg.betaRnn  # forgetting factor for noise-only covariance matrix (alias)
             for k in range(self.cfg.K):
                 if self.wasn.vadOnline is None:
                     Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
@@ -175,7 +187,7 @@ class Launcher:
                     if self.wasn.vadOnline is True:
                         Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
                     else:
-                        Rnn[k] = b * Rnn[k] + (1 - b) * _outer_prod(yTilde[k])
+                        Rnn[k] = bRnn * Rnn[k] + (1 - bRnn) * _outer_prod(yTilde[k])
         return Ryy, Rnn
 
 
@@ -196,6 +208,7 @@ class Launcher:
                     np.abs((wCentral @ ek).T.conj() @ y -\
                         self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]) ** 2
                 )
+            filterCoeffsSaved = [copy.deepcopy(wCentral)]
         elif self.cfg.mode == 'online':
             singleSCM = np.random.randn(nSensors, nSensors)
             Ryy = copy.deepcopy(singleSCM)
@@ -205,6 +218,7 @@ class Launcher:
             stopcond = False
             i = 0
             self.cfg.sigConfig.sampleIdx = 0
+            filterCoeffsSaved = []
             while not stopcond: 
                 s, n = self.wasn.query()  # Get new data
                 y = [s[k] + n[k] for k in range(self.cfg.K)]
@@ -238,8 +252,9 @@ class Launcher:
                 print(f"[Centr. {self.cfg.mode}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
                 i += 1
                 stopcond = self.update_stop_condition(i, mmseCentral)
+                filterCoeffsSaved.append(copy.deepcopy(wCentral))
             mmseCentral = np.array(mmseCentral)
-        return mmseCentral
+        return mmseCentral, filterCoeffsSaved
     
     def update_stop_condition(self, i, mmse):
         """Stop condition for DANSE `while`-loops."""
@@ -321,7 +336,11 @@ def check_matrix_validity(Ryy, Rnn):
 def filter_update(Ryy, Rnn, gevd=False, rank=1):
     """Update filter using GEVD-MWF or MWF."""
     if gevd:
-        s, Xmat = sla.eigh(Ryy, Rnn)
+        try:
+            s, Xmat = sla.eigh(Ryy, Rnn)
+        except ValueError as err:
+            print(f"`scipy.linalg.eigh` error: {err}")
+            return None
         idx = np.flip(np.argsort(s))
         s = s[idx]
         Xmat = Xmat[:, idx]

@@ -6,9 +6,18 @@ import matplotlib.pyplot as plt
 from .config import Configuration
 
 class PostProcessor:
-    def __init__(self, mmsePerAlgo, mmseCentral, cfg: Configuration, export, suffix=''):
+    def __init__(
+            self,
+            mmsePerAlgo, mmseCentral,
+            filtersPerAlgo, filtersCentral,
+            vadSaved,
+            cfg: Configuration, export, suffix=''
+        ):
         self.mmsePerAlgo = mmsePerAlgo
         self.mmseCentral = mmseCentral
+        self.filtersPerAlgo = filtersPerAlgo
+        self.filtersCentral = filtersCentral
+        self.vadSaved = vadSaved
         self.cfg = cfg
         self.export = export
         self.suffix = suffix
@@ -33,11 +42,70 @@ class PostProcessor:
                 f.write(self.cfg.to_string())
             # Save config as YAML file
             self.cfg.to_yaml(os.path.join(sf, 'config.yaml'))
-        # Plot results
-        fig, _ = self.plot_mmse()
+        # Plot MMSE
+        fig = self.plot_mmse()
         if self.export:
             fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
             fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
+        # Plot filters
+        figs = self.plot_filters()
+        if self.export:
+            for k in range(self.cfg.K):
+                for algo in self.cfg.algos:
+                    # figs[k][algo].savefig(os.path.join(sf, f'filters_node{k}_{algo}.pdf'), bbox_inches='tight')
+                    figs[k][algo].savefig(os.path.join(sf, f'filters_node{k}_{algo}.png'), bbox_inches='tight', dpi=300)
+
+    def plot_filters(self):
+        """Plot (TI-)DANSE filter coefficients for each node and each
+        algorithm."""
+        figs = dict([(k, dict(
+            [(algo, None) for algo in self.cfg.algos]
+        )) for k in range(self.cfg.K)])
+        mcRunIdx = 0  # only plot first MC run (arbitrary)
+        # Determine fixed y-axis limits for all plots
+        yLimMin, yLimMax = np.inf, -np.inf
+        for idxAlgo, algo in enumerate(self.cfg.algos):
+            for k in range(self.cfg.K):
+                currFilts = np.array([
+                    w[k] for w in self.filtersPerAlgo[mcRunIdx][idxAlgo]
+                ])
+                yLimMin = min(yLimMin, np.amin(np.abs(currFilts)))
+                yLimMax = max(yLimMax, np.amax(np.abs(currFilts)))
+        for k in range(self.cfg.K):
+            for idxAlgo, algo in enumerate(self.cfg.algos):
+                currFilts = np.array([
+                    w[k] for w in self.filtersPerAlgo[mcRunIdx][idxAlgo]
+                ])
+                fig, axes = plt.subplots(1,1)
+                fig.set_size_inches(8.5, 3.5)
+                for m in range(currFilts.shape[1]):
+                    if m < self.cfg.Mk:
+                        lab = f'$w_{{kk,{m}}}$'
+                    else:
+                        if algo == 'danse':
+                            lab = f'$g_{{k{{-}}k,{m - self.cfg.Mk}}}$'
+                        else:
+                            lab = f'$g_{{k,{m - self.cfg.Mk}}}$'
+                    axes.semilogy(np.abs(currFilts[:, m]), label=lab)
+                # Plot VAD as shaded grey area
+                axes.fill_between(
+                    np.arange(len(self.vadSaved)),
+                    np.zeros_like(self.vadSaved),
+                    self.vadSaved * yLimMax,
+                    color='grey',
+                    alpha=0.2,
+                    label='VAD'
+                )
+                axes.legend(loc='lower right')
+                axes.grid()
+                axes.set_xlabel('Iteration index')
+                axes.set_ylabel('Filter coefficient')
+                axes.set_title(f'Node {k}, {algo.upper()}')
+                axes.set_ylim([yLimMin, yLimMax])
+                fig.tight_layout()
+                figs[k][algo] = fig
+        plt.close('all')
+        return figs
     
     def pre_process_mc_runs(self):
         # Find the maximum iteration reached by any MC run
@@ -105,25 +173,33 @@ class PostProcessor:
             for idxAlgo in range(len(self.cfg.algos)):
                 # Current plot data
                 dataMean = np.mean(np.array(self.mmsePerAlgoMean[idxAlgo]), axis=0)
+                algoref = self.cfg.algos[idxAlgo].upper()
+                if self.cfg.gevd:
+                    if '-' in algoref:
+                        algoref = algoref.split('-')[0] + '-GEVD-' + algoref.split('-')[1]
+                    else:
+                        algoref = 'GEVD-' + algoref
                 axes.loglog(
                     dataMean,
                     f'-C{idxAlgo}',
-                    label=f'{self.cfg.algos[idxAlgo].upper()} (${strLoss}=${"{:.3g}".format(dataMean[-1], -4)})'
+                    label=f'{algoref} (${strLoss}=${"{:.3g}".format(dataMean[-1], -4)})'
                 )
                 # Add shaded area for min/max
-                dataMax = np.mean(np.array(self.mmsePerAlgoMax[idxAlgo]), axis=0)
-                dataMin = np.mean(np.array(self.mmsePerAlgoMin[idxAlgo]), axis=0)
-                axes.fill_between(
-                    np.arange(maxIter),
-                    dataMin,
-                    dataMax,
-                    color=f'C{idxAlgo}',
-                    alpha=0.1
-                )
+                if self.cfg.mcRuns > 1:
+                    dataMax = np.mean(np.array(self.mmsePerAlgoMax[idxAlgo]), axis=0)
+                    dataMin = np.mean(np.array(self.mmsePerAlgoMin[idxAlgo]), axis=0)
+                    axes.fill_between(
+                        np.arange(maxIter),
+                        dataMin,
+                        dataMax,
+                        color=f'C{idxAlgo}',
+                        alpha=0.1
+                    )
+            centrAlgoStr = 'GEVD-MWF' if self.cfg.gevd else 'MWF'
             if self.cfg.mode == 'batch':
-                axes.hlines(np.mean(self.mmseCentralMean), 0, maxIter, 'k', linestyle="--", label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
+                axes.hlines(np.mean(self.mmseCentralMean), 0, maxIter, 'k', linestyle="--", label=f'Centralized {centrAlgoStr} (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
             elif self.cfg.mode == 'online':
-                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
+                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized {centrAlgoStr} (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
             axes.set_xlabel("Iteration index")
             axes.set_ylabel("Cost $\\mathcal{L}$")
             axes.legend(loc='upper right')
@@ -132,9 +208,9 @@ class PostProcessor:
             if not asLogLog:
                 # Set x-axis to linear
                 axes.set_xscale('linear')
-            ti_str = f'$K={self.cfg.K}$, $M={self.cfg.Mk}$ mics/node, $\\mathrm{{SNR}}={self.cfg.snr}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{self}}}}={self.cfg.snSnr}$ dB, $\\mathrm{{GEVD}}={self.cfg.gevd}$'
+            ti_str = f'$K={self.cfg.K}$, $M_{{k}}={self.cfg.Mk}$, $\\mathrm{{SNR}}={self.cfg.snr}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{SN}}}}={self.cfg.snSnr}$ dB'
             if self.cfg.mode == 'online':
-                ti_str += f', $B={self.cfg.B}$ ({int(self.cfg.overlapB * 100)}%ovlp), $\\beta={self.cfg.beta}$'
+                ti_str += f', $B={self.cfg.B}$, $\\beta={self.cfg.beta}$, $\\beta_{{\\mathbf{{R_{{nn}}}}}}={self.cfg.betaRnn}$'
             elif self.cfg.mode == 'batch':
                 ti_str += f', {self.cfg.sigConfig.nSamplesBatch} samples'
             axes.set_title(ti_str)
@@ -176,4 +252,4 @@ class PostProcessor:
         fig.tight_layout()	
         plt.show(block=False)
 
-        return fig, axes
+        return fig

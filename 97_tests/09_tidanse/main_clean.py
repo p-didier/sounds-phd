@@ -17,9 +17,9 @@ from utils.config import Configuration
 CWD = os.path.dirname(os.path.realpath(__file__))
 # YAML file containing configuration
 YAML_FILE = f'{CWD}/params.yaml'
-# EXPORT = True
-EXPORT = False
-SUFFIX = 'asprevious_withZeroInitSCMs'  # to add at the end of the export subfolder name
+EXPORT = True
+# EXPORT = False
+SUFFIX = 'testFilterCoeffs'  # to add at the end of the export subfolder name
 
 def main():
     """Main function (called by default when running script)."""
@@ -27,7 +27,7 @@ def main():
     cfg = Configuration()
     cfg.from_yaml(relative_to_absolute_path(YAML_FILE))
 
-    mmsePerAlgo, mmseCentral = [], []
+    mmsePerAlgo, mmseCentral, filtersPerAlgo, filtersCentral = [], [], [], []
     for nMC in range(cfg.mcRuns):
         print(f"MC run {nMC+1}/{cfg.mcRuns}")
         # Create acoustic scene
@@ -39,9 +39,15 @@ def main():
         # Save results
         mmsePerAlgo.append(sim.mmsePerAlgo)
         mmseCentral.append(sim.mmseCentral)
+        filtersPerAlgo.append(sim.filtersPerAlgo)
+        filtersCentral.append(sim.filtersCentral)
     
     # Post-process results
-    pp = PostProcessor(mmsePerAlgo, mmseCentral, cfg, export=EXPORT, suffix=SUFFIX)
+    pp = PostProcessor(
+        mmsePerAlgo, mmseCentral,
+        filtersPerAlgo, filtersCentral,
+        sim.vadSaved,
+        cfg, export=EXPORT, suffix=SUFFIX)
     pp.perform_post_processing()
 
     return 0

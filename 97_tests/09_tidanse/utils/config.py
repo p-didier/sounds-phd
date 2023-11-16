@@ -30,6 +30,7 @@ class Configuration:
     B: int = 500
     overlapB: int = 0
     beta: float = 0.98
+    betaRnn: float = None
 
     # TI-DANSE eta normalization
     gamma: float = 0.0
