@@ -52,7 +52,7 @@ class PostProcessor:
         figs = self.plot_filters()
         if self.export:
             for k in range(self.cfg.K):
-                # figs[k].savefig(os.path.join(sf, f'filters_node{k}.pdf'), bbox_inches='tight')
+                figs[k].savefig(os.path.join(sf, f'filters_node{k}.pdf'), bbox_inches='tight')
                 figs[k].savefig(os.path.join(sf, f'filters_node{k}.png'), bbox_inches='tight', dpi=300)
 
     def plot_filters(self):
@@ -94,10 +94,10 @@ class PostProcessor:
                     axes[idxAlgo].fill_between(
                         np.arange(len(self.vadSaved)),
                         np.zeros_like(self.vadSaved),
-                        np.array(self.vadSaved) * yLimMax[idxAlgo],
+                        (1 - np.array(self.vadSaved)) * yLimMax[idxAlgo],
                         color='grey',
                         alpha=0.2,
-                        label='VAD'
+                        label='VAD=0'
                     )
                 axes[idxAlgo].legend(loc='lower right')
                 axes[idxAlgo].grid()
@@ -107,8 +107,9 @@ class PostProcessor:
                 axes[idxAlgo].set_title(f'Node {k}, {algo.upper()}')
                 axes[idxAlgo].set_ylim([yLimMin[idxAlgo], yLimMax[idxAlgo]])
             fig.tight_layout()
+            plt.show(block=False)
             figs[k] = fig
-        plt.close('all')
+        # plt.close('all')
         return figs
     
     def pre_process_mc_runs(self):

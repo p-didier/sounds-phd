@@ -61,6 +61,9 @@ class Launcher:
             self.startFilterUpdates = False
             self.cfg.sigConfig.sampleIdx = 0
             self.nUpRyy, self.nUpRnn = 0, 0
+            # DEBUG STUFF
+            normFact_zn = []
+            normFact_zy = []
             while not stopcond:
 
                 # Get new data
@@ -85,8 +88,7 @@ class Launcher:
                 yTilde, nTilde = self.get_tildes(algo, z_y, z_n)
 
                 # Normalize \eta (TI-DANSE only)
-                if algo == 'ti-danse' and self.cfg.mode == 'online'\
-                    and i > 0 and i % self.cfg.normGkEvery == 0:
+                if algo == 'ti-danse' and self.conds_for_ti_danse_norm():
                     # Compute normalization factor
                     nf = np.mean(np.abs(np.sum(z_y, axis=0)))
                     for k in range(self.cfg.K):
@@ -104,7 +106,7 @@ class Launcher:
                     self.startFilterUpdates = True  # by default, start filter updates
                     if self.cfg.mode == 'online' and self.cfg.gevd:
                         for k in range(self.cfg.K):
-                            if not check_matrix_validity(Ryy[k], Rnn[k]):# or\
+                            if not check_matrix_validity(Ryy[k], Rnn[k]):# or i < 150:# or\
                                 # np.abs(self.nUpRyy - self.nUpRnn) > np.amax([self.nUpRyy, self.nUpRnn]) * 0.25:
                                 print(f"i={i} [{self.cfg.mode}] -- Warning: matrices are not valid for gevd-based filter update.")
                                 self.startFilterUpdates = False
@@ -125,6 +127,8 @@ class Launcher:
                         if self.cfg.mode == 'batch':
                             mats = {'Ryy': Ryy, 'Rnn': Rnn}
                         elif self.cfg.mode == 'online':
+                            # diagLoad = np.sum(np.abs(np.diag(Ryy[u]))) * np.eye(dimTilde)
+                            # mats = {'Ryy': Ryy[u] + diagLoad, 'Rnn': Rnn[u] + diagLoad}
                             mats = {'Ryy': Ryy[u], 'Rnn': Rnn[u]}
                         out = filter_update(**mats, gevd=self.cfg.gevd)
                         if out is None:
@@ -155,11 +159,23 @@ class Launcher:
                 wTildeSaved.append(copy.deepcopy(wTilde))
                 vadSaved.append(copy.deepcopy(self.wasn.vadOnline))
 
+            if algo == 'ti-danse':
+                stop = 1
             # Store MMSE
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
             filterCoeffsPerAlgo[self.cfg.algos.index(algo)] = wTildeSaved
         
         return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr, vadSaved
+
+    def conds_for_ti_danse_norm(self, i):
+        """Check conditions for TI-DANSE normalization. Returns True if
+        normalization should be applied at this iteration."""
+        conds = []
+        conds.append(self.cfg.mode == 'online')     # online-mode
+        conds.append(self.wasn.vadOnline is False)  # noise-only period
+        conds.append(i > 0)                         # not first iteration
+        conds.append(i % self.cfg.normGkEvery == 0) # every `normGkEvery` iterations
+        return sum(conds) == 1
 
     def update_scms(self, yTilde, nTilde, Ryy, Rnn):
         """Update spatial covariance matrices."""

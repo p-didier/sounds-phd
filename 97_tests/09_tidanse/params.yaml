@@ -25,7 +25,7 @@ nNoiseSources: 1  # Number of noise sources
 eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal
-# snSnr: 5  # [dB] SNR of self-noise signals
+# snSnr: 12  # [dB] SNR of self-noise signals
 snSnr: 20  # [dB] SNR of self-noise signals
 
 algos:  # 'danse' and/or 'ti-danse'
@@ -47,8 +47,8 @@ alphaExt: 0.5  # External filter relaxation factor
 tExt: 0.4  # Update external filter every `TEXT` seconds
 
 # ----- Tests / debug
-# normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
-normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+# normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 # ----- Plot booleans
 plotOnlyCost: true  # Plot only cost (no per-node MMSE)
 exportFolder: './97_tests/09_tidanse/out'
