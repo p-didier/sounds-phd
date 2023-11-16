@@ -88,9 +88,10 @@ class Launcher:
                 yTilde, nTilde = self.get_tildes(algo, z_y, z_n)
 
                 # Normalize \eta (TI-DANSE only)
-                if algo == 'ti-danse' and self.conds_for_ti_danse_norm():
+                if algo == 'ti-danse' and self.conds_for_ti_danse_norm(i):
                     # Compute normalization factor
                     nf = np.mean(np.abs(np.sum(z_y, axis=0)))
+                    # nf = np.sum(z_y, axis=0)
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'seq':
                             yTilde[k][-1, :] /= nf
@@ -175,7 +176,7 @@ class Launcher:
         conds.append(self.wasn.vadOnline is False)  # noise-only period
         conds.append(i > 0)                         # not first iteration
         conds.append(i % self.cfg.normGkEvery == 0) # every `normGkEvery` iterations
-        return sum(conds) == 1
+        return sum(conds) == len(conds)
 
     def update_scms(self, yTilde, nTilde, Ryy, Rnn):
         """Update spatial covariance matrices."""
