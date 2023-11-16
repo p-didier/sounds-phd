@@ -8,12 +8,12 @@ class Launcher:
     def __init__(self, scene: SceneCreator):
         self.cfg = scene.cfg
         self.wasn = scene.wasn
-        self.vad = scene.vad
         self.mmsePerAlgo = None
         self.mmseCentral = None
         self.y = None  # Current desired signal chunk, for each node (`K`-elements list)
         self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
         self.startFilterUpdates = False
+        self.q = 0  # currently updating node index
 
     def run(self):
         """Run simulation."""
@@ -24,24 +24,12 @@ class Launcher:
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral = self.batch_or_online_run()
 
-    def query(self):
-        """Query new data from WASN."""
-        return self.wasn.query(
-            Mk=self.cfg.Mk,
-            B=self.cfg.B,
-            nNoiseSources=self.cfg.nNoiseSources,
-            snr=self.cfg.snr,
-            snSnr=self.cfg.snSnr
-        )
-
     def batch_or_online_run(self):
         # Compute centralized cost
         mmseCentral = self.get_centr_cost()
 
         mmsePerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
-            # Check for VAD
-            flagVAD = self.vad is not None
             # Initialize DANSE variables
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
             e = np.zeros(dimTilde)
@@ -50,29 +38,32 @@ class Launcher:
             wTildeExt = copy.deepcopy(wTilde)
             if self.cfg.mode == 'online':
                 singleSCM = random_posdef_fullrank_matrix(dimTilde)
+                singleSCM = np.zeros((dimTilde, dimTilde))
                 Ryy = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
                 singleSCM = random_posdef_fullrank_matrix(dimTilde)
+                singleSCM = np.zeros((dimTilde, dimTilde))
                 Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
             i = 0  # DANSE iteration index
-            q = 0  # currently updating node index
+            self.q = 0  # currently updating node index
             nf = 1  # normalization factor
             mmse = [[] for _ in range(self.cfg.K)]  # MMSE per node
             nIterSinceLastUp = [0 for _ in range(self.cfg.K)]
             stopcond = False
             self.startFilterUpdates = False
+            self.cfg.sigConfig.sampleIdx = 0
             while not stopcond:
 
                 # Get new data
                 if self.cfg.mode == 'online':
-                    s, self.n = self.query()
+                    s, self.n = self.wasn.query()
                     self.y = [s[k] + self.n[k] for k in range(self.cfg.K)]
                     z_y = np.zeros((self.cfg.K, self.cfg.B))
-                    z_n = np.zeros((self.cfg.K, self.cfg.B))
+                    z_n = np.zeros((self.cfg.K, self.cfg.B))  # used iff `flagVAD == False`
                 elif self.cfg.mode == 'batch':
                     self.y = [self.wasn.nodes[k].signal for k in range(self.cfg.K)]
                     self.n = [self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)]
                     z_y = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
-                    z_n = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))
+                    z_n = np.zeros((self.cfg.K, self.cfg.sigConfig.nSamplesBatch))  # used iff `flagVAD == False`
                 
                 # Compute compressed signals
                 for k in range(self.cfg.K):
@@ -96,15 +87,7 @@ class Launcher:
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
 
                 # Update covariance matrices
-                if self.cfg.mode == 'batch':
-                    Ryy = yTilde[q] @ yTilde[q].T.conj()
-                    Rnn = nTilde[q] @ nTilde[q].T.conj()
-                elif self.cfg.mode == 'online':
-                    for k in range(self.cfg.K):
-                        Ryy[k] = self.cfg.beta * Ryy[k] +\
-                            (1 - self.cfg.beta) * yTilde[k] @ yTilde[k].T.conj()
-                        Rnn[k] = self.cfg.beta * Rnn[k] +\
-                            (1 - self.cfg.beta) * nTilde[k] @ nTilde[k].T.conj()
+                Ryy, Rnn = self.update_scms(yTilde, nTilde, Ryy, Rnn)
 
                 # Check if filter updates should start
                 if not self.startFilterUpdates:
@@ -118,12 +101,12 @@ class Launcher:
 
                 # Perform filter updates
                 if self.cfg.nodeUpdating == 'seq':
-                    if nIterSinceLastUp[q] >= self.cfg.nIterBetweenUpdates:
-                        upNodes = np.array([q])
-                        nIterSinceLastUp[q] = 0
+                    if nIterSinceLastUp[self.q] >= self.cfg.nIterBetweenUpdates:
+                        upNodes = np.array([self.q])
+                        nIterSinceLastUp[self.q] = 0
                     else:
                         upNodes = np.array([])
-                        nIterSinceLastUp[q] += 1
+                        nIterSinceLastUp[self.q] += 1
                 elif self.cfg.nodeUpdating == 'sim':
                     upNodes = np.arange(self.cfg.K)
                 if self.startFilterUpdates:
@@ -143,16 +126,19 @@ class Launcher:
                 # Compute MMSE estimate of desired signal at each node
                 mmses = self.get_mmse(wTilde, yTilde)
                 for k in range(self.cfg.K):
+                    # if mmses[k] is None:
+                    #     mmse[k].append(mmse[k][-1])  # keep previous value (e.g., "off" period of speech)
+                    # else: 
                     mmse[k].append(mmses[k])
                 
                 # Print progress
-                toPrint = f"[{algo.upper()} {self.cfg.mode} {self.cfg.nodeUpdating}] i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}"
+                toPrint = f"[{algo.upper()} {self.cfg.mode} {self.cfg.nodeUpdating}] i = {i}, u = {upNodes}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmse]), -4)}, vad = {self.wasn.vadOnline}"
                 if not self.startFilterUpdates:
                     toPrint += " (filter updates not started yet)"
                 print(toPrint)
                 # Update indices
                 i += 1
-                q = (q + 1) % self.cfg.K
+                self.q = (self.q + 1) % self.cfg.K
                 # Randomly pick node to update
                 stopcond = self.update_stop_condition(i, mmse)
 
@@ -160,12 +146,42 @@ class Launcher:
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
         
         return mmsePerAlgo, mmseCentral
+    
+    def update_scms(self, yTilde, nTilde, Ryy, Rnn):
+        """Update spatial covariance matrices."""
+        def _outer_prod(a: np.ndarray):
+            """Compute inner product of `a` across channels."""
+            if a.shape[0] > a.shape[1]:
+                a = a.T
+            return a @ a.T.conj()
+
+        if self.cfg.mode == 'batch':
+            if self.wasn.vadBatch is None:
+                # No VAD -- update both `Ryy` and `Rnn` using oracle knowledge
+                # of the noise-only signal.
+                Ryy = _outer_prod(yTilde[self.q])
+                Rnn = _outer_prod(nTilde[self.q])
+            else:
+                # VAD available -- update `Ryy` and `Rnn` using the VAD.
+                Ryy = _outer_prod(yTilde[self.q][:, self.wasn.vadBatch])
+                Rnn = _outer_prod(yTilde[self.q][:, ~self.wasn.vadBatch])
+        elif self.cfg.mode == 'online':
+            b = self.cfg.beta  # forgetting factor (alias)
+            for k in range(self.cfg.K):
+                if self.wasn.vadOnline is None:
+                    Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
+                    Rnn[k] = b * Rnn[k] + (1 - b) * _outer_prod(nTilde[k])
+                else:
+                    if self.wasn.vadOnline is True:
+                        Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
+                    else:
+                        Rnn[k] = b * Rnn[k] + (1 - b) * _outer_prod(yTilde[k])
+        return Ryy, Rnn
+
 
     def get_centr_cost(self):
         """Compute centralized cost (MMSE) for each node."""
-        # Full observation matrices
         nSensors = self.cfg.K * self.cfg.Mk
-
         if self.cfg.mode == 'batch':
             y = np.concatenate(tuple(self.wasn.nodes[k].signal for k in range(self.cfg.K)), axis=0)
             n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
@@ -185,16 +201,23 @@ class Launcher:
             Ryy = copy.deepcopy(singleSCM)
             Rnn = copy.deepcopy(singleSCM)
             mmseCentral = [[] for _ in range(self.cfg.K)]
-            wCentral = np.zeros((nSensors, nSensors))
+            wCentral = np.ones((nSensors, nSensors))
             stopcond = False
             i = 0
+            self.cfg.sigConfig.sampleIdx = 0
             while not stopcond: 
-                s, n = self.query()  # Get new data
+                s, n = self.wasn.query()  # Get new data
                 y = [s[k] + n[k] for k in range(self.cfg.K)]
                 yStacked = np.concatenate(tuple(y[k] for k in range(self.cfg.K)), axis=0)
                 nStacked = np.concatenate(tuple(n[k] for k in range(self.cfg.K)), axis=0)
-                Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * yStacked @ yStacked.T.conj()
-                Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nStacked @ nStacked.T.conj()
+                if self.wasn.vadOnline is None:
+                    Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * yStacked @ yStacked.T.conj()
+                    Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * nStacked @ nStacked.T.conj()
+                else:
+                    if self.wasn.vadOnline is True:
+                        Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * yStacked @ yStacked.T.conj()
+                    else:
+                        Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * yStacked @ yStacked.T.conj()
                 if self.cfg.gevd and not check_matrix_validity(Ryy, Rnn):
                     print(f"i={i} [centr online] -- Warning: matrices are not valid for self.cfg.gevd-based filter update.")
                 else:
@@ -204,9 +227,14 @@ class Launcher:
                     ek = np.zeros(nSensors)
                     ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
                     target = (yStacked - nStacked).T @ ek
-                    mmseCentral[k].append(np.mean(np.abs(
-                        (wCentral @ ek).T.conj() @ yStacked - target
-                    ) ** 2))
+                    if np.allclose(np.abs(target), np.zeros_like(target)):
+                        # If the target is zero (e.g., "off" period of speech),
+                        # keep the previous MMSE value.
+                        mmseCentral[k].append(mmseCentral[k][-1])
+                    else:
+                        mmseCentral[k].append(np.mean(np.abs(
+                            (wCentral @ ek).T.conj() @ yStacked - target
+                        ) ** 2))
                 print(f"[Centr. {self.cfg.mode}] i = {i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
                 i += 1
                 stopcond = self.update_stop_condition(i, mmseCentral)
@@ -216,15 +244,12 @@ class Launcher:
     def update_stop_condition(self, i, mmse):
         """Stop condition for DANSE `while`-loops."""
         if i > self.cfg.K:
-            return i >= self.cfg.maxIter or\
-                any([np.isnan(me[-1]) for me in mmse]) or\
-                np.all([
-                    np.abs(
-                        me[-1] - me[-1 - self.cfg.K]
-                    ) / np.abs(me[-1 - self.cfg.K]) < self.cfg.eps
-                    for me in mmse
-                ])\
-                and self.startFilterUpdates  # <-- important: don't stop before the updates have started
+            return i >= self.cfg.maxIter or np.all([
+                np.abs(
+                    me[-1] - me[-1 - self.cfg.K]
+                ) / np.abs(me[-1 - self.cfg.K]) < self.cfg.eps
+                for me in mmse
+            ]) and self.startFilterUpdates  # <-- important: don't stop before the updates have started
         else:
             return False
 
@@ -250,11 +275,17 @@ class Launcher:
 
     def get_mmse(self, wTilde, yTilde):
         """Compute MMSE."""
-        currMMSEs = np.zeros(len(wTilde))
+        currMMSEs = np.zeros(len(wTilde), dtype=object)
         for k in range(len(wTilde)):
             dHat = wTilde[k] @ yTilde[k].conj()
             target = (self.y[k] - self.n[k])[self.wasn.refSensorIdx, :]
-            currMMSEs[k] = np.mean(np.abs(dHat - target) ** 2)
+            if np.allclose(np.abs(target), np.zeros_like(target)):
+                # If the target is zero (e.g., "off" period of speech),
+                # set the MMSE to `np.nan`.
+                currMMSEs[k] = np.nan
+                # currMMSEs[k] = None
+            else:
+                currMMSEs[k] = np.mean(np.abs(dHat - target) ** 2)
         return currMMSEs
 
 

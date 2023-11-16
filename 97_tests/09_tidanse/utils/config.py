@@ -9,8 +9,12 @@ class SignalConfig:
     desiredSignalType: str = 'noise'  # noise, speech, noise+pauses
     fs: int = 16000
     nSamplesBatch: int = 1000
-    pauseLength: int = 100  # in samples (used iff `desiredSignalType == noise+pauses`)
-    pauseSpacing: int = 100  # in samples (used iff `desiredSignalType == noise+pauses`)
+    # vvv (used iff `desiredSignalType == noise+pauses`) vvv
+    pauseLength: int = 1000  # in samples
+    pauseSpacing: int = 1000  # in samples
+    samplesSinceLastPause: int = 0 
+    sampleIdx: int = 0
+    # ^^^ (used iff `desiredSignalType == noise+pauses`) ^^^
 
 @dataclass
 class Configuration:
@@ -53,6 +57,11 @@ class Configuration:
 
     def __post_init__(self):
         np.random.seed(self.originalSeed)  # set RNG seed
+        # Check for online VAD
+        if self.mode == 'online' and self.sigConfig.desiredSignalType == 'noise+pauses':
+            if self.sigConfig.pauseLength <= self.B or\
+                self.sigConfig.pauseSpacing <= self.B:
+                raise ValueError("['noise+pauses' desired signal] Pause length and spacing must be larger than `B`.")
 
     def to_string(self):
         """Converts the configuration to a TXT-writable
@@ -78,6 +87,7 @@ class Configuration:
         if pathToYaml == '':
             pathToYaml = self.yamlFile
         self.__dict__ = load_from_yaml(pathToYaml, self).__dict__
+        self.__post_init__()
         return self
 
 
