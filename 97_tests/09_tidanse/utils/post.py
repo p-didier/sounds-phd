@@ -25,9 +25,10 @@ class PostProcessor:
     def perform_post_processing(self):
         """Perform post-processing of results."""
         # Export subfolder path with date and time
-        sf = self.cfg.exportFolder + '\\' +\
-            Path(self.cfg.exportFolder).name + '_' +\
-            datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        now = datetime.datetime.now()
+        sf = self.cfg.exportFolder +\
+            f'\\{Path(self.cfg.exportFolder).name}_{now.strftime("%Y%m%d")}\\' +\
+            'res_' + now.strftime("%Y%m%d_%H%M%S")
         if self.suffix != '':
             sf += '__' + self.suffix
         if self.export:
@@ -51,33 +52,33 @@ class PostProcessor:
         figs = self.plot_filters()
         if self.export:
             for k in range(self.cfg.K):
-                for algo in self.cfg.algos:
-                    # figs[k][algo].savefig(os.path.join(sf, f'filters_node{k}_{algo}.pdf'), bbox_inches='tight')
-                    figs[k][algo].savefig(os.path.join(sf, f'filters_node{k}_{algo}.png'), bbox_inches='tight', dpi=300)
+                # figs[k].savefig(os.path.join(sf, f'filters_node{k}.pdf'), bbox_inches='tight')
+                figs[k].savefig(os.path.join(sf, f'filters_node{k}.png'), bbox_inches='tight', dpi=300)
 
     def plot_filters(self):
         """Plot (TI-)DANSE filter coefficients for each node and each
         algorithm."""
-        figs = dict([(k, dict(
-            [(algo, None) for algo in self.cfg.algos]
-        )) for k in range(self.cfg.K)])
+        figs = dict([(k, None) for k in range(self.cfg.K)])
         mcRunIdx = 0  # only plot first MC run (arbitrary)
-        # Determine fixed y-axis limits for all plots
-        yLimMin, yLimMax = np.inf, -np.inf
+        # Determine fixed y-axis limits for all plots, per algorithm
+        yLimMin = [np.inf for _ in range(len(self.cfg.algos))]
+        yLimMax = [-np.inf for _ in range(len(self.cfg.algos))]
         for idxAlgo, algo in enumerate(self.cfg.algos):
             for k in range(self.cfg.K):
                 currFilts = np.array([
                     w[k] for w in self.filtersPerAlgo[mcRunIdx][idxAlgo]
                 ])
-                yLimMin = min(yLimMin, np.amin(np.abs(currFilts)))
-                yLimMax = max(yLimMax, np.amax(np.abs(currFilts)))
+                yLimMin[idxAlgo] = min(yLimMin[idxAlgo], np.amin(np.abs(currFilts)))
+                yLimMax[idxAlgo] = max(yLimMax[idxAlgo], np.amax(np.abs(currFilts)))
         for k in range(self.cfg.K):
+            fig, axes = plt.subplots(len(self.cfg.algos), 1, sharex=True)
+            fig.set_size_inches(8.5, 4.5)
             for idxAlgo, algo in enumerate(self.cfg.algos):
+                if len(self.cfg.algos) == 1:
+                    axes = [axes]
                 currFilts = np.array([
                     w[k] for w in self.filtersPerAlgo[mcRunIdx][idxAlgo]
                 ])
-                fig, axes = plt.subplots(1,1)
-                fig.set_size_inches(8.5, 3.5)
                 for m in range(currFilts.shape[1]):
                     if m < self.cfg.Mk:
                         lab = f'$w_{{kk,{m}}}$'
@@ -86,24 +87,27 @@ class PostProcessor:
                             lab = f'$g_{{k{{-}}k,{m - self.cfg.Mk}}}$'
                         else:
                             lab = f'$g_{{k,{m - self.cfg.Mk}}}$'
-                    axes.semilogy(np.abs(currFilts[:, m]), label=lab)
+                    # Plot filter coefficients
+                    axes[idxAlgo].semilogy(np.abs(currFilts[:, m]), label=lab)
                 # Plot VAD as shaded grey area
-                axes.fill_between(
-                    np.arange(len(self.vadSaved)),
-                    np.zeros_like(self.vadSaved),
-                    self.vadSaved * yLimMax,
-                    color='grey',
-                    alpha=0.2,
-                    label='VAD'
-                )
-                axes.legend(loc='lower right')
-                axes.grid()
-                axes.set_xlabel('Iteration index')
-                axes.set_ylabel('Filter coefficient')
-                axes.set_title(f'Node {k}, {algo.upper()}')
-                axes.set_ylim([yLimMin, yLimMax])
-                fig.tight_layout()
-                figs[k][algo] = fig
+                if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+                    axes[idxAlgo].fill_between(
+                        np.arange(len(self.vadSaved)),
+                        np.zeros_like(self.vadSaved),
+                        np.array(self.vadSaved) * yLimMax[idxAlgo],
+                        color='grey',
+                        alpha=0.2,
+                        label='VAD'
+                    )
+                axes[idxAlgo].legend(loc='lower right')
+                axes[idxAlgo].grid()
+                if idxAlgo == len(self.cfg.algos) - 1:
+                    axes[idxAlgo].set_xlabel('Iteration index')
+                axes[idxAlgo].set_ylabel('Coefficient norm')
+                axes[idxAlgo].set_title(f'Node {k}, {algo.upper()}')
+                axes[idxAlgo].set_ylim([yLimMin[idxAlgo], yLimMax[idxAlgo]])
+            fig.tight_layout()
+            figs[k] = fig
         plt.close('all')
         return figs
     
@@ -166,6 +170,11 @@ class PostProcessor:
             strLoss = 'E_\\mathrm{{MC\\,runs}}\\{{\\mathcal{{L}}\\}}'  # average over MC runs
         else:
             strLoss = '\\mathcal{{L}}'
+
+        def _loss_for_legend(data):
+            begIdx = int(len(data) / 5)
+            value = "{:.3g}".format(np.nanmean(data[-begIdx]), -4)
+            return f'${strLoss}=${value} over last {begIdx} iter.'
         
         if self.cfg.plotOnlyCost:
             fig, axes = plt.subplots(1, 1)
@@ -182,7 +191,7 @@ class PostProcessor:
                 axes.loglog(
                     dataMean,
                     f'-C{idxAlgo}',
-                    label=f'{algoref} (${strLoss}=${"{:.3g}".format(dataMean[-1], -4)})'
+                    label=f'{algoref} ({_loss_for_legend(dataMean)})'
                 )
                 # Add shaded area for min/max
                 if self.cfg.mcRuns > 1:
@@ -199,10 +208,22 @@ class PostProcessor:
             if self.cfg.mode == 'batch':
                 axes.hlines(np.mean(self.mmseCentralMean), 0, maxIter, 'k', linestyle="--", label=f'Centralized {centrAlgoStr} (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
             elif self.cfg.mode == 'online':
-                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized {centrAlgoStr} (${strLoss}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
+                axes.loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized {centrAlgoStr} ({_loss_for_legend(np.mean(self.mmseCentralMean, axis=0))})')
+            
+            # Add grey transparent area for frames where VAD is 0
+            if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+                axes.fill_between(
+                    np.arange(maxIter),
+                    np.zeros_like(self.vadSaved),
+                    (1 - np.array(self.vadSaved)) * np.amax(axes.get_ylim()),
+                    color='grey',
+                    alpha=0.2,
+                    label='VAD=0 frames'
+                )
+            
             axes.set_xlabel("Iteration index")
             axes.set_ylabel("Cost $\\mathcal{L}$")
-            axes.legend(loc='upper right')
+            axes.legend(loc='upper right', fontsize='small')
             axes.set_xlim([0, maxIter])
             axes.grid()
             if not asLogLog:
@@ -210,7 +231,9 @@ class PostProcessor:
                 axes.set_xscale('linear')
             ti_str = f'$K={self.cfg.K}$, $M_{{k}}={self.cfg.Mk}$, $\\mathrm{{SNR}}={self.cfg.snr}$ dB, $\\mathrm{{SNR}}_{{\\mathrm{{SN}}}}={self.cfg.snSnr}$ dB'
             if self.cfg.mode == 'online':
-                ti_str += f', $B={self.cfg.B}$, $\\beta={self.cfg.beta}$, $\\beta_{{\\mathbf{{R_{{nn}}}}}}={self.cfg.betaRnn}$'
+                ti_str += f', $B={self.cfg.B}$, $\\beta={self.cfg.beta}$'
+                if self.cfg.beta != self.cfg.betaRnn:
+                    ti_str += f', $\\beta_{{\\mathbf{{R_{{nn}}}}}}={self.cfg.betaRnn}$'
             elif self.cfg.mode == 'batch':
                 ti_str += f', {self.cfg.sigConfig.nSamplesBatch} samples'
             axes.set_title(ti_str)

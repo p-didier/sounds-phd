@@ -36,6 +36,8 @@ class Launcher:
         mmsePerAlgo = [[] for _ in range(len(self.cfg.algos))]
         filterCoeffsPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
+            # Set RNG state
+            np.random.set_state(self.cfg.rngStateOriginal)
             # Initialize DANSE variables
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
             e = np.zeros(dimTilde)
@@ -44,13 +46,12 @@ class Launcher:
             wTildeExt = copy.deepcopy(wTilde)
             wTildeSaved = [copy.deepcopy(wTilde)]
             vadSaved = []
-            if self.cfg.mode == 'online':
-                singleSCM = random_posdef_fullrank_matrix(dimTilde)
-                singleSCM = np.zeros((dimTilde, dimTilde))
-                Ryy = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
-                singleSCM = random_posdef_fullrank_matrix(dimTilde)
-                singleSCM = np.zeros((dimTilde, dimTilde))
-                Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
+            # singleSCM = random_posdef_fullrank_matrix(dimTilde)
+            singleSCM = np.zeros((dimTilde, dimTilde))
+            Ryy = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
+            # singleSCM = random_posdef_fullrank_matrix(dimTilde)
+            singleSCM = np.zeros((dimTilde, dimTilde))
+            Rnn = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
             i = 0  # DANSE iteration index
             self.q = 0  # currently updating node index
             nf = 1  # normalization factor
@@ -59,6 +60,7 @@ class Launcher:
             stopcond = False
             self.startFilterUpdates = False
             self.cfg.sigConfig.sampleIdx = 0
+            self.nUpRyy, self.nUpRnn = 0, 0
             while not stopcond:
 
                 # Get new data
@@ -86,7 +88,7 @@ class Launcher:
                 if algo == 'ti-danse' and self.cfg.mode == 'online'\
                     and i > 0 and i % self.cfg.normGkEvery == 0:
                     # Compute normalization factor
-                    nf = np.mean(np.abs(np.sum(z_y + z_n, axis=0)))
+                    nf = np.mean(np.abs(np.sum(z_y, axis=0)))
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'seq':
                             yTilde[k][-1, :] /= nf
@@ -102,7 +104,8 @@ class Launcher:
                     self.startFilterUpdates = True  # by default, start filter updates
                     if self.cfg.mode == 'online' and self.cfg.gevd:
                         for k in range(self.cfg.K):
-                            if not check_matrix_validity(Ryy[k], Rnn[k]):
+                            if not check_matrix_validity(Ryy[k], Rnn[k]):# or\
+                                # np.abs(self.nUpRyy - self.nUpRnn) > np.amax([self.nUpRyy, self.nUpRnn]) * 0.25:
                                 print(f"i={i} [{self.cfg.mode}] -- Warning: matrices are not valid for gevd-based filter update.")
                                 self.startFilterUpdates = False
                                 break
@@ -176,6 +179,8 @@ class Launcher:
                 # VAD available -- update `Ryy` and `Rnn` using the VAD.
                 Ryy = _outer_prod(yTilde[self.q][:, self.wasn.vadBatch])
                 Rnn = _outer_prod(yTilde[self.q][:, ~self.wasn.vadBatch])
+            self.nUpRyy += 1
+            self.nUpRnn += 1
         elif self.cfg.mode == 'online':
             b = self.cfg.beta  # forgetting factor (alias)
             bRnn = self.cfg.betaRnn  # forgetting factor for noise-only covariance matrix (alias)
@@ -183,16 +188,24 @@ class Launcher:
                 if self.wasn.vadOnline is None:
                     Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
                     Rnn[k] = b * Rnn[k] + (1 - b) * _outer_prod(nTilde[k])
+                    self.nUpRyy += 1
+                    self.nUpRnn += 1
                 else:
                     if self.wasn.vadOnline is True:
                         Ryy[k] = b * Ryy[k] + (1 - b) * _outer_prod(yTilde[k])
+                        self.nUpRyy += 1
                     else:
                         Rnn[k] = bRnn * Rnn[k] + (1 - bRnn) * _outer_prod(yTilde[k])
+                        self.nUpRnn += 1
         return Ryy, Rnn
 
 
     def get_centr_cost(self):
         """Compute centralized cost (MMSE) for each node."""
+
+        # Set RNG state
+        np.random.set_state(self.cfg.rngStateOriginal)
+
         nSensors = self.cfg.K * self.cfg.Mk
         if self.cfg.mode == 'batch':
             y = np.concatenate(tuple(self.wasn.nodes[k].signal for k in range(self.cfg.K)), axis=0)

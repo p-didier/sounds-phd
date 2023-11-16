@@ -58,11 +58,16 @@ class Configuration:
 
     def __post_init__(self):
         np.random.seed(self.originalSeed)  # set RNG seed
+        self.rngStateOriginal = np.random.get_state()  # save RNG state
         # Check for online VAD
         if self.mode == 'online' and self.sigConfig.desiredSignalType == 'noise+pauses':
             if self.sigConfig.pauseLength <= self.B or\
                 self.sigConfig.pauseSpacing <= self.B:
                 raise ValueError("['noise+pauses' desired signal] Pause length and spacing must be larger than `B`.")
+        if self.mode == 'batch' and self.sigConfig.desiredSignalType == 'noise+pauses':
+            print("Warning: `desiredSignalType == 'noise+pauses'` is not supported in batch mode. Switching to `desiredSignalType == 'noise'`.")
+            self.sigConfig.desiredSignalType = 'noise'
+        
 
     def to_string(self):
         """Converts the configuration to a TXT-writable

@@ -170,20 +170,9 @@ class SceneCreator:
         """Get desired signal for batch mode. Computes VAD as well."""
         c = self.cfg.sigConfig  # alias for brevity
         if c.desiredSignalType == 'noise':
-            self.wasn.vadBatch = None
             return np.random.randn(c.nSamplesBatch, 1)
         elif c.desiredSignalType == 'speech':
             raise NotImplementedError("Speech not implemented yet")
-        elif c.desiredSignalType == 'noise+pauses':
-            # Create noise signal
-            sig = np.random.randn(c.nSamplesBatch, 1)
-            # Create pauses
-            pauses = np.zeros((c.nSamplesBatch, 1))
-            for k in range(0, c.nSamplesBatch, c.pauseLength + c.pauseSpacing):
-                pauses[k:k + c.pauseLength] = 1
-            self.wasn.vadBatch = pauses  # Store VAD
-            # Create desired signal
-            return sig * pauses
         else:
             raise ValueError(f"Unknown desired signal type: {self.cfg.sigConfig.desiredSignalType}")
 
