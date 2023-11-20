@@ -11,7 +11,7 @@ class PostProcessor:
             mmsePerAlgo, mmseCentral,
             filtersPerAlgo, filtersCentral,
             vadSaved,
-            cfg: Configuration, export, suffix=''
+            cfg: Configuration, export
         ):
         self.mmsePerAlgo = mmsePerAlgo
         self.mmseCentral = mmseCentral
@@ -20,7 +20,6 @@ class PostProcessor:
         self.vadSaved = vadSaved
         self.cfg = cfg
         self.export = export
-        self.suffix = suffix
 
     def perform_post_processing(self):
         """Perform post-processing of results."""
@@ -29,8 +28,8 @@ class PostProcessor:
         sf = self.cfg.exportFolder +\
             f'\\{Path(self.cfg.exportFolder).name}_{now.strftime("%Y%m%d")}\\' +\
             'res_' + now.strftime("%Y%m%d_%H%M%S")
-        if self.suffix != '':
-            sf += '__' + self.suffix
+        if self.cfg.suffix != '':
+            sf += '__' + self.cfg.suffix
         if self.export:
             # Check if export folder exists
             if not os.path.exists(sf):
@@ -94,7 +93,7 @@ class PostProcessor:
                     axes[idxAlgo].fill_between(
                         np.arange(len(self.vadSaved)),
                         np.zeros_like(self.vadSaved),
-                        (1 - np.array(self.vadSaved)) * yLimMax[idxAlgo],
+                        (1 - np.array(self.vadSaved)) * axes[idxAlgo].get_ylim()[1],
                         color='grey',
                         alpha=0.2,
                         label='VAD=0'
@@ -104,7 +103,17 @@ class PostProcessor:
                 if idxAlgo == len(self.cfg.algos) - 1:
                     axes[idxAlgo].set_xlabel('Iteration index')
                 axes[idxAlgo].set_ylabel('Coefficient norm')
-                axes[idxAlgo].set_title(f'Node {k}, {algo.upper()}')
+                algoref = algo.upper()
+                if self.cfg.gevd:
+                    if '-' in algoref:
+                        algoref = algoref.split('-')[0] + '-GEVD-' + algoref.split('-')[1]
+                    else:
+                        algoref = 'GEVD-' + algoref
+                axes[idxAlgo].set_title(f'Node {k}, {algoref}')
+                if np.isinf(yLimMax[idxAlgo]):
+                    yLimMax[idxAlgo] = axes[idxAlgo].get_ylim()[1]
+                if np.isinf(yLimMin[idxAlgo]):
+                    yLimMin[idxAlgo] = axes[idxAlgo].get_ylim()[0]
                 axes[idxAlgo].set_ylim([yLimMin[idxAlgo], yLimMax[idxAlgo]])
             fig.tight_layout()
             plt.show(block=False)
@@ -247,11 +256,11 @@ class PostProcessor:
                 else:
                     currAx = axes[:, idxAlgo]
                 if self.cfg.mode == 'batch':
-                    xmax = len(self.mmsePerAlgo[idxAlgo][0])-1
+                    xmax = len(self.mmsePerAlgoMean[idxAlgo][0])-1
                 elif self.cfg.mode == 'online':
-                    xmax = np.amax([len(self.mmsePerAlgo[idxAlgo][0])-1, len(self.mmseCentral[0])-1])
+                    xmax = np.amax([len(self.mmsePerAlgoMean[idxAlgo][0])-1, len(self.mmseCentralMean[0])-1])
                 for k in range(self.cfg.K):
-                    currAx[0].loglog(self.mmsePerAlgo[idxAlgo][k], f'-C{k}', label=f"Node {k}")
+                    currAx[0].loglog(self.mmsePerAlgoMean[idxAlgo][k], f'-C{k}', label=f"Node {k}")
                     if self.cfg.mode == 'batch':
                         currAx[0].hlines(self.mmseCentral[idxAlgo][k], 0, xmax, f'C{k}', linestyle="--")
                     elif self.cfg.mode == 'online':
@@ -262,11 +271,11 @@ class PostProcessor:
                 currAx[0].set_xlim([0, xmax])
                 currAx[0].grid()
                 #
-                currAx[1].loglog(np.mean(np.array(self.mmsePerAlgo[idxAlgo]), axis=0), '-k', label=f'{self.cfg.algos[idxAlgo].upper()} ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(np.array(self.mmsePerAlgo[idxAlgo]), axis=0)[-1], -4)})')
+                currAx[1].loglog(np.mean(np.array(self.mmsePerAlgoMean[idxAlgo]), axis=0), '-k', label=f'{self.cfg.algos[idxAlgo].upper()} ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(np.array(self.mmsePerAlgoMean[idxAlgo]), axis=0)[-1], -4)})')
                 if self.cfg.mode == 'batch':
-                    currAx[1].hlines(np.mean(self.mmseCentral), 0, xmax, 'k', linestyle="--", label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(self.mmseCentral), -4)})')
+                    currAx[1].hlines(np.mean(self.mmseCentralMean), 0, xmax, 'k', linestyle="--", label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(self.mmseCentralMean), -4)})')
                 elif self.cfg.mode == 'online':
-                    currAx[1].loglog(np.mean(self.mmseCentral, axis=0), '--k', label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(self.mmseCentral, axis=0)[-1], -4)})')
+                    currAx[1].loglog(np.mean(self.mmseCentralMean, axis=0), '--k', label=f'Centralized ($\\mathcal{{L}}=${"{:.3g}".format(np.mean(self.mmseCentralMean, axis=0)[-1], -4)})')
                 currAx[1].set_xlabel(f"{self.cfg.algos[idxAlgo].upper()} iteration index")
                 currAx[1].set_ylabel("Cost")
                 currAx[1].legend(loc='upper right')

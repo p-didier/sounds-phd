@@ -65,20 +65,21 @@ class WASN:
         """Get desired signal chunk."""
         c = self.cfg.sigConfig  # alias for brevity
         if c.desiredSignalType == 'noise':
+            # np.random.seed(np.random.randint(1, 1e4))  # Set seed
             d = np.random.randn(1, self.cfg.B)
         elif c.desiredSignalType == 'speech':
             raise NotImplementedError("Speech not implemented yet")
         elif c.desiredSignalType == 'noise+pauses':
             sig = np.random.randn(1, self.cfg.B)
             pauses = self.create_pauses_online()
-            self.vadOnline = True if np.sum(pauses) > 0.5 * len(pauses) else False  # Store framewise VAD
+            self.vadOnline = np.sum(pauses) > 0.5 * len(pauses)  # Store framewise VAD
             d = sig * pauses
         else:
             raise ValueError(f"Unknown desired signal type: {c.desiredSignalType}")
         c.sampleIdx += self.cfg.B  # Update sample index
         return d
     
-    def create_pauses_online(self):
+    def create_pauses_online(self, startWithPause=False):
         """Generate binary mask to add pauses to noise, for online mode
         desired signal of type noise+pauses, taking into account the pauses
         in the previous frame."""
@@ -109,6 +110,9 @@ class WASN:
         # Add the ones
         for ii in indicesIterator:
             pauses[ii:ii + c.pauseLength] = 1
+
+        if startWithPause:
+            pauses = 1 - pauses  # Invert
 
         return pauses[np.newaxis, :]
 

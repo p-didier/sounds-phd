@@ -4,6 +4,13 @@ import numpy as np
 from typing import List
 from dataclasses import dataclass, field, is_dataclass
 
+"""
+References:
+- [1] Bertrand, Alexander, and Marc Moonen. "Distributed adaptive node-specific
+signal estimation in fully connected sensor networks—Part I: Sequential node
+updating." IEEE Transactions on Signal Processing 58.10 (2010): 5277-5291.
+"""
+
 @dataclass
 class SignalConfig:
     desiredSignalType: str = 'noise'  # noise, speech, noise+pauses
@@ -29,8 +36,12 @@ class Configuration:
     # Online processing
     B: int = 500
     overlapB: int = 0
-    beta: float = 0.98
-    betaRnn: float = None
+    scmEstType: str = 'exp'  # "exp" or "rec" (exponential or recursive)
+    # ^^^ cf. Eq.(46) or (48) in [1], respectively.
+    beta: float = 0.98      # only used if `scmEstType == 'exp'`
+    betaRnn: float = None   # only used if `scmEstType == 'exp'`
+    L: int = 1              # [iterations] observation window length
+    # ^^^ only used if `scmEstType == 'rec'`
 
     # TI-DANSE eta normalization
     gamma: float = 0.0
@@ -55,6 +66,7 @@ class Configuration:
     # Plot booleans
     plotOnlyCost: bool = False
     exportFolder: str = './figs'
+    suffix: str = ''
 
     def __post_init__(self):
         np.random.seed(self.originalSeed)  # set RNG seed
@@ -80,7 +92,7 @@ class Configuration:
         return config_str
     
     def to_yaml(self, pathToYaml):
-        """Export configuration to yaml file."""
+        """Export configuration to YAML file."""
         with open(pathToYaml, 'w') as f:
             yaml.dump(self.__dict__, f)
 
@@ -89,9 +101,7 @@ class Configuration:
         return self.to_string()
 
     def from_yaml(self, pathToYaml: str = ''):
-        """Read configuration from yaml file."""
-        if pathToYaml == '':
-            pathToYaml = self.yamlFile
+        """Read configuration from YAML file."""
         self.__dict__ = load_from_yaml(pathToYaml, self).__dict__
         self.__post_init__()
         return self
