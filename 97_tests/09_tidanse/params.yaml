@@ -6,8 +6,8 @@ refSensorIdx: 0  # Reference sensor index (for desired signal)
 sigConfig:
   fs: 16000
   nSamplesBatch: 10000  # Total number of samples for batch processing
-  desiredSignalType: noise  # noise, speech, noise+pauses
-  # desiredSignalType: noise+pauses  # noise, speech, noise+pauses (only valid for online-mode)
+  # desiredSignalType: noise  # noise, speech, noise+pauses
+  desiredSignalType: noise+pauses  # noise, speech, noise+pauses (only valid for online-mode)
   pauseLength: 20000  # [samples]
   pauseSpacing: 20000  # [samples]
 
@@ -30,22 +30,22 @@ betaRnn: 0.9  # Forgetting factor for Rnn
 # betaRnn: 0.  # Forgetting factor for Rnn
 
 nStft: 1024  # STFT window length
-nNoiseSources: 1  # Number of noise sources
+nNoiseSources: 2  # Number of noise sources
 eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal
 # snSnr: 12  # [dB] SNR of self-noise signals
-snSnr: 9999  # [dB] SNR of self-noise signals
+snSnr: 20  # [dB] SNR of self-noise signals
 
 algos:  # 'danse' and/or 'ti-danse'
 - danse
 - ti-danse
 
-mode: batch  # 'wola' or 'online' or 'batch'
-# mode: online  # 'wola' or 'online' or 'batch'
+# mode: batch  # 'wola' or 'online' or 'batch'
+mode: online  # 'wola' or 'online' or 'batch'
 
-# gevd: true  # Use GEVD-MWF
-gevd: false # Use MWF
+gevd: true  # Use GEVD-MWF
+# gevd: false # Use MWF
 
 nodeUpdating: seq  # Node-updating strategy: 'sim' or 'seq'
 nIterBetweenUpdates: 0  # Number of iterations between node-updates (at each node)
@@ -56,8 +56,8 @@ alphaExt: 0.5  # External filter relaxation factor
 tExt: 0.4  # Update external filter every `TEXT` seconds
 
 # ----- Tests / debug
-normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
-# normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+# normGkEvery: 1  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
+normGkEvery: 9999  # Normalize `gk` coefficient every `NORM_GK_EVERY` iterations
 # ----- Plot booleans
 plotOnlyCost: true  # Plot only cost (no per-node MMSE)
 # plotOnlyCost: false  # Plot only cost (no per-node MMSE)

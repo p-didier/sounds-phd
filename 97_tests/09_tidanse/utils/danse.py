@@ -2,6 +2,7 @@ import copy
 import numpy as np
 import scipy.linalg as sla
 from .scene import SceneCreator
+import matplotlib.pyplot as plt
 
 class Launcher:
     """Class to launch DANSE simulations."""
@@ -43,10 +44,11 @@ class Launcher:
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
             e = np.zeros(dimTilde)
             e[self.cfg.refSensorIdx] = 1  # reference sensor selection vector
-            # wInit = np.ones(dimTilde)
-            wInit = np.zeros(dimTilde)
-            wInit[0] = 1
-            wInit[-1] = 1
+            wInit = np.ones(dimTilde)
+            # wInit = np.random.randn(dimTilde)
+            # wInit = np.zeros(dimTilde)
+            # wInit[0] = 1
+            # wInit[-1] = 1
             wTilde = [wInit for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
             wTildeSaved = [copy.deepcopy(wTilde)]
@@ -113,6 +115,25 @@ class Launcher:
                     yTildeSaved=yTildeSaved,
                     nTildeSaved=nTildeSaved
                 )
+
+                # if algo == 'ti-danse' and self.q == 0:
+                #     fig, axes = plt.subplots(2,1)
+                #     fig.set_size_inches(6.5, 2.5)
+                #     # Set position of figure
+                #     fig.canvas.manager.window.move(0,0)
+                #     figManager = plt.get_current_fig_manager()
+                #     figManager.window.showMaximized()
+
+                #     axes[0].plot(Ryy[self.q].flatten(), label='Ryy')
+                #     axes[0].plot(Rnn[self.q].flatten(), label='Rnn')
+                #     axes[1].plot(outer_prod(yTilde[self.q]).flatten(), label='yyH')
+                #     axes[1].plot(outer_prod(nTilde[self.q]).flatten(), label='nnH')
+                #     for ax in axes:
+                #         ax.grid()
+                #         ax.legend()
+                #     axes[0].set_title(f'Iteration {self.i} ({self.cfg.mode} mode)')
+                #     fig.tight_layout()
+                #     plt.show()
 
                 # Check if filter updates should start
                 if not self.startFilterUpdates:
@@ -193,11 +214,13 @@ class Launcher:
     def conds_for_ti_danse_norm(self):
         """Check conditions for TI-DANSE normalization. Returns True if
         normalization should be applied at this iteration."""
+        # if self.cfg.sigConfig.desiredSignalType == 'noise':
+        #     return False  # no need for normalization if no VAD
         conds = []
-        conds.append(self.cfg.mode == 'online')     # online-mode
-        # conds.append(~self.wasn.vadOnline)  # noise-only period
-        conds.append(self.i > 0)                         # not first iteration
-        conds.append(self.i % self.cfg.normGkEvery == 0) # every `normGkEvery` iterations
+        conds.append(self.cfg.mode == 'online')             # online-mode
+        # conds.append(~self.wasn.vadOnline)                  # noise-only period
+        conds.append(self.i > 0)                            # not first iteration
+        conds.append(self.i % self.cfg.normGkEvery == 0)    # every `normGkEvery` iterations
         return sum(conds) == len(conds)
 
     def update_scms(
@@ -237,8 +260,8 @@ class Launcher:
                             # Rnn[k] += outer_prod(nTilde[k]) * np.amax([1, self.i]) / (self.i + 1)
                         else:
                             if self.i - self.cfg.L == 0:
-                                Ryy[k] = 1 / self.cfg.L * np.sum([outer_prod(y) for y in yTildeSaved[k]])
-                                Rnn[k] = 1 / self.cfg.L * np.sum([outer_prod(n) for n in nTildeSaved[k]])
+                                Ryy[k] = 1 / self.cfg.L * np.sum(np.array([outer_prod(y) for y in yTildeSaved[k]]), axis=0)
+                                Rnn[k] = 1 / self.cfg.L * np.sum(np.array([outer_prod(n) for n in nTildeSaved[k]]), axis=0)
                             else:
                                 Ryy[k] += 1 / self.cfg.L * outer_prod(yTilde[k]) -\
                                     1 / self.cfg.L * outer_prod(yTildeSaved[k][self.i - self.cfg.L])
@@ -336,7 +359,8 @@ class Launcher:
                             Rnn += outer_prod(yStacked)
                             if self.i - self.cfg.L > 0:
                                 Rnn -= outer_prod(yStackedSaved[self.i - self.cfg.L])
-                    
+
+
                 if self.cfg.gevd and not check_matrix_validity_gevd(Ryy, Rnn):
                     print(f"i={self.i} [centr online] -- Warning: matrices are not valid for gevd-based filter update.")
                 else:
@@ -445,7 +469,7 @@ def check_matrix_validity(Ryy):
     return (np.linalg.matrix_rank(Ryy) == Ryy.shape[-1]).all()
 
 
-def filter_update(Ryy, Rnn, gevd=False, rank=1):
+def filter_update(Ryy, Rnn, gevd=False, rank=1, pseudoInvGEVD=False):
     """Update filter using GEVD-MWF or MWF."""
     if gevd:
         try:
@@ -457,12 +481,28 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1):
         s = s[idx]
         Xmat = Xmat[:, idx]
         Qmat = np.linalg.inv(Xmat.T.conj())
-        Dmat = np.zeros_like(Ryy)
-        for r in range(rank):
-            Dmat[r, r] = 1 - 1 / s[r]
-        return Xmat @ Dmat @ Qmat.T.conj()
+
+        if pseudoInvGEVD:
+            # Pseudo-inverse GEVD-based filter update
+            # sTrunc = np.ones_like(s) * 1e-9 * np.amax(s)
+            sTrunc = np.zeros_like(s)
+            sTrunc[:rank] = s[:rank]
+            Ryypinv = np.linalg.pinv(  # <-- pseudo-inverse
+                Qmat @ np.diag(sTrunc) @ Qmat.T.conj()
+            )
+            deltaMat = np.zeros_like(s)
+            deltaMat[:rank] = s[:rank] - 1
+            return Ryypinv @ Qmat @ np.diag(deltaMat) @ Qmat.T.conj()
+        else:
+            Dmat = np.zeros_like(Ryy)
+            for r in range(rank):
+                Dmat[r, r] = 1 - 1 / s[r]  # <-- actual inverse
+            return Xmat @ Dmat @ Qmat.T.conj()
     else:
-        return np.linalg.pinv(Ryy) @ (Ryy - Rnn)
+        return np.linalg.inv(Ryy) @ (Ryy - Rnn)
+        # return np.linalg.pinv(Ryy) @ (Ryy - Rnn)  # `pinv` to deal with
+                # "easiest" low/-rank scenarios (few localized sources
+                # and/or low sensor-noise).
     
 
 def random_posdef_fullrank_matrix(n):
