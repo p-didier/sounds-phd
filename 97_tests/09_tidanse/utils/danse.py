@@ -43,10 +43,10 @@ class Launcher:
             dimTilde = self.cfg.Mk + self.cfg.K - 1 if algo == 'danse' else self.cfg.Mk + 1
             e = np.zeros(dimTilde)
             e[self.cfg.refSensorIdx] = 1  # reference sensor selection vector
-            wInit = np.ones(dimTilde)
-            # wInit = np.zeros(dimTilde)
-            # wInit[0] = 1
-            # wInit[-1] = 1
+            # wInit = np.ones(dimTilde)
+            wInit = np.zeros(dimTilde)
+            wInit[0] = 1
+            wInit[-1] = 1
             wTilde = [wInit for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
             wTildeSaved = [copy.deepcopy(wTilde)]
@@ -123,12 +123,6 @@ class Launcher:
                                 for k in range(self.cfg.K):
                                     if not check_matrix_validity_gevd(Ryy[k], Rnn[k]):# or self.i < 150:# or\
                                         print(f"i={self.i} [{self.cfg.mode}] -- Warning: matrices are not valid for gevd-based filter update.")
-                                        self.startFilterUpdates = False
-                                        break
-                            else:
-                                for k in range(self.cfg.K):
-                                    if not check_matrix_validity(Ryy[k]):
-                                        print(f"i={self.i} [{self.cfg.mode}] -- Warning: matrices are not valid for filter update.")
                                         self.startFilterUpdates = False
                                         break
                         else:
@@ -234,6 +228,8 @@ class Launcher:
                     if self.cfg.scmEstType == 'exp':
                         Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
                         Rnn[k] = b * Rnn[k] + (1 - b) * outer_prod(nTilde[k])
+                        self.nUpRyy += 1
+                        self.nUpRnn += 1
                     elif self.cfg.scmEstType == 'rec':  # recursive updating
                         if self.i - self.cfg.L < 0:
                             pass  # do nothing
@@ -343,8 +339,6 @@ class Launcher:
                     
                 if self.cfg.gevd and not check_matrix_validity_gevd(Ryy, Rnn):
                     print(f"i={self.i} [centr online] -- Warning: matrices are not valid for gevd-based filter update.")
-                elif not self.cfg.gevd and not check_matrix_validity(Ryy):
-                    print(f"i={self.i} [centr online] -- Warning: matrices are not valid for filter update.")
                 else:
                     self.startFilterUpdates = True
                     wCentral = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
@@ -468,7 +462,7 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1):
             Dmat[r, r] = 1 - 1 / s[r]
         return Xmat @ Dmat @ Qmat.T.conj()
     else:
-        return np.linalg.inv(Ryy) @ (Ryy - Rnn)
+        return np.linalg.pinv(Ryy) @ (Ryy - Rnn)
     
 
 def random_posdef_fullrank_matrix(n):

@@ -11,18 +11,18 @@ sigConfig:
   pauseLength: 20000  # [samples]
   pauseSpacing: 20000  # [samples]
 
-K: 3  # Number of nodes
-Mk: 2  # Number of microphones per node (same for all nodes)
 # K: 5  # Number of nodes
-# Mk: 3  # Number of microphones per node (same for all nodes)
+# Mk: 1  # Number of microphones per node (same for all nodes)
+K: 5  # Number of nodes
+Mk: 3  # Number of microphones per node (same for all nodes)
 # K: 15  # Number of nodes
 # Mk: 5  # Number of microphones per node (same for all nodes)
 
 # ---- Online processing
 B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
-scmEstType: rec
-# scmEstType: exp
+# scmEstType: rec
+scmEstType: exp
 L: 50   # [iterations] observation window length
 beta: 0.9  # Forgetting factor for online covariance matrix
 betaRnn: 0.9  # Forgetting factor for Rnn
@@ -35,14 +35,14 @@ eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal
 # snSnr: 12  # [dB] SNR of self-noise signals
-snSnr: 20  # [dB] SNR of self-noise signals
+snSnr: 9999  # [dB] SNR of self-noise signals
 
 algos:  # 'danse' and/or 'ti-danse'
 - danse
-# - ti-danse
+- ti-danse
 
-# mode: batch  # 'wola' or 'online' or 'batch'
-mode: online  # 'wola' or 'online' or 'batch'
+mode: batch  # 'wola' or 'online' or 'batch'
+# mode: online  # 'wola' or 'online' or 'batch'
 
 # gevd: true  # Use GEVD-MWF
 gevd: false # Use MWF
