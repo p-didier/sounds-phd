@@ -1,4 +1,4 @@
-suffix: noGEVD_online
+suffix: earlySCMupdatesRegardless
 
 mcRuns: 1  # Number of Monte-Carlo runs
 originalSeed: 0
@@ -30,7 +30,7 @@ betaRnn: 0.9  # Forgetting factor for Rnn
 # betaRnn: 0.  # Forgetting factor for Rnn
 
 nStft: 1024  # STFT window length
-nNoiseSources: 2  # Number of noise sources
+nNoiseSources: 1  # Number of noise sources
 eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal

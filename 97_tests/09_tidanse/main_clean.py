@@ -17,15 +17,15 @@ from utils.config import Configuration
 CWD = os.path.dirname(os.path.realpath(__file__))
 # YAML file containing configuration
 YAML_FILE = f'{CWD}/params.yaml'
-# EXPORT = True
-EXPORT = False
+EXPORT = True
+# EXPORT = False
 
 def main():
     """Main function (called by default when running script)."""
     cfg = Configuration()
     cfg.from_yaml(relative_to_absolute_path(YAML_FILE))
 
-    mmsePerAlgo, mmseCentral, filtersPerAlgo, filtersCentral = [], [], [], []
+    mmsePerAlgo, mmseCentral, filtersPerAlgo, filtersCentral, RyyPerAlgo, RnnPerAlgo = [], [], [], [], [], []
     for nMC in range(cfg.mcRuns):
         print(f"MC run {nMC+1}/{cfg.mcRuns}")
         # Create acoustic scene
@@ -39,13 +39,17 @@ def main():
         mmseCentral.append(sim.mmseCentral)
         filtersPerAlgo.append(sim.filtersPerAlgo)
         filtersCentral.append(sim.filtersCentral)
+        RyyPerAlgo.append(sim.RyyPerAlgo)
+        RnnPerAlgo.append(sim.RnnPerAlgo)
     
     # Post-process results
     pp = PostProcessor(
         mmsePerAlgo, mmseCentral,
         filtersPerAlgo, filtersCentral,
+        RyyPerAlgo, RnnPerAlgo,
         sim.vadSaved,
-        cfg, export=EXPORT)
+        cfg, export=EXPORT
+    )
     pp.perform_post_processing()
 # 
     return 0

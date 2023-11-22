@@ -109,10 +109,20 @@ class WASN:
             )
         # Add the ones
         for ii in indicesIterator:
-            pauses[ii:ii + c.pauseLength] = 1
+            pauses[ii:ii + c.pauseSpacing] = 1
 
         if startWithPause:
             pauses = 1 - pauses  # Invert
+
+        if 0:
+            if c.sampleIdx < c.pauseSpacing:
+                # Special debug case: manually forcing more pauses in the beginning
+                # of the signal
+                period = self.cfg.B * 6
+                if c.sampleIdx % period <= period // 2:
+                    pauses = np.zeros_like(pauses)
+                else:
+                    pauses = np.ones_like(pauses)
 
         return pauses[np.newaxis, :]
 
