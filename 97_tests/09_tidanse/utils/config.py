@@ -79,6 +79,11 @@ class Configuration:
         if self.mode == 'batch' and self.sigConfig.desiredSignalType == 'noise+pauses':
             print("Warning: `desiredSignalType == 'noise+pauses'` is not supported in batch mode. Switching to `desiredSignalType == 'noise'`.")
             self.sigConfig.desiredSignalType = 'noise'
+        # Define algorithm names
+        self.algoNames = {
+            'danse': 'DANSE' if not self.gevd else 'GEVD-DANSE',
+            'ti-danse': 'TI-DANSE' if not self.gevd else 'TI-GEVD-DANSE',
+        }
         
 
     def to_string(self):
