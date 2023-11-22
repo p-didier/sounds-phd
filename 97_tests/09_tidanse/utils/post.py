@@ -1,7 +1,9 @@
 import os
+import sys
 import datetime
 import numpy as np
 from pathlib import Path
+import scipy.linalg as sla
 import matplotlib.pyplot as plt
 from .config import Configuration
 
@@ -10,6 +12,7 @@ class PostProcessor:
             self,
             mmsePerAlgo, mmseCentral,
             filtersPerAlgo, filtersCentral,
+            RyyPerAlgo, RnnPerAlgo,
             vadSaved,
             cfg: Configuration, export
         ):
@@ -17,6 +20,8 @@ class PostProcessor:
         self.mmseCentral = mmseCentral
         self.filtersPerAlgo = filtersPerAlgo
         self.filtersCentral = filtersCentral
+        self.RyyPerAlgo = RyyPerAlgo
+        self.RnnPerAlgo = RnnPerAlgo
         self.vadSaved = vadSaved
         self.cfg = cfg
         self.export = export
@@ -47,12 +52,131 @@ class PostProcessor:
         if self.export:
             fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
             fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
+        # Plot Ryy and Rnn coefficients
+        figs = self.plot_Ryy_Rnn()
+        if self.export:
+            for fig in figs:
+                fig[1].savefig(os.path.join(sf, f'{fig[0]}.pdf'), bbox_inches='tight')
+                fig[1].savefig(os.path.join(sf, f'{fig[0]}.png'), bbox_inches='tight', dpi=300)
         # Plot filters
         figs = self.plot_filters()
         if self.export:
             for k in range(self.cfg.K):
                 figs[k].savefig(os.path.join(sf, f'filters_node{k}.pdf'), bbox_inches='tight')
                 figs[k].savefig(os.path.join(sf, f'filters_node{k}.png'), bbox_inches='tight', dpi=300)
+
+    def plot_Ryy_Rnn(self):
+        """Plots the evolution of some of the SCMs' coefficients over
+        (TI-)DANSE iterations."""
+
+        def _title_maker(typ='n'):
+            return f'$\\log_{{10}}(\\tilde{{\\mathbf{{R}}}}_{{\\mathbf{{{typ}}}_{{k}}\\mathbf{{{typ}}}_{{k}}}}^{{i}}[{{-}}1,{{-}}1])$' +\
+                f'   =  $\\log_{{10}}(\\mathbb{{E}}\\{{\\eta_{{-k}}^{{i}}\\eta_{{-k}}^{{iH}}\\}})$'
+
+        figs = []
+
+        if self.cfg.mcRuns > 1:
+            return None   # TODO: implement
+        else:
+            lineStyles = ['-', '--', '-.', ':']
+            fig, axes = plt.subplots(2, 1, sharex=True, sharey=True)
+            fig.set_size_inches(8.5, 5.5)
+            # Set position of figure
+            fig.canvas.manager.window.move(0,0)
+            figManager = plt.get_current_fig_manager()
+            figManager.window.showMaximized()
+            ylimMin, ylimMax = np.inf, -np.inf
+            for idxAlgo, algo in enumerate(self.cfg.algos):
+                for k in range(self.cfg.K):
+                    dataRyy = np.array(self.RyyPerAlgo[0][idxAlgo][k])
+                    dataRnn = np.array(self.RnnPerAlgo[0][idxAlgo][k])
+                    toPlotRyy = np.log10(dataRyy[:, -1, -1])
+                    toPlotRyy[np.isinf(toPlotRyy)] = np.nan
+                    toPlotRyy = np.nan_to_num(toPlotRyy, nan=np.nanmin(toPlotRyy))
+                    toPlotRnn = np.log10(dataRnn[:, -1, -1])
+                    toPlotRnn[np.isinf(toPlotRnn)] = np.nan
+                    toPlotRnn = np.nan_to_num(toPlotRnn, nan=np.nanmin(toPlotRnn))
+                    axes[0].plot(toPlotRyy, f'{lineStyles[idxAlgo]}C{k}', label=f'{self.cfg.algoNames[algo]}, node {k}')
+                    axes[1].plot(toPlotRnn, f'{lineStyles[idxAlgo]}C{k}', label=f'{self.cfg.algoNames[algo]}, node {k}')
+                    ylimMin = min(ylimMin, np.amin(toPlotRyy), np.amin(toPlotRnn))
+                    ylimMax = max(ylimMax, np.amax(toPlotRyy), np.amax(toPlotRnn))
+            axes[0].set_title(_title_maker('y'))
+            axes[1].set_title(_title_maker('n'))
+            # Show VAD
+            if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+                axes[0].fill_between(
+                    np.arange(len(self.vadSaved)),
+                    np.zeros_like(self.vadSaved),
+                    (1 - np.array(self.vadSaved)) * axes[0].get_ylim()[1],
+                    color='grey',
+                    alpha=0.2,
+                    label='VAD=0'
+                )
+                axes[1].fill_between(
+                    np.arange(len(self.vadSaved)),
+                    np.zeros_like(self.vadSaved),
+                    (1 - np.array(self.vadSaved)) * axes[1].get_ylim()[1],
+                    color='grey',
+                    alpha=0.2,
+                    label='VAD=0'
+                )
+            axes[0].grid()
+            axes[1].grid()
+            axes[0].set_ylim([
+                ylimMin,
+                ylimMax
+            ])
+            axes[0].set_xlim([0, len(toPlotRyy)])
+            axes[0].legend(loc='upper right', fontsize='small')
+            axes[1].set_xlabel('Iteration index $i$')
+            fig.tight_layout()
+            plt.show(block=False)
+            figs.append(('Ryy_Rnn', fig))
+
+            # Plot GEVLs
+            markers = ['o', 'x', 'd', 'v', '^', '<', '>', 'p', 'h', '8']
+            fig, axes = plt.subplots(1,1)
+            fig.set_size_inches(8.5, 3.5)
+            # Set position of figure
+            fig.canvas.manager.window.move(0,0)
+            figManager = plt.get_current_fig_manager()
+            figManager.window.showMaximized()
+            for idxAlgo, algo in enumerate(self.cfg.algos):
+                for k in range(self.cfg.K):
+                    currRyy = np.array(self.RyyPerAlgo[0][idxAlgo][k])
+                    currRnn = np.array(self.RnnPerAlgo[0][idxAlgo][k])
+                    # Compute GEVLs
+                    gevls = np.full(currRyy.shape[0], fill_value=np.nan)
+                    for i in range(currRyy.shape[0]):
+                        try:
+                            allGEVLs, _ = sla.eigh(
+                                currRyy[i, :, :],
+                                currRnn[i, :, :]
+                            )
+                        except:
+                            continue
+                        gevls[i] = np.amax(allGEVLs)
+                    axes.semilogy(gevls, f'{markers[idxAlgo]}{lineStyles[idxAlgo]}C{k}', label=f'{self.cfg.algoNames[algo]}, node {k}', markersize=3)
+            axes.grid()
+            # Show VAD
+            if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+                axes.fill_between(
+                    np.arange(len(self.vadSaved)),
+                    np.zeros_like(self.vadSaved),
+                    (1 - np.array(self.vadSaved)) * axes.get_ylim()[1],
+                    color='grey',
+                    alpha=0.2,
+                    label='VAD=0'
+                )
+            axes.set_xlabel('Iteration index $i$')
+            axes.set_ylabel('Max. GEVL')
+            axes.set_xlim([0, len(gevls)])
+            axes.legend(loc='upper right', fontsize='small')
+            fig.tight_layout()
+            plt.show(block=False)
+            figs.append(('GEVLs', fig))
+
+            return figs
 
     def plot_filters(self):
         """Plot (TI-)DANSE filter coefficients for each node and each

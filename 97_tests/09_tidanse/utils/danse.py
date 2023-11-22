@@ -13,6 +13,8 @@ class Launcher:
         self.mmseCentral = None
         self.filtersPerAlgo = None
         self.filtersCentral = None
+        self.RyyPerAlgo = None
+        self.RnnPerAlgo = None
         self.vadSaved = None
         self.y = None  # Current desired signal chunk, for each node (`K`-elements list)
         self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
@@ -29,6 +31,7 @@ class Launcher:
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral,\
                 self.filtersPerAlgo, self.filtersCentral,\
+                self.RyyPerAlgo, self.RnnPerAlgo,\
                     self.vadSaved = self.batch_or_online_run()
 
     def batch_or_online_run(self):
@@ -37,6 +40,8 @@ class Launcher:
 
         mmsePerAlgo = [[] for _ in range(len(self.cfg.algos))]
         filterCoeffsPerAlgo = [[] for _ in range(len(self.cfg.algos))]
+        RyyPerAlgo = [[] for _ in range(len(self.cfg.algos))]
+        RnnPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
             # Set RNG state
             np.random.set_state(self.cfg.rngStateOriginal)
@@ -70,6 +75,8 @@ class Launcher:
             self.nUpRyy, self.nUpRnn = 0, 0
             yTildeSaved = [[] for _ in range(self.cfg.K)]
             nTildeSaved = [[] for _ in range(self.cfg.K)]
+            RyySaved = [[] for _ in range(self.cfg.K)]
+            RnnSaved = [[] for _ in range(self.cfg.K)]
             while not stopcond:
 
                 # Get new data
@@ -115,28 +122,13 @@ class Launcher:
                     yTildeSaved=yTildeSaved,
                     nTildeSaved=nTildeSaved
                 )
-
-                # if algo == 'ti-danse' and self.q == 0:
-                #     fig, axes = plt.subplots(2,1)
-                #     fig.set_size_inches(6.5, 2.5)
-                #     # Set position of figure
-                #     fig.canvas.manager.window.move(0,0)
-                #     figManager = plt.get_current_fig_manager()
-                #     figManager.window.showMaximized()
-
-                #     axes[0].plot(Ryy[self.q].flatten(), label='Ryy')
-                #     axes[0].plot(Rnn[self.q].flatten(), label='Rnn')
-                #     axes[1].plot(outer_prod(yTilde[self.q]).flatten(), label='yyH')
-                #     axes[1].plot(outer_prod(nTilde[self.q]).flatten(), label='nnH')
-                #     for ax in axes:
-                #         ax.grid()
-                #         ax.legend()
-                #     axes[0].set_title(f'Iteration {self.i} ({self.cfg.mode} mode)')
-                #     fig.tight_layout()
-                #     plt.show()
+                for k in range(self.cfg.K):
+                    RyySaved[k].append(copy.deepcopy(Ryy[k]))
+                    RnnSaved[k].append(copy.deepcopy(Rnn[k]))
 
                 # Check if filter updates should start
-                if not self.startFilterUpdates:
+                if not self.startFilterUpdates and\
+                    self.i > self.cfg.sigConfig.pauseSpacing // self.cfg.B:
                     self.startFilterUpdates = True  # by default, start filter updates
                     if self.cfg.mode == 'online':
                         if self.nUpRnn > dimTilde and self.nUpRyy > dimTilde:
@@ -159,12 +151,15 @@ class Launcher:
                         nIterSinceLastUp[self.q] += 1
                 elif self.cfg.nodeUpdating == 'sim':
                     upNodes = np.arange(self.cfg.K)
+                
                 if self.startFilterUpdates:
                     for u in upNodes:
                         if self.cfg.mode == 'batch':
                             mats = {'Ryy': Ryy, 'Rnn': Rnn}
                         elif self.cfg.mode == 'online':
                             mats = {'Ryy': Ryy[u], 'Rnn': Rnn[u]}
+                        # if algo == 'ti-danse' and self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+                        #     mats['pseudoInvGEVD'] = True
                         out = filter_update(**mats, gevd=self.cfg.gevd)
                         if out is None:
                             pass  # <-- filter update failed
@@ -174,17 +169,6 @@ class Launcher:
                     # Update external filters
                     wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (actually purposeful if `self.cfg.nodeUpdating == 'sim'`)
 
-                    # if algo == 'ti-danse' and self.q == 0:
-                    #     import matplotlib.pyplot as plt
-                    #     plt.close()
-                    #     fig, axes = plt.subplots(1,1)
-                    #     fig.set_size_inches(8.5, 3.5)
-                    #     plt.plot(np.abs(Ryy[self.q].flatten()))
-                    #     plt.plot(np.abs(Rnn[self.q].flatten()))
-                    #     print(f'gq = {wTilde[self.q][-1]}')
-                    #     print(f'mean(mean(y[-1])) = {np.mean(np.abs(np.mean([self.y[i][-1, :] for i in range(self.cfg.K)])))}')
-                    #     plt.show(block=False)
-                    #     stp = 1
                 # Compute MMSE estimate of desired signal at each node
                 mmses = self.get_mmse(wTilde, yTilde)
                 for k in range(self.cfg.K):
@@ -208,17 +192,19 @@ class Launcher:
             # Store MMSE
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
             filterCoeffsPerAlgo[self.cfg.algos.index(algo)] = wTildeSaved
+            RyyPerAlgo[self.cfg.algos.index(algo)] = RyySaved
+            RnnPerAlgo[self.cfg.algos.index(algo)] = RnnSaved
         
-        return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr, vadSaved
+        return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr, RyyPerAlgo, RnnPerAlgo, vadSaved
 
     def conds_for_ti_danse_norm(self):
         """Check conditions for TI-DANSE normalization. Returns True if
         normalization should be applied at this iteration."""
-        # if self.cfg.sigConfig.desiredSignalType == 'noise':
-        #     return False  # no need for normalization if no VAD
+        if self.cfg.sigConfig.desiredSignalType == 'noise':
+            return False  # no need for normalization if no VAD
         conds = []
         conds.append(self.cfg.mode == 'online')             # online-mode
-        # conds.append(~self.wasn.vadOnline)                  # noise-only period
+        conds.append(~self.wasn.vadOnline)                  # noise-only period
         conds.append(self.i > 0)                            # not first iteration
         conds.append(self.i % self.cfg.normGkEvery == 0)    # every `normGkEvery` iterations
         return sum(conds) == len(conds)
@@ -270,6 +256,13 @@ class Launcher:
                             self.nUpRyy += 1
                             self.nUpRnn += 1
                 else:
+                    # if self.i < self.cfg.sigConfig.pauseSpacing // self.cfg.B:
+                    #     period = 8  # [frames]
+                    #     if self.i % period <= period // 2:
+                    #         Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
+                    #     else:
+                    #         Rnn[k] = b * Rnn[k] + (1 - b) * outer_prod(yTilde[k])
+                    # else:
                     if self.wasn.vadOnline:
                         if self.cfg.scmEstType == 'exp':
                             Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
@@ -492,6 +485,7 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1, pseudoInvGEVD=False):
             )
             deltaMat = np.zeros_like(s)
             deltaMat[:rank] = s[:rank] - 1
+            # deltaMat = sTrunc - 1
             return Ryypinv @ Qmat @ np.diag(deltaMat) @ Qmat.T.conj()
         else:
             Dmat = np.zeros_like(Ryy)
