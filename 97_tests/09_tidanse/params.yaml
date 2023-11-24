@@ -1,4 +1,4 @@
-suffix: quickRssVSsteeringMatTest
+suffix: batch_largeSROs
 
 
 # DEBUG / TEST STUFF
@@ -23,6 +23,16 @@ Mk: 2  # Number of microphones per node (same for all nodes)
 # K: 15  # Number of nodes
 # Mk: 5  # Number of microphones per node (same for all nodes)
 
+# ---- SROs
+sros:  # [PPM]
+- 0
+# - 10
+# - 20
+- 100
+- 200
+# - 0
+# - 0
+
 # ---- Online processing
 B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
@@ -40,7 +50,7 @@ eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal
 # snSnr: 12  # [dB] SNR of self-noise signals
-snSnr: 10  # [dB] SNR of self-noise signals
+snSnr: 20  # [dB] SNR of self-noise signals
 
 algos:  # 'danse' and/or 'ti-danse'
 - danse

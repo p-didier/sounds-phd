@@ -31,7 +31,7 @@ def main():
     RyyPerAlgo, RnnPerAlgo, RssPerAlgo, etaMean, nf\
         = [], [], [], [], [], [], [], [], []
     for nMC in range(cfg.mcRuns):
-        print(f"MC run {nMC+1}/{cfg.mcRuns}")
+        print(f"MC run {nMC + 1}/{cfg.mcRuns}")
         # Create acoustic scene
         scene = SceneCreator(cfg)
         scene.prepare_scene()

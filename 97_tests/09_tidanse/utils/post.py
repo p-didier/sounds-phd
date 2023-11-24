@@ -56,11 +56,12 @@ class PostProcessor:
             fig.savefig(os.path.join(sf, 'mmse.pdf'), bbox_inches='tight')
             fig.savefig(os.path.join(sf, 'mmse.png'), bbox_inches='tight', dpi=300)
         # Plot Ryy and Rnn coefficients
-        figs = self.plot_Ryy_Rnn()
-        if self.export:
-            for fig in figs:
-                fig[1].savefig(os.path.join(sf, f'{fig[0]}.pdf'), bbox_inches='tight')
-                fig[1].savefig(os.path.join(sf, f'{fig[0]}.png'), bbox_inches='tight', dpi=300)
+        if self.cfg.mode == 'online':
+            figs = self.plot_Ryy_Rnn()
+            if self.export:
+                for fig in figs:
+                    fig[1].savefig(os.path.join(sf, f'{fig[0]}.pdf'), bbox_inches='tight')
+                    fig[1].savefig(os.path.join(sf, f'{fig[0]}.png'), bbox_inches='tight', dpi=300)
         # Plot filters
         figs = self.plot_filters()
         if self.export:

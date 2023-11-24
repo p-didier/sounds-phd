@@ -1,6 +1,7 @@
 
 import numpy as np
 import scipy.signal as sig
+from resampy import resample
 from .config import Configuration
 
 class Node:
@@ -141,6 +142,7 @@ class SceneCreator:
         self.wasn: WASN = None
 
     def prepare_scene(self):
+        """Create acoustic scene and the WASN in it."""
         self.create_scene()
         self.create_wasn()
 
@@ -164,12 +166,19 @@ class SceneCreator:
             )
             # Generate microphone signals
             s, n = [], []
-            for _ in range(self.cfg.K):
+            for k in range(self.cfg.K):
                 # Create random mixing matrix
                 mixingVect = _gen_mixing_vect((self.cfg.Mk, 1))
                 self.ak_s.append(mixingVect)
                 # Compute microphone signals
-                s.append(mixingVect @ desired.T)
+                sCurr = mixingVect @ desired.T
+                # Apply SRO
+                sCurr = apply_sro(
+                    sCurr,
+                    self.cfg.sigConfig.fs,
+                    self.cfg.sros[k]
+                )
+                s.append(sCurr)
                 # Create noise steering matrix
                 mixingVectNoise = _gen_mixing_vect(
                     (self.cfg.Mk, self.cfg.nNoiseSources)
@@ -180,6 +189,12 @@ class SceneCreator:
                     10 ** (-self.cfg.snr / 20) + np.random.randn(
                         self.cfg.Mk, self.cfg.sigConfig.nSamplesBatch
                     ) * 10 ** (-self.cfg.snSnr / 20)
+                # Apply SRO
+                noiseAtMic = apply_sro(
+                    noiseAtMic,
+                    self.cfg.sigConfig.fs,
+                    self.cfg.sros[k]
+                )
                 n.append(noiseAtMic)
             self.s, self.n = s, n  # Store
 
@@ -193,6 +208,7 @@ class SceneCreator:
                 )
             self.ak_s = mixVectDesired   # Store
             self.ak_n = mixVectNoise     # Store
+
 
     def get_desired_signal_batch(self):
         """Get desired signal for batch mode. Computes VAD as well."""
@@ -235,3 +251,39 @@ class SceneCreator:
                     svDesired=self.ak_s[k],
                     svNoise=self.ak_n[k],
                 ))
+
+def apply_sro(sig: np.ndarray, fs, sro):
+    """Apply sampling rate offset (SRO) `sro` to signal `sig` and adjust
+    resulting length to match original length.
+    
+    Parameters
+    ----------
+    sig : np.ndarray [shape=(M, N)]
+        `M`-channels signal(s) to which to apply SRO.
+    fs : float
+        Original sampling frequency [Hz].
+    sro : float
+        Sampling rate offset [PPM].
+
+    Returns
+    -------
+    sig : np.ndarray [shape=(M, N)]
+        `M`-channels signal(s) to which SRO has been applied.
+    """
+    n = sig.shape[1]
+    if sro != 0:
+        sig = resample(
+            sig,
+            sr_orig=fs,
+            sr_new=fs * (1 + sro / 1e6),
+            axis=1
+        )
+        if sig.shape[1] > n:
+            sig = sig[:, :n]
+        elif sig.shape[1] < n:
+            sig = np.pad(
+                sig,
+                ((0, 0), (0, n - sig.shape[1])),
+                mode='constant'
+            )
+    return sig

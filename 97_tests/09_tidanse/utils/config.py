@@ -33,6 +33,9 @@ class Configuration:
     K: int = 15
     Mk: int = 5
 
+    # SROs
+    sros: List[int] = field(default_factory=lambda: [0])
+
     # Online processing
     B: int = 500
     overlapB: int = 0
