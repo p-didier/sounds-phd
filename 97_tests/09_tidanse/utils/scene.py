@@ -156,9 +156,9 @@ class SceneCreator:
             mixingVect /= np.linalg.norm(mixingVect)
             return mixingVect
 
+        # Generate desired source signal (+ VAD if relevant)
+        desired = self.get_desired_signal()
         if self.cfg.mode == 'batch':
-            # Generate desired source signal (+ VAD if relevant)
-            desired = self.get_desired_signal_batch()
             # Generate noise signals (random)
             noise = np.random.randn(
                 self.cfg.sigConfig.nSamplesBatch,
@@ -209,11 +209,16 @@ class SceneCreator:
             self.ak_s = mixVectDesired   # Store
             self.ak_n = mixVectNoise     # Store
 
-    def get_desired_signal_batch(self):
-        """Get desired signal for batch mode. Computes VAD as well."""
+    def get_desired_signal(self):
+        """Get desired signal. Computes VAD as well."""
         c = self.cfg.sigConfig  # alias for brevity
         if c.desiredSignalType == 'noise':
             return np.random.randn(c.nSamplesBatch, 1)
+        elif c.desiredSignalType == 'noise+pauses':
+            sig = np.random.randn(c.nSamplesBatch, 1)
+            vad = self.get_vad()
+            self.vadBatch = vad
+            return sig * vad
         elif c.desiredSignalType == 'speech':
             raise NotImplementedError("Speech not implemented yet")
         else:

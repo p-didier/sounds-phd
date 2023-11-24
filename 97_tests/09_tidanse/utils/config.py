@@ -58,7 +58,7 @@ class Configuration:
     snSnr: int = 20
 
     algos: List[str] = field(default_factory=lambda: ['danse', 'ti-danse'])
-    mode: str = 'batch'
+    mode: str = 'batch'  # online, wola, batch
 
     gevd: bool = False
 
