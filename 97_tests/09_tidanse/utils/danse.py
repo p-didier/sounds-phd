@@ -34,14 +34,17 @@ class Launcher:
             # Compute STFT signals
             self.wasn.compute_stft_signals()
             raise NotImplementedError  # TODO: implement TI-DANSE with WOLA
+        elif self.cfg.mode == 'batch':
+            outputs = self.batch_run()
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral,\
             self.filtersPerAlgo, self.filtersCentral,\
             self.RyyPerAlgo, self.RnnPerAlgo, self.RssPerAlgo,\
             self.vadSaved, self.etaMeanSaved, self.nfSaved\
-                = self.batch_or_online_run()
+                = self.batch_run()
 
-    def batch_or_online_run(self):
+    def batch_run(self):
+        """Run DANSE simulations in batch mode."""
         # Compute centralized cost
         mmseCentr, filterCoeffsCentr = self.get_centr_cost()
 
@@ -249,31 +252,31 @@ class Launcher:
 
         def _update_scm(scm, beta, y, ySaved):
             if self.cfg.scmEstType == 'exp':
-                scm = beta * scm + (1 - beta) * outer_prod(y)
+                scm = beta * scm + (1 - beta) * outprod(y)
             elif self.cfg.scmEstType == 'rec':  # recursive updating
-                scm += outer_prod(y)
+                scm += outprod(y)
                 if self.i - self.cfg.L >= 0:
-                    scm -= outer_prod(ySaved)
+                    scm -= outprod(ySaved)
             return scm
 
         if self.cfg.mode == 'batch':
             if self.wasn.vadBatch is None:
                 # No VAD -- update both `Ryy` and `Rnn` using oracle knowledge
                 # of the noise-only signal.
-                Ryy = outer_prod(yTilde[self.q])
-                Rnn = outer_prod(nTilde[self.q])
+                Ryy = outprod(yTilde[self.q])
+                Rnn = outprod(nTilde[self.q])
             else:
                 # VAD available -- update `Ryy` and `Rnn` using the VAD.
-                Ryy = outer_prod(yTilde[self.q][:, self.wasn.vadBatch])
-                Rnn = outer_prod(yTilde[self.q][:, ~self.wasn.vadBatch])
+                Ryy = outprod(yTilde[self.q][:, self.wasn.vadBatch])
+                Rnn = outprod(yTilde[self.q][:, ~self.wasn.vadBatch])
         elif self.cfg.mode == 'online':
             b = self.cfg.beta  # forgetting factor (alias)
             bRnn = self.cfg.betaRnn  # forgetting factor for noise-only covariance matrix (alias)
             for k in range(self.cfg.K):
                 if self.wasn.vadOnline is None:
                     if self.cfg.scmEstType == 'exp':
-                        Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
-                        Rnn[k] = b * Rnn[k] + (1 - b) * outer_prod(nTilde[k])
+                        Ryy[k] = b * Ryy[k] + (1 - b) * outprod(yTilde[k])
+                        Rnn[k] = b * Rnn[k] + (1 - b) * outprod(nTilde[k])
                         self.nUpRyy[k] += 1
                         self.nUpRnn[k] += 1
                     elif self.cfg.scmEstType == 'rec':  # recursive updating
@@ -283,13 +286,13 @@ class Launcher:
                             # Rnn[k] += outer_prod(nTilde[k]) * np.amax([1, self.i]) / (self.i + 1)
                         else:
                             if self.i - self.cfg.L == 0:
-                                Ryy[k] = 1 / self.cfg.L * np.sum(np.array([outer_prod(y) for y in yTildeSaved[k]]), axis=0)
-                                Rnn[k] = 1 / self.cfg.L * np.sum(np.array([outer_prod(n) for n in nTildeSaved[k]]), axis=0)
+                                Ryy[k] = 1 / self.cfg.L * np.sum(np.array([outprod(y) for y in yTildeSaved[k]]), axis=0)
+                                Rnn[k] = 1 / self.cfg.L * np.sum(np.array([outprod(n) for n in nTildeSaved[k]]), axis=0)
                             else:
-                                Ryy[k] += 1 / self.cfg.L * outer_prod(yTilde[k]) -\
-                                    1 / self.cfg.L * outer_prod(yTildeSaved[k][self.i - self.cfg.L])
-                                Rnn[k] += 1 / self.cfg.L * outer_prod(nTilde[k]) -\
-                                    1 / self.cfg.L * outer_prod(nTildeSaved[k][self.i - self.cfg.L])
+                                Ryy[k] += 1 / self.cfg.L * outprod(yTilde[k]) -\
+                                    1 / self.cfg.L * outprod(yTildeSaved[k][self.i - self.cfg.L])
+                                Rnn[k] += 1 / self.cfg.L * outprod(nTilde[k]) -\
+                                    1 / self.cfg.L * outprod(nTildeSaved[k][self.i - self.cfg.L])
                             self.nUpRyy += 1
                             self.nUpRnn += 1
                 else:
@@ -332,20 +335,7 @@ class Launcher:
 
         nSensors = self.cfg.K * self.cfg.Mk
         if self.cfg.mode == 'batch':
-            y = np.concatenate(tuple(self.wasn.nodes[k].signal for k in range(self.cfg.K)), axis=0)
-            n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
-            Ryy = y @ y.T.conj()
-            Rnn = n @ n.T.conj()
-            wCentral, _ = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
-            mmseCentral = np.zeros(self.cfg.K)
-            for k in range(self.cfg.K):
-                ek = np.zeros(nSensors)
-                ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
-                mmseCentral[k] = np.mean(
-                    np.abs((wCentral @ ek).T.conj() @ y -\
-                        self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]) ** 2
-                )
-            filterCoeffsSaved = [copy.deepcopy(wCentral)]
+            mmseCentral, wCentral = self.batch_centralized()
         elif self.cfg.mode == 'online':
             singleSCM = np.zeros((nSensors, nSensors))
             Ryy = copy.deepcopy(singleSCM)
@@ -368,32 +358,32 @@ class Launcher:
                 # SCM updates
                 if self.wasn.vadOnline is None:
                     if self.cfg.scmEstType == 'exp':
-                        Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * outer_prod(yStacked)
-                        Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * outer_prod(nStacked)
+                        Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * outprod(yStacked)
+                        Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * outprod(nStacked)
                     elif self.cfg.scmEstType == 'rec':  # recursive updating
                         if self.i - self.cfg.L < 0:
-                            Ryy += outer_prod(yStacked) * np.amax([1, self.i]) / (self.i + 1)
-                            Rnn += outer_prod(nStacked) * np.amax([1, self.i]) / (self.i + 1)
+                            Ryy += outprod(yStacked) * np.amax([1, self.i]) / (self.i + 1)
+                            Rnn += outprod(nStacked) * np.amax([1, self.i]) / (self.i + 1)
                         else:
-                            Ryy += 1 / self.cfg.L * outer_prod(yStacked) -\
-                                1 / self.cfg.L * outer_prod(yStackedSaved[self.i - self.cfg.L])
-                            Rnn += 1 / self.cfg.L * outer_prod(nStacked) -\
-                                1 / self.cfg.L * outer_prod(nStackedSaved[self.i - self.cfg.L])
+                            Ryy += 1 / self.cfg.L * outprod(yStacked) -\
+                                1 / self.cfg.L * outprod(yStackedSaved[self.i - self.cfg.L])
+                            Rnn += 1 / self.cfg.L * outprod(nStacked) -\
+                                1 / self.cfg.L * outprod(nStackedSaved[self.i - self.cfg.L])
                 else:
                     if self.wasn.vadOnline:
                         if self.cfg.scmEstType == 'exp':
-                            Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * outer_prod(yStacked)
+                            Ryy = self.cfg.beta * Ryy + (1 - self.cfg.beta) * outprod(yStacked)
                         elif self.cfg.scmEstType == 'rec':  # recursive updating
-                            Ryy += outer_prod(yStacked)
+                            Ryy += outprod(yStacked)
                             if self.i - self.cfg.L > 0:
-                                Ryy -= outer_prod(yStackedSaved[self.i - self.cfg.L])
+                                Ryy -= outprod(yStackedSaved[self.i - self.cfg.L])
                     else:
                         if self.cfg.scmEstType == 'exp':
-                            Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * outer_prod(nStacked)
+                            Rnn = self.cfg.beta * Rnn + (1 - self.cfg.beta) * outprod(nStacked)
                         elif self.cfg.scmEstType == 'rec':  # recursive updating
-                            Rnn += outer_prod(yStacked)
+                            Rnn += outprod(yStacked)
                             if self.i - self.cfg.L > 0:
-                                Rnn -= outer_prod(yStackedSaved[self.i - self.cfg.L])
+                                Rnn -= outprod(yStackedSaved[self.i - self.cfg.L])
 
 
                 if self.cfg.gevd and not check_matrix_validity_gevd(Ryy, Rnn):
@@ -466,6 +456,82 @@ class Launcher:
             else:
                 currMMSEs[k] = np.mean(np.abs(dHat - target) ** 2)
         return currMMSEs
+    
+    def batch_centralized(self):
+        """Run centralized MWF-based processing in batch-mode."""
+        y = np.concatenate(tuple(
+            self.wasn.nodes[k].signal for k in range(self.cfg.K)
+        ), axis=0)
+        n = np.concatenate(tuple(
+            self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)
+        ), axis=0)
+        Ryy = y @ y.T.conj()
+        Rnn = n @ n.T.conj()
+        wCentral, _ = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
+        mmseCentral = np.zeros(self.cfg.K)
+        for k in range(self.cfg.K):
+            ek = np.zeros(self.cfg.K * self.cfg.Mk)
+            ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
+            target = self.wasn.nodes[k].desiredOnly[self.cfg.refSensorIdx, :]
+            mmseCentral[k] = np.mean(
+                np.abs((wCentral @ ek).T.conj() @ y - target) ** 2
+            )
+        return mmseCentral, wCentral
+
+    def online_centralized(self):
+        """Run centralized MWF-based processing in online-mode."""
+        nSensors = self.cfg.K * self.cfg.Mk
+        singleSCM = np.zeros((nSensors, nSensors))
+        Ryy = copy.deepcopy(singleSCM)
+        Rnn = copy.deepcopy(singleSCM)
+        mmseCentral = [[] for _ in range(self.cfg.K)]
+        wCentral = np.ones((nSensors, nSensors))
+        stopcond = False
+        self.i = 0
+        self.cfg.sigConfig.sampleIdx = 0
+        filterCoeffsSaved = []
+        yStackedSaved = []
+        nStackedSaved = []
+        while not stopcond: 
+            s, n = self.wasn.query()  # Get new data
+            y = [s[k] + n[k] for k in range(self.cfg.K)]
+            yStacked = np.concatenate(tuple(y[k] for k in range(self.cfg.K)), axis=0)
+            nStacked = np.concatenate(tuple(n[k] for k in range(self.cfg.K)), axis=0)
+            yStackedSaved.append(copy.deepcopy(yStacked))
+            nStackedSaved.append(copy.deepcopy(nStacked))
+            # SCM updates
+            b = self.cfg.beta  # forgetting factor (alias)
+            if self.wasn.vadOnline is None:
+                Ryy = b * Ryy + (1 - b) * outprod(yStacked)
+                Rnn = b * Rnn + (1 - b) * outprod(nStacked)
+            else:
+                if self.wasn.vadOnline:
+                    Ryy = b * Ryy + (1 - b) * outprod(yStacked)
+                else:
+                    Rnn = b * Rnn + (1 - b) * outprod(nStacked)
+
+            if self.cfg.gevd and not check_matrix_validity_gevd(Ryy, Rnn):
+                print(f"i={self.i} [centr online] -- Warning: matrices are not valid for gevd-based filter update.")
+            else:
+                self.startFilterUpdates = True
+                wCentral, _ = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
+            for k in range(self.cfg.K):
+                ek = np.zeros(nSensors)
+                ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
+                target = (yStacked - nStacked).T @ ek
+                if np.allclose(np.abs(target), np.zeros_like(target)):
+                    # If the target is zero (e.g., "off" period of speech),
+                    # set the MMSE to `np.nan`.
+                    mmseCentral[k].append(np.nan)
+                else:
+                    mmseCentral[k].append(np.mean(np.abs(
+                        (wCentral @ ek).T.conj() @ yStacked - target
+                    ) ** 2))
+            print(f"[Centr. {self.cfg.mode}] i = {self.i}, mmse = {'{:.3g}'.format(np.mean([me[-1] for me in mmseCentral]), -4)}")
+            self.i += 1
+            stopcond = self.update_stop_condition(mmseCentral)
+            filterCoeffsSaved.append(copy.deepcopy(wCentral))
+        mmseCentral = np.array(mmseCentral)
 
 
 def get_compressed_signals(yk, nk, algo, wkEXT):
@@ -553,7 +619,7 @@ def random_posdef_fullrank_matrix(n):
     return Amat @ Amat.T.conj() + np.eye(n) * 0.01
 
 
-def outer_prod(a: np.ndarray):
+def outprod(a: np.ndarray):
     """Compute outer product of `a` across channels."""
     if a.shape[0] > a.shape[1]:
         a = a.T

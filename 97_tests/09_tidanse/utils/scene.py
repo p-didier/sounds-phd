@@ -209,7 +209,6 @@ class SceneCreator:
             self.ak_s = mixVectDesired   # Store
             self.ak_n = mixVectNoise     # Store
 
-
     def get_desired_signal_batch(self):
         """Get desired signal for batch mode. Computes VAD as well."""
         c = self.cfg.sigConfig  # alias for brevity

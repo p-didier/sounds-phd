@@ -91,6 +91,11 @@ class Configuration:
             'danse': 'DANSE' if not self.gevd else 'GEVD-DANSE',
             'ti-danse': 'TI-DANSE' if not self.gevd else 'TI-GEVD-DANSE',
         }
+        # Check obsolete parameters
+        if self.scmEstType == 'rec':
+            print("Warning: `scmEstType == 'rec'` is obsolete. Switching to `scmEstType == 'exp'`.")
+            print("[For more details, see commits on `sounds-phd` Github before mid-Nov 2023]")
+            self.scmEstType = 'exp'
         
 
     def to_string(self):

@@ -36,8 +36,6 @@ sros:  # [PPM]
 # ---- Online processing
 B: 500  # Block size (number of samples per block)
 overlapB: 0  # Overlap between blocks (in percentage)
-# scmEstType: rec
-scmEstType: exp
 L: 50   # [iterations] observation window length
 beta: 0.9  # Forgetting factor for online covariance matrix
 betaRnn: 0.9  # Forgetting factor for Rnn
