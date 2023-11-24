@@ -12,8 +12,8 @@ class PostProcessor:
             self,
             mmsePerAlgo, mmseCentral,
             filtersPerAlgo, filtersCentral,
-            RyyPerAlgo, RnnPerAlgo,
-            vadSaved,
+            RyyPerAlgo, RnnPerAlgo, RssPerAlgo,
+            vadSaved, etaMean, nf,
             cfg: Configuration, export
         ):
         self.mmsePerAlgo = mmsePerAlgo
@@ -22,7 +22,10 @@ class PostProcessor:
         self.filtersCentral = filtersCentral
         self.RyyPerAlgo = RyyPerAlgo
         self.RnnPerAlgo = RnnPerAlgo
+        self.RssPerAlgo = RssPerAlgo
         self.vadSaved = vadSaved
+        self.etaMean = etaMean
+        self.nf = nf
         self.cfg = cfg
         self.export = export
 
@@ -64,14 +67,81 @@ class PostProcessor:
             for k in range(self.cfg.K):
                 figs[k].savefig(os.path.join(sf, f'filters_node{k}.pdf'), bbox_inches='tight')
                 figs[k].savefig(os.path.join(sf, f'filters_node{k}.png'), bbox_inches='tight', dpi=300)
+        # Plot eta
+        fig = self.plot_eta()
+        if self.export:
+            fig.savefig(os.path.join(sf, 'eta.pdf'), bbox_inches='tight')
+            fig.savefig(os.path.join(sf, 'eta.png'), bbox_inches='tight', dpi=300)
+        # Plot normalization factor
+        fig = self.plot_nf()
+        if self.export:
+            fig.savefig(os.path.join(sf, 'nf.pdf'), bbox_inches='tight')
+            fig.savefig(os.path.join(sf, 'nf.png'), bbox_inches='tight', dpi=300)
+
+    def plot_nf(self):
+        """Plots the evolution of the normalization factor over
+        (TI-)DANSE iterations."""
+        if self.cfg.mcRuns > 1:
+            return None
+        fig, axes = plt.subplots(1,1)
+        fig.set_size_inches(8.5, 3.5)
+        # Set position of figure
+        fig.canvas.manager.window.move(0,0)
+        figManager = plt.get_current_fig_manager()
+        figManager.window.showMaximized()
+        axes.plot(np.log10(np.array(self.nf[0])), '-k')
+        if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+            self.show_vad(axes)
+        axes.set_xlim([0, len(self.nf[0])])
+        axes.grid()
+        axes.set_xlabel('Iteration index $i$')
+        axes.set_ylabel('$\\log_{10}(\\mathrm{NF}^i)$')
+        axes.set_title(f'TI-DANSE normalization factor over iterations')
+        fig.tight_layout()
+        plt.show(block=False)
+        return fig
+
+    def plot_eta(self):
+        """Plots the evolution of the eta coefficient over
+        (TI-)DANSE iterations."""
+        if self.cfg.mcRuns > 1:
+            return None  # TODO: implement
+        fig, axes = plt.subplots(1,1)
+        fig.set_size_inches(8.5, 3.5)
+        # Set position of figure
+        fig.canvas.manager.window.move(0,0)
+        figManager = plt.get_current_fig_manager()
+        figManager.window.showMaximized()
+        axes.plot(np.array(np.log10(np.abs(self.etaMean[0]))), '-k')
+        if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
+            self.show_vad(axes)
+        axes.set_xlim([0, len(self.etaMean[0])])
+        axes.grid()
+        axes.set_xlabel('Iteration index $i$')
+        axes.set_ylabel('$\\log_{10}(|\\mathbb{E}_{l(i)}\\{\\eta[l(i)]\\}|)$')
+        axes.set_title(f'TI-DANSE $\\eta$ over iterations')
+        fig.tight_layout()
+        plt.show(block=False)
+        return fig
+    
+    def show_vad(self, ax):
+        """Shows VAD as shaded area (grey = VAD off)."""
+        ax.fill_between(
+            np.arange(len(self.vadSaved)),
+            (1 - np.array(self.vadSaved)) * ax.get_ylim()[0],
+            (1 - np.array(self.vadSaved)) * ax.get_ylim()[1],
+            color='grey',
+            alpha=0.2,
+            label='VAD=0'
+        )
 
     def plot_Ryy_Rnn(self):
         """Plots the evolution of some of the SCMs' coefficients over
         (TI-)DANSE iterations."""
 
-        def _title_maker(typ='n'):
-            return f'$\\log_{{10}}(\\tilde{{\\mathbf{{R}}}}_{{\\mathbf{{{typ}}}_{{k}}\\mathbf{{{typ}}}_{{k}}}}^{{i}}[{{-}}1,{{-}}1])$' +\
-                f'   =  $\\log_{{10}}(\\mathbb{{E}}\\{{\\eta_{{-k}}^{{i}}\\eta_{{-k}}^{{iH}}\\}})$'
+        def _title_maker(typ='n', indicesToPlot=[-1, -1]):
+            return f'$\\log_{{10}}(\\tilde{{\\mathbf{{R}}}}_{{\\mathbf{{{typ}}}_{{k}}\\mathbf{{{typ}}}_{{k}}}}^{{i}}[{{{indicesToPlot[0]}}},{{{indicesToPlot[1]}}}])$'
+                # f'   =  $\\log_{{10}}(\\mathbb{{E}}\\{{\\eta_{{-k}}^{{i}}\\eta_{{-k}}^{{iH}}\\}})$'
 
         figs = []
 
@@ -86,22 +156,23 @@ class PostProcessor:
             figManager = plt.get_current_fig_manager()
             figManager.window.showMaximized()
             ylimMin, ylimMax = np.inf, -np.inf
+            indicesToPlot = [-1, -1]
             for idxAlgo, algo in enumerate(self.cfg.algos):
                 for k in range(self.cfg.K):
                     dataRyy = np.array(self.RyyPerAlgo[0][idxAlgo][k])
                     dataRnn = np.array(self.RnnPerAlgo[0][idxAlgo][k])
-                    toPlotRyy = np.log10(dataRyy[:, -1, -1])
+                    toPlotRyy = np.log10(dataRyy[:, indicesToPlot[0], indicesToPlot[1]])
                     toPlotRyy[np.isinf(toPlotRyy)] = np.nan
                     toPlotRyy = np.nan_to_num(toPlotRyy, nan=np.nanmin(toPlotRyy))
-                    toPlotRnn = np.log10(dataRnn[:, -1, -1])
+                    toPlotRnn = np.log10(dataRnn[:, indicesToPlot[0], indicesToPlot[1]])
                     toPlotRnn[np.isinf(toPlotRnn)] = np.nan
                     toPlotRnn = np.nan_to_num(toPlotRnn, nan=np.nanmin(toPlotRnn))
                     axes[0].plot(toPlotRyy, f'{lineStyles[idxAlgo]}C{k}', label=f'{self.cfg.algoNames[algo]}, node {k}')
                     axes[1].plot(toPlotRnn, f'{lineStyles[idxAlgo]}C{k}', label=f'{self.cfg.algoNames[algo]}, node {k}')
                     ylimMin = min(ylimMin, np.amin(toPlotRyy), np.amin(toPlotRnn))
                     ylimMax = max(ylimMax, np.amax(toPlotRyy), np.amax(toPlotRnn))
-            axes[0].set_title(_title_maker('y'))
-            axes[1].set_title(_title_maker('n'))
+            axes[0].set_title(_title_maker('y', indicesToPlot))
+            axes[1].set_title(_title_maker('n', indicesToPlot))
             # Show VAD
             if self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
                 axes[0].fill_between(

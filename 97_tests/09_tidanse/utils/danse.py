@@ -15,12 +15,18 @@ class Launcher:
         self.filtersCentral = None
         self.RyyPerAlgo = None
         self.RnnPerAlgo = None
+        self.RssPerAlgo = None
         self.vadSaved = None
+        self.etaMeanSaved = None
+        self.nfSaved = None
         self.y = None  # Current desired signal chunk, for each node (`K`-elements list)
         self.n = None  # Current noise signal chunk, for each node (`K`-elements list)
         self.startFilterUpdates = False
         self.q = 0  # currently updating node index
         self.i = 0  # DANSE iteration index
+        self.currAlgo = None
+        # test / debug
+        self.nVADflips = 0
 
     def run(self):
         """Run simulation."""
@@ -30,9 +36,10 @@ class Launcher:
             raise NotImplementedError  # TODO: implement TI-DANSE with WOLA
         elif self.cfg.mode in ['batch', 'online']:
             self.mmsePerAlgo, self.mmseCentral,\
-                self.filtersPerAlgo, self.filtersCentral,\
-                self.RyyPerAlgo, self.RnnPerAlgo,\
-                    self.vadSaved = self.batch_or_online_run()
+            self.filtersPerAlgo, self.filtersCentral,\
+            self.RyyPerAlgo, self.RnnPerAlgo, self.RssPerAlgo,\
+            self.vadSaved, self.etaMeanSaved, self.nfSaved\
+                = self.batch_or_online_run()
 
     def batch_or_online_run(self):
         # Compute centralized cost
@@ -42,7 +49,9 @@ class Launcher:
         filterCoeffsPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         RyyPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         RnnPerAlgo = [[] for _ in range(len(self.cfg.algos))]
+        RssPerAlgo = [[] for _ in range(len(self.cfg.algos))]
         for algo in self.cfg.algos:
+            self.currAlgo = algo
             # Set RNG state
             np.random.set_state(self.cfg.rngStateOriginal)
             # Initialize DANSE variables
@@ -56,8 +65,6 @@ class Launcher:
             # wInit[-1] = 1
             wTilde = [wInit for _ in range(self.cfg.K)]
             wTildeExt = copy.deepcopy(wTilde)
-            wTildeSaved = [copy.deepcopy(wTilde)]
-            vadSaved = []
             # singleSCM = random_posdef_fullrank_matrix(dimTilde)
             singleSCM = np.zeros((dimTilde, dimTilde))
             Ryy = [copy.deepcopy(singleSCM) for _ in range(self.cfg.K)]
@@ -72,16 +79,29 @@ class Launcher:
             stopcond = False
             self.startFilterUpdates = False
             self.cfg.sigConfig.sampleIdx = 0
-            self.nUpRyy, self.nUpRnn = 0, 0
+            self.nUpRyy = [0 for _ in range(self.cfg.K)]
+            self.nUpRnn = [0 for _ in range(self.cfg.K)]
             yTildeSaved = [[] for _ in range(self.cfg.K)]
             nTildeSaved = [[] for _ in range(self.cfg.K)]
             RyySaved = [[] for _ in range(self.cfg.K)]
             RnnSaved = [[] for _ in range(self.cfg.K)]
+            RssSaved = [[] for _ in range(self.cfg.K)]
+            vadSaved = []
+            wTildeSaved = [copy.deepcopy(wTilde)]
+            etaMeanSaved = []
+            self.nVADflips = 0  # reset counter
+            self.lastVADflipIdx = 0
+            nfSaved = []
             while not stopcond:
 
                 # Get new data
                 if self.cfg.mode == 'online':
-                    s, self.n = self.wasn.query()
+                    previousVAD = copy.deepcopy(self.wasn.vadOnline)
+                    s, self.n = self.wasn.query()  # query new samples and update VAD status
+                    if self.wasn.vadOnline != previousVAD:
+                        self.nVADflips += 1  # <-- count VAD flips
+                        self.lastVADflipIdx = self.i
+                    vadSaved.append(copy.deepcopy(self.wasn.vadOnline))
                     self.y = [s[k] + self.n[k] for k in range(self.cfg.K)]
                     z_y = np.zeros((self.cfg.K, self.cfg.B))
                     z_n = np.zeros((self.cfg.K, self.cfg.B))  # used iff `flagVAD == False`
@@ -102,11 +122,14 @@ class Launcher:
                 for k in range(self.cfg.K):
                     yTildeSaved[k].append(copy.deepcopy(yTilde[k]))
                     nTildeSaved[k].append(copy.deepcopy(nTilde[k]))
+                etaMeanSaved.append(np.mean(np.sum(z_y, axis=0)))
 
                 # Normalize \eta (TI-DANSE only)
                 if algo == 'ti-danse' and self.conds_for_ti_danse_norm():
                     # Compute normalization factor
-                    nf = np.mean(np.abs(np.sum(z_y, axis=0)))
+                    # if ~self.wasn.vadOnline:
+                    if self.i > self.cfg.sigConfig.pauseSpacing // self.cfg.B:
+                        nf = np.mean(np.abs(np.sum(z_y, axis=0)))
                     # nf = np.sum(z_y, axis=0)
                     for k in range(self.cfg.K):
                         if self.cfg.nodeUpdating == 'seq':
@@ -114,6 +137,7 @@ class Launcher:
                             nTilde[k][-1, :] /= nf
                         elif self.cfg.nodeUpdating == 'sim':
                             raise NotImplementedError('The normalization (to avoid divergence) of TI-DANSE coefficient is not implemented for simultaneous node-updating.')
+                    nfSaved.append(copy.deepcopy(nf))
 
                 # Update covariance matrices
                 Ryy, Rnn = self.update_scms(
@@ -127,11 +151,11 @@ class Launcher:
                     RnnSaved[k].append(copy.deepcopy(Rnn[k]))
 
                 # Check if filter updates should start
-                if not self.startFilterUpdates and\
-                    self.i > self.cfg.sigConfig.pauseSpacing // self.cfg.B:
+                if not self.startFilterUpdates:# and\
+                    # self.i > self.cfg.sigConfig.pauseSpacing // self.cfg.B:
                     self.startFilterUpdates = True  # by default, start filter updates
                     if self.cfg.mode == 'online':
-                        if self.nUpRnn > dimTilde and self.nUpRyy > dimTilde:
+                        if self.nUpRnn[k] > dimTilde and self.nUpRyy[k] > dimTilde:
                             if self.cfg.gevd:
                                 for k in range(self.cfg.K):
                                     if not check_matrix_validity_gevd(Ryy[k], Rnn[k]):# or self.i < 150:# or\
@@ -158,9 +182,7 @@ class Launcher:
                             mats = {'Ryy': Ryy, 'Rnn': Rnn}
                         elif self.cfg.mode == 'online':
                             mats = {'Ryy': Ryy[u], 'Rnn': Rnn[u]}
-                        # if algo == 'ti-danse' and self.cfg.sigConfig.desiredSignalType == 'noise+pauses':
-                        #     mats['pseudoInvGEVD'] = True
-                        out = filter_update(**mats, gevd=self.cfg.gevd)
+                        out, Rss = filter_update(**mats, gevd=self.cfg.gevd)
                         if out is None:
                             pass  # <-- filter update failed
                         else:
@@ -168,6 +190,13 @@ class Launcher:
 
                     # Update external filters
                     wTildeExt[u] = copy.deepcopy(wTilde[u])  # default (actually purposeful if `self.cfg.nodeUpdating == 'sim'`)
+                else:
+                    # Default Rss matrix
+                    Rss = [np.zeros_like(Ryy[0]) for _ in range(self.cfg.K)]
+
+                # Store Rss
+                for k in range(self.cfg.K):
+                    RssSaved[k].append(copy.deepcopy(Rss[k]))
 
                 # Compute MMSE estimate of desired signal at each node
                 mmses = self.get_mmse(wTilde, yTilde)
@@ -187,15 +216,16 @@ class Launcher:
 
                 # Store filter coefficients
                 wTildeSaved.append(copy.deepcopy(wTilde))
-                vadSaved.append(copy.deepcopy(self.wasn.vadOnline))
 
             # Store MMSE
             mmsePerAlgo[self.cfg.algos.index(algo)] = mmse
             filterCoeffsPerAlgo[self.cfg.algos.index(algo)] = wTildeSaved
             RyyPerAlgo[self.cfg.algos.index(algo)] = RyySaved
             RnnPerAlgo[self.cfg.algos.index(algo)] = RnnSaved
+            RssPerAlgo[self.cfg.algos.index(algo)] = RssSaved
         
-        return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr, RyyPerAlgo, RnnPerAlgo, vadSaved
+        return mmsePerAlgo, mmseCentr, filterCoeffsPerAlgo, filterCoeffsCentr,\
+            RyyPerAlgo, RnnPerAlgo, RssPerAlgo, vadSaved, etaMeanSaved, nfSaved
 
     def conds_for_ti_danse_norm(self):
         """Check conditions for TI-DANSE normalization. Returns True if
@@ -204,7 +234,7 @@ class Launcher:
             return False  # no need for normalization if no VAD
         conds = []
         conds.append(self.cfg.mode == 'online')             # online-mode
-        conds.append(~self.wasn.vadOnline)                  # noise-only period
+        # conds.append(~self.wasn.vadOnline)                  # noise-only period
         conds.append(self.i > 0)                            # not first iteration
         conds.append(self.i % self.cfg.normGkEvery == 0)    # every `normGkEvery` iterations
         return sum(conds) == len(conds)
@@ -217,6 +247,15 @@ class Launcher:
         ):
         """Update spatial covariance matrices."""
 
+        def _update_scm(scm, beta, y, ySaved):
+            if self.cfg.scmEstType == 'exp':
+                scm = beta * scm + (1 - beta) * outer_prod(y)
+            elif self.cfg.scmEstType == 'rec':  # recursive updating
+                scm += outer_prod(y)
+                if self.i - self.cfg.L >= 0:
+                    scm -= outer_prod(ySaved)
+            return scm
+
         if self.cfg.mode == 'batch':
             if self.wasn.vadBatch is None:
                 # No VAD -- update both `Ryy` and `Rnn` using oracle knowledge
@@ -227,8 +266,6 @@ class Launcher:
                 # VAD available -- update `Ryy` and `Rnn` using the VAD.
                 Ryy = outer_prod(yTilde[self.q][:, self.wasn.vadBatch])
                 Rnn = outer_prod(yTilde[self.q][:, ~self.wasn.vadBatch])
-            self.nUpRyy += 1
-            self.nUpRnn += 1
         elif self.cfg.mode == 'online':
             b = self.cfg.beta  # forgetting factor (alias)
             bRnn = self.cfg.betaRnn  # forgetting factor for noise-only covariance matrix (alias)
@@ -237,8 +274,8 @@ class Launcher:
                     if self.cfg.scmEstType == 'exp':
                         Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
                         Rnn[k] = b * Rnn[k] + (1 - b) * outer_prod(nTilde[k])
-                        self.nUpRyy += 1
-                        self.nUpRnn += 1
+                        self.nUpRyy[k] += 1
+                        self.nUpRnn[k] += 1
                     elif self.cfg.scmEstType == 'rec':  # recursive updating
                         if self.i - self.cfg.L < 0:
                             pass  # do nothing
@@ -256,29 +293,34 @@ class Launcher:
                             self.nUpRyy += 1
                             self.nUpRnn += 1
                 else:
-                    # if self.i < self.cfg.sigConfig.pauseSpacing // self.cfg.B:
-                    #     period = 8  # [frames]
-                    #     if self.i % period <= period // 2:
-                    #         Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
+                    kw = {
+                        'y': yTilde[k],
+                        'ySaved': yTildeSaved[k],
+                    }
+                    # if self.currAlgo == 'ti-danse' and\
+                    #     self.nVADflips < self.cfg.minNumVADflips:
+                    #     # for TI-DANSE, only update SCMs
+                    #     # `numEarlySCMupPerVADperiod` after each VAD flip.
+                    #     if self.i - self.lastVADflipIdx <=\
+                    #         self.cfg.numEarlySCMupPerVADperiod:
+                    #         # Update `Ryy` or `Rnn` depending on the VAD.
+                    #         if self.wasn.vadOnline:
+                    #             Ryy[k] = _update_scm(Ryy[k], b, **kw)
+                    #             self.nUpRyy[k] += 1
+                    #         else:
+                    #             Rnn[k] = _update_scm(Rnn[k], bRnn, **kw)
+                    #             self.nUpRnn[k] += 1
                     #     else:
-                    #         Rnn[k] = b * Rnn[k] + (1 - b) * outer_prod(yTilde[k])
+                    #         # Don't update SCMs.
+                    #         print(f"i={self.i} [early SCM update] -- Warning: not updating SCM because the number of VAD flips is less than `minNumVADflips` and the number of SCM updates since the last flip is greater than `numEarlySCMupPerVADperiod`.")
                     # else:
+                    # Otherwise, update SCMs whenever possible.
                     if self.wasn.vadOnline:
-                        if self.cfg.scmEstType == 'exp':
-                            Ryy[k] = b * Ryy[k] + (1 - b) * outer_prod(yTilde[k])
-                        elif self.cfg.scmEstType == 'rec':  # recursive updating
-                            Ryy[k] += outer_prod(yTilde[k])
-                            if self.i - self.cfg.L >= 0:
-                                Ryy[k] -= outer_prod(yTildeSaved[k])
-                        self.nUpRyy += 1
+                        Ryy[k] = _update_scm(Ryy[k], b, **kw)
+                        self.nUpRyy[k] += 1
                     else:
-                        if self.cfg.scmEstType == 'exp':
-                            Rnn[k] = bRnn * Rnn[k] + (1 - bRnn) * outer_prod(yTilde[k])
-                        elif self.cfg.scmEstType == 'rec':  # recursive updating
-                            Rnn[k] += outer_prod(yTilde[k])
-                            if self.i - self.cfg.L >= 0:
-                                Rnn[k] -= outer_prod(yTildeSaved[k])
-                        self.nUpRnn += 1
+                        Rnn[k] = _update_scm(Rnn[k], bRnn, **kw)
+                        self.nUpRnn[k] += 1
         return Ryy, Rnn
 
 
@@ -294,7 +336,7 @@ class Launcher:
             n = np.concatenate(tuple(self.wasn.nodes[k].noiseOnly for k in range(self.cfg.K)), axis=0)
             Ryy = y @ y.T.conj()
             Rnn = n @ n.T.conj()
-            wCentral = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
+            wCentral, _ = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
             mmseCentral = np.zeros(self.cfg.K)
             for k in range(self.cfg.K):
                 ek = np.zeros(nSensors)
@@ -358,7 +400,7 @@ class Launcher:
                     print(f"i={self.i} [centr online] -- Warning: matrices are not valid for gevd-based filter update.")
                 else:
                     self.startFilterUpdates = True
-                    wCentral = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
+                    wCentral, _ = filter_update(Ryy, Rnn, gevd=self.cfg.gevd)
                 for k in range(self.cfg.K):
                     ek = np.zeros(nSensors)
                     ek[k * self.cfg.Mk + self.cfg.refSensorIdx] = 1
@@ -475,6 +517,11 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1, pseudoInvGEVD=False):
         Xmat = Xmat[:, idx]
         Qmat = np.linalg.inv(Xmat.T.conj())
 
+        # Compute Rss matrix for comparison with steering matrix
+        sTrunc = np.zeros_like(s)
+        sTrunc[:rank] = s[:rank] - 1  # matrix (L - I)
+        Rss = Qmat @ np.diag(sTrunc) @ Qmat.T.conj()
+
         if pseudoInvGEVD:
             # Pseudo-inverse GEVD-based filter update
             # sTrunc = np.ones_like(s) * 1e-9 * np.amax(s)
@@ -491,9 +538,9 @@ def filter_update(Ryy, Rnn, gevd=False, rank=1, pseudoInvGEVD=False):
             Dmat = np.zeros_like(Ryy)
             for r in range(rank):
                 Dmat[r, r] = 1 - 1 / s[r]  # <-- actual inverse
-            return Xmat @ Dmat @ Qmat.T.conj()
+            return Xmat @ Dmat @ Qmat.T.conj(), Rss
     else:
-        return np.linalg.inv(Ryy) @ (Ryy - Rnn)
+        return np.linalg.inv(Ryy) @ (Ryy - Rnn), Ryy - Rnn
         # return np.linalg.pinv(Ryy) @ (Ryy - Rnn)  # `pinv` to deal with
                 # "easiest" low/-rank scenarios (few localized sources
                 # and/or low sensor-noise).

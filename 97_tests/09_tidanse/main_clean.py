@@ -8,6 +8,8 @@
 
 import os
 import sys
+import numpy as np
+import matplotlib.pyplot as plt
 from utils.danse import Launcher
 from utils.scene import SceneCreator
 from utils.post import PostProcessor
@@ -25,7 +27,9 @@ def main():
     cfg = Configuration()
     cfg.from_yaml(relative_to_absolute_path(YAML_FILE))
 
-    mmsePerAlgo, mmseCentral, filtersPerAlgo, filtersCentral, RyyPerAlgo, RnnPerAlgo = [], [], [], [], [], []
+    mmsePerAlgo, mmseCentral, filtersPerAlgo, filtersCentral,\
+    RyyPerAlgo, RnnPerAlgo, RssPerAlgo, etaMean, nf\
+        = [], [], [], [], [], [], [], [], []
     for nMC in range(cfg.mcRuns):
         print(f"MC run {nMC+1}/{cfg.mcRuns}")
         # Create acoustic scene
@@ -41,15 +45,18 @@ def main():
         filtersCentral.append(sim.filtersCentral)
         RyyPerAlgo.append(sim.RyyPerAlgo)
         RnnPerAlgo.append(sim.RnnPerAlgo)
+        RssPerAlgo.append(sim.RssPerAlgo)
+        etaMean.append(sim.etaMeanSaved)
+        nf.append(sim.nfSaved)
     
     # Post-process results
     pp = PostProcessor(
         mmsePerAlgo, mmseCentral,
         filtersPerAlgo, filtersCentral,
-        RyyPerAlgo, RnnPerAlgo,
-        sim.vadSaved,
-        cfg, export=EXPORT
-    )
+        RyyPerAlgo, RnnPerAlgo, RssPerAlgo,
+        sim.vadSaved, etaMean,
+        nf, cfg, export=EXPORT
+        )
     pp.perform_post_processing()
 # 
     return 0

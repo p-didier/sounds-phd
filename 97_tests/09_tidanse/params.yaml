@@ -1,4 +1,9 @@
-suffix: earlySCMupdatesRegardless
+suffix: quickRssVSsteeringMatTest
+
+
+# DEBUG / TEST STUFF
+minNumVADflips: 6  # minimum number of VAD flips before starting continuous SCM updates
+numEarlySCMupPerVADperiod: 3  # number of SCM updates per VAD period when the number of VAD flips is less than `minNumVADflips`
 
 mcRuns: 1  # Number of Monte-Carlo runs
 originalSeed: 0
@@ -13,8 +18,8 @@ sigConfig:
 
 # K: 5  # Number of nodes
 # Mk: 1  # Number of microphones per node (same for all nodes)
-K: 5  # Number of nodes
-Mk: 3  # Number of microphones per node (same for all nodes)
+K: 3  # Number of nodes
+Mk: 2  # Number of microphones per node (same for all nodes)
 # K: 15  # Number of nodes
 # Mk: 5  # Number of microphones per node (same for all nodes)
 
@@ -30,12 +35,12 @@ betaRnn: 0.9  # Forgetting factor for Rnn
 # betaRnn: 0.  # Forgetting factor for Rnn
 
 nStft: 1024  # STFT window length
-nNoiseSources: 1  # Number of noise sources
+nNoiseSources: 0  # Number of noise sources
 eps: 0.0001  # Stopping criterion constant
 maxIter: 500  # Maximum number of iterations
 snr: 10  # [dB] SNR of desired signal
 # snSnr: 12  # [dB] SNR of self-noise signals
-snSnr: 20  # [dB] SNR of self-noise signals
+snSnr: 10  # [dB] SNR of self-noise signals
 
 algos:  # 'danse' and/or 'ti-danse'
 - danse

@@ -5,13 +5,15 @@ from .config import Configuration
 
 class Node:
     # Class to store node information (from create_wasn())
-    def __init__(self, signal=None, noiseOnly=None, smDesired=None, smNoise=None):
+    def __init__(
+            self, signal=None, noiseOnly=None, svDesired=None, svNoise=None
+        ):
         self.signal = signal
         self.noiseOnly = noiseOnly
         if signal is not None and noiseOnly is not None:
             self.desiredOnly = signal - noiseOnly
-        self.Ak_s = smDesired   # steering matrix for desired signal
-        self.Ak_n = smNoise     # steering matrix for noise
+        self.ak_s = svDesired   # steering matrix/vector for desired signal
+        self.ak_n = svNoise     # steering matrix/vector for noise
 
 class WASN:
     # Class to store WASN information (from create_wasn())
@@ -47,11 +49,11 @@ class WASN:
         noiseSigChunk = np.random.randn(self.cfg.nNoiseSources, self.cfg.B)
         s, n = [], []
         for k in range(len(self.nodes)):
-            if self.nodes[k].Ak_s is None or self.nodes[k].Ak_n is None:
+            if self.nodes[k].ak_s is None or self.nodes[k].ak_n is None:
                 raise ValueError(f"Steering matrices not defined at node {k}. Cannot query samples.")
             # Query samples
-            sCurr = self.nodes[k].Ak_s @ desiredSigChunk
-            localizedNoise = self.nodes[k].Ak_n @ noiseSigChunk
+            sCurr = self.nodes[k].ak_s @ desiredSigChunk
+            localizedNoise = self.nodes[k].ak_n @ noiseSigChunk
             localizedNoise *= 10 ** (-self.cfg.snr / 20)  # apply noise SNR
             selfNoise = np.random.randn(self.cfg.Mk, self.cfg.B)
             selfNoise *= 10 ** (-self.cfg.snSnr / 20)  # apply self-noise SNR
@@ -85,7 +87,8 @@ class WASN:
         in the previous frame."""
         c = self.cfg.sigConfig  # alias for brevity
         pauses = np.zeros((self.cfg.B,))
-        samplesSinceLastPause = (c.sampleIdx + c.pauseSpacing) % (c.pauseSpacing + c.pauseLength)
+        samplesSinceLastPause = (c.sampleIdx + c.pauseSpacing) %\
+            (c.pauseSpacing + c.pauseLength)
         if samplesSinceLastPause < c.pauseLength:
             # The last frame's pause was not finished. Only start adding
             # 1's to `pauses` after `pauseLength - samplesSinceLastPause`
@@ -118,7 +121,7 @@ class WASN:
             if c.sampleIdx < c.pauseSpacing:
                 # Special debug case: manually forcing more pauses in the beginning
                 # of the signal
-                period = self.cfg.B * 6
+                period = self.cfg.B * 8
                 if c.sampleIdx % period <= period // 2:
                     pauses = np.zeros_like(pauses)
                 else:
@@ -133,8 +136,8 @@ class SceneCreator:
         self.cfg = cfg
         self.s = None  # Desired source signals, for each node (`K`-elements list)
         self.n = None  # Noise signals, for each node (`K`-elements list)
-        self.Ak_s = []  # Mixing matrices for desired signals, for each node (`K`-elements list)
-        self.Ak_n = []  # Mixing matrices for noise signals, for each node (`K`-elements list)
+        self.ak_s = []  # Mixing matrices for desired signals, for each node (`K`-elements list)
+        self.ak_n = []  # Mixing matrices for noise signals, for each node (`K`-elements list)
         self.wasn: WASN = None
 
     def prepare_scene(self):
@@ -144,6 +147,13 @@ class SceneCreator:
     def create_scene(self):
         """Create acoustic scene. In batch-mode, create the signals.
         In online-mode, create the mixing matrices."""
+
+        def _gen_mixing_vect(dims):
+            """Generate mixing vector."""
+            mixingVect = np.abs(np.random.randn(*dims))
+            mixingVect /= np.linalg.norm(mixingVect)
+            return mixingVect
+
         if self.cfg.mode == 'batch':
             # Generate desired source signal (+ VAD if relevant)
             desired = self.get_desired_signal_batch()
@@ -156,15 +166,17 @@ class SceneCreator:
             s, n = [], []
             for _ in range(self.cfg.K):
                 # Create random mixing matrix
-                mixingMatrix = np.abs(np.random.randn(self.cfg.Mk, 1))
-                self.Ak_s.append(mixingMatrix)
+                mixingVect = _gen_mixing_vect((self.cfg.Mk, 1))
+                self.ak_s.append(mixingVect)
                 # Compute microphone signals
-                s.append(mixingMatrix @ desired.T)
+                s.append(mixingVect @ desired.T)
                 # Create noise steering matrix
-                mixingMatrixNoise = np.abs(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources))
-                self.Ak_n.append(mixingMatrixNoise)
+                mixingVectNoise = _gen_mixing_vect(
+                    (self.cfg.Mk, self.cfg.nNoiseSources)
+                )
+                self.ak_n.append(mixingVectNoise)
                 # Create noise signals
-                noiseAtMic = mixingMatrixNoise @ noise.T *\
+                noiseAtMic = mixingVectNoise @ noise.T *\
                     10 ** (-self.cfg.snr / 20) + np.random.randn(
                         self.cfg.Mk, self.cfg.sigConfig.nSamplesBatch
                     ) * 10 ** (-self.cfg.snSnr / 20)
@@ -172,13 +184,15 @@ class SceneCreator:
             self.s, self.n = s, n  # Store
 
         elif self.cfg.mode == 'online':
-            mixMatDesired, mixMatNoise = [], []
+            mixVectDesired, mixVectNoise = [], []
             for _ in range(self.cfg.K):
                 # Create random mixing matrices
-                mixMatDesired.append(np.abs(np.random.randn(self.cfg.Mk, 1)))
-                mixMatNoise.append(np.abs(np.random.randn(self.cfg.Mk, self.cfg.nNoiseSources)))
-            self.Ak_s = mixMatDesired   # Store
-            self.Ak_n = mixMatNoise     # Store
+                mixVectDesired.append(_gen_mixing_vect((self.cfg.Mk, 1)))
+                mixVectNoise.append(
+                    _gen_mixing_vect((self.cfg.Mk, self.cfg.nNoiseSources))
+                )
+            self.ak_s = mixVectDesired   # Store
+            self.ak_n = mixVectNoise     # Store
 
     def get_desired_signal_batch(self):
         """Get desired signal for batch mode. Computes VAD as well."""
@@ -213,11 +227,11 @@ class SceneCreator:
                 self.wasn.nodes.append(Node(
                     signal=self.s[k] + self.n[k],
                     noiseOnly=self.n[k],
-                    smDesired=self.Ak_s[k],
-                    smNoise=self.Ak_n[k],
+                    svDesired=self.ak_s[k],
+                    svNoise=self.ak_n[k],
                 ))
             elif self.cfg.mode == 'online':
                 self.wasn.nodes.append(Node(
-                    smDesired=self.Ak_s[k],
-                    smNoise=self.Ak_n[k],
+                    svDesired=self.ak_s[k],
+                    svNoise=self.ak_n[k],
                 ))

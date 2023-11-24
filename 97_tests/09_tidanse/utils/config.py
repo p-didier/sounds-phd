@@ -63,6 +63,10 @@ class Configuration:
     nIterBetweenUpdates: int = 0
     # Tests / debug
     normGkEvery: int = 1
+    minNumVADflips: int = 0  # minimum number of VAD flips before starting
+        # continuous SCM updates
+    numEarlySCMupPerVADperiod: int = 0  # number of SCM updates per VAD period
+        # when the number of VAD flips is less than `minNumVADflips`
     # Plot booleans
     plotOnlyCost: bool = False
     exportFolder: str = './figs'
